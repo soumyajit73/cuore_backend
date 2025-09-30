@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const controller = require('../controllers/onboardingController.js');
+const { protect } = require('../middleware/authMiddleware');
 
 // o2
 router.post('/basic-info', controller.submitBasicInfo);
