@@ -43,7 +43,7 @@ exports.requestOtp = async (req, res) => {
     }
 
     try {
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otp = '123456'; // FIXED OTP for Postman testing
  
         const otpHash = hashOtp(otp);
         const requestId = nanoid();
