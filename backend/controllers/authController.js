@@ -32,21 +32,26 @@ const compareOtp = (plainOtp, hashedOtp) => hashedOtp === `HASHED_${plainOtp}`;
 
 
 // --- ENDPOINT LOGIC ---
-
+function generateSimpleOtp() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+}
 // A. Login Mobile (enter phone & "Verify")
 exports.requestOtp = async (req, res) => {
     const { phone, purpose, client_info } = req.body;
     
     if (!phone) {
-        // INVALID_PHONE (400) "Please enter a valid mobile number."
         return res.status(400).json({ error: "Please enter a valid mobile number." });
     }
 
     try {
-        const otp = '123456'; // FIXED OTP for Postman testing
- 
+        // --- CHANGE 1: Use simple Math.random() ---
+        const otp = generateSimpleOtp();
+        // --- END CHANGE 1 ---
+        
         const otpHash = hashOtp(otp);
-        const requestId = nanoid();
+        // Ensure nanoid is accessible here, if it's imported globally
+        const requestId = typeof nanoid !== 'undefined' ? nanoid() : require('crypto').randomBytes(16).toString('hex');
+        
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
 
         // Create the OTP request entry
@@ -58,22 +63,24 @@ exports.requestOtp = async (req, res) => {
             lastRequestedAt: new Date(),
         });
         
-        // Log the OTP to the console for Postman testing
-        console.log(`[AUTH] OTP for ${phone}: ${otp} (Request ID: ${requestId})`);
+        // Log to console (still useful for debugging)
+        console.log(`[AUTH] Test OTP for ${phone}: ${otp} (Request ID: ${requestId})`);
 
-        // OTP_SENT (202) - Use generic copy for security
+        // --- CHANGE 2: Expose OTP in the response for binding (Temporary!) ---
         return res.status(202).json({ 
             request_id: requestId, 
+            test_otp_code: otp, // <--- FRONTEND DEV MUST USE THIS
             retry_after_seconds: RETRY_AFTER,
             message: "If the number is registered, a code has been sent." 
         });
+        // --- END CHANGE 2 ---
 
     } catch (error) {
         console.error("Error requesting OTP:", error);
-        // RATE_LIMIT_EXCEEDED (429) logic would go here if implemented
         return res.status(500).json({ error: "Something went wrong. Please try again." });
     }
 };
+
 
 // B. OTP Verification (login)
 exports.verifyOtp = async (req, res) => {
