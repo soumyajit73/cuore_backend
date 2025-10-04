@@ -39,7 +39,7 @@ function generateSimpleOtp() {
 exports.requestOtp = async (req, res) => {
     const { phone, purpose, client_info } = req.body;
     
-    if (!phone || || !phone.startsWith('+')) {
+    if (!phone ||  !phone.startsWith('+')) {
         return res.status(400).json({ error: "Please enter a valid mobile number in international format eg: +91.... ." });
     }
 
