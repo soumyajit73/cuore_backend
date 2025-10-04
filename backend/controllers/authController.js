@@ -5,7 +5,7 @@ let nanoid;
     const module = await import('nanoid');
     nanoid = module.nanoid;
 })();
-const User = require('../models/user');
+const User = require('../models/User');
 const OtpRequest = require('../models/otp');
 
 // --- CONSTANTS ---
