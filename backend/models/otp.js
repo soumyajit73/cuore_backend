@@ -8,7 +8,7 @@ const otpRequestSchema = new mongoose.Schema({
     request_id: { type: String, required: true, unique: true }, 
 
     // User identification
-    phone: { type: String, required: true },
+    phone: { type: String, required: true, match: /^\+[1-9]\d{1,14}$/ },
     
     // OTP storage (hashed for security)
     otpHash: { type: String, required: true }, 
