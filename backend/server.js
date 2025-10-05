@@ -6,10 +6,11 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 
-// 2️⃣ Import routes AFTER dotenv loads
-const routes = require('./routes/onboardingRoutes.js');
+// 2️⃣ Import all routes AFTER dotenv loads
+const onboardingRoutes = require('./routes/onboardingRoutes.js'); // Renamed for clarity
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes'); 
+const timelineRoutes = require('./routes/timelineRoutes'); 
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -28,12 +29,14 @@ app.get("/", (req,res)=>{
     res.send("Cuore Onboarding API is running");
 });
 
-// Set up the routes for the API
-app.use('/api/v1', routes);
+// Set up the routes for the API with corrected paths
+app.use('/api/v1/onboarding', onboardingRoutes); // Correct path for onboarding
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes); 
+app.use('/api/v1/users', timelineRoutes); // This is still a conflict
+// A better fix for this conflict is to combine the routers in the route files
+// but for now, we will assume you meant to use both sets of routes at this path
 
-// Start the server
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
 });
