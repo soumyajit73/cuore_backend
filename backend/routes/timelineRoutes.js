@@ -26,6 +26,6 @@ router.put('/:userId/medications/:medId', protect, timelineController.updateEntr
 
 // --- Placeholders for future APIs ---
 // router.get('/:userId/medications', protect, timelineController.getEntries); 
-// router.get('/:userId/timeline', protect, timelineController.getTimeline); 
+router.get('/:userId/timeline', protect, timelineController.getTimeline);
 
 module.exports = router;

@@ -3,10 +3,35 @@ const Medication = require('../models/Medication');
 const Reminder = require('../models/Reminder');
 const User = require('../models/User'); 
 
+const dayjs = require('dayjs');
+const utc = require('dayjs/plugin/utc');
+const timezone = require('dayjs/plugin/timezone');
+const isSameOrAfter = require('dayjs/plugin/isSameOrAfter');  // Add this line
+const isSameOrBefore = require('dayjs/plugin/isSameOrBefore');
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+dayjs.extend(isSameOrAfter);    // Add this line
+dayjs.extend(isSameOrBefore);
+
 // Utility function to parse date fields from string to Date object
 const parseDate = (dateString) => {
     if (!dateString || dateString.toLowerCase() === 'never') return null;
     return new Date(dateString);
+};
+
+// Utility to find the correct Model based on the request path
+const getModelAndId = (req) => {
+    const isMedication = req.originalUrl.includes('/medications');
+    const model = isMedication ? Medication : Reminder;
+    const docId = isMedication ? req.params.medId : req.params.reminderId;
+    return { model, docId };
+};
+
+// Helper to calculate time offsets based on anchor time (wakeUp)
+const calculateScheduledTime = (anchorTime, offsetMinutes) => {
+    // anchorTime is a dayjs object
+    return anchorTime.add(offsetMinutes, 'minute');
 };
 
 // ----------------------------------------------------------------------
@@ -64,21 +89,20 @@ exports.addEntry = async (req, res) => {
 };
 
 // ----------------------------------------------------------------------
-// GET /api/v1/users/:userId/reminders - Get all Reminders
-// GET /api/v1/users/:userId/medications - Get all Medications
+// GET /api/v1/users/:userId/reminders - Get all Reminders (READ)
+// GET /api/v1/users/:userId/medications - Get all Medications (READ)
 // ----------------------------------------------------------------------
 exports.getEntries = async (req, res) => {
     const userId = req.user.userId;
-    // Determine which type of entry to fetch based on the endpoint path
-    const isMedicationPath = req.path.includes('/medications');
+    const isMedicationPath = req.originalUrl.includes('/medications');
 
     try {
         let entries;
         if (isMedicationPath) {
-            entries = await Medication.find({ userId, isActive: true });
+            entries = await Medication.find({ userId, isActive: true }).select('-__v -userId');
             return res.status(200).json({ type: 'medications', data: entries });
         } else {
-            entries = await Reminder.find({ userId, isActive: true });
+            entries = await Reminder.find({ userId, isActive: true }).select('-__v -userId');
             return res.status(200).json({ type: 'reminders', data: entries });
         }
     } catch (error) {
@@ -87,34 +111,23 @@ exports.getEntries = async (req, res) => {
     }
 };
 
-const getModelAndId = (req) => {
-    // Check if the URL path contains '/medications' or '/reminders'
-    const isMedication = req.originalUrl.includes('/medications');
-    const model = isMedication ? Medication : Reminder;
-    // Extract the ID based on the parameter name in the route file
-    const docId = isMedication ? req.params.medId : req.params.reminderId;
-    return { model, docId };
-};
-
 // ----------------------------------------------------------------------
-// PUT /api/v1/users/:userId/reminders/:reminderId - Update an Entry
-// PUT /api/v1/users/:userId/medications/:medId - Update an Entry
+// PUT /api/v1/users/:userId/reminders/:reminderId - Update an Entry (UPDATE)
+// PUT /api/v1/users/:userId/medications/:medId - Update an Entry (UPDATE)
 // ----------------------------------------------------------------------
 exports.updateEntry = async (req, res) => {
-    const userId = req.user.userId; // Get the user ID from the JWT
+    const userId = req.user.userId;
     const { model, docId } = getModelAndId(req);
     
-    // We only take fields that are allowed to be updated.
     const { title, startDate, endDate, time, repeatFrequency, name, dosage } = req.body;
     
     const updateData = {};
     if (title) updateData.title = title;
     if (startDate) updateData.startDate = parseDate(startDate);
-    if (endDate !== undefined) updateData.endDate = parseDate(endDate);
+    if (endDate !== undefined) updateData.endDate = parseDate(endDate); // Handles 'never' being passed as null/string
     if (time) updateData.time = time;
     if (repeatFrequency) updateData.repeatFrequency = repeatFrequency;
     
-    // Specific fields for Medication model
     if (model === Medication) {
         if (name) updateData.name = name;
         if (dosage) updateData.dosage = dosage;
@@ -122,13 +135,12 @@ exports.updateEntry = async (req, res) => {
 
     try {
         const updatedEntry = await model.findOneAndUpdate(
-            { _id: docId, userId: userId }, // Find by ID and ensure user ownership
+            { _id: docId, userId: userId }, 
             { $set: updateData },
-            { new: true, runValidators: true } // Return the updated document and run validation
+            { new: true, runValidators: true }
         );
 
         if (!updatedEntry) {
-            // Document not found or user doesn't own it
             return res.status(404).json({ error: `${model.modelName} not found or access denied.` });
         }
 
@@ -140,19 +152,103 @@ exports.updateEntry = async (req, res) => {
     }
 };
 
+// ----------------------------------------------------------------------
+// GET /api/v1/users/:id/timeline - Get the full daily schedule (The Engine)
+// ----------------------------------------------------------------------
+exports.getTimeline = async (req, res) => {
+    const userId = req.user.userId;
+    const dateString = req.query.date; // Expecting YYYY-MM-DD
+    
+    if (!dateString) {
+        return res.status(400).json({ error: "Date query parameter (YYYY-MM-DD) is required." });
+    }
 
-// ----------------------------------------------------------------------
-// POST /api/v1/users/:id/timeline/cards/:card_id/complete - Mark a card as complete
-// ----------------------------------------------------------------------
-exports.completeCard = async (req, res) => {
-    // This is a placeholder for a later stage of implementation
-    res.status(501).json({ message: "Not Implemented Yet. This will mark a task as complete." });
+    try {
+        const user = await User.findById(userId).select('preferred_time_zone preferred_wake_time').lean();
+        if (!user) {
+            return res.status(404).json({ error: "User not found." });
+        }
+
+        // 1. Setup Time Context
+        const targetDate = dayjs(dateString).startOf('day');
+        const userTimezone = user.preferred_time_zone || 'Asia/Kolkata'; 
+
+        // Anchor the Wake Up time to the target date in the user's timezone
+        const preferredWakeTime = user.preferred_wake_time || '07:00'; 
+        const [wakeHour, wakeMinute] = preferredWakeTime.split(':').map(Number);
+        
+        // This is the starting point for all calculations
+        let wakeUpAnchor = dayjs.tz(targetDate.format('YYYY-MM-DD'), userTimezone).hour(wakeHour).minute(wakeMinute);
+
+        let timeline = [];
+
+        // --- 2. Generate System Cards (Based on Page 7 Offsets) ---
+        
+        // A. Wake Up (0 min offset)
+        timeline.push({ 
+            scheduledTime: wakeUpAnchor.format('HH:mm'), 
+            title: 'Wake Up', 
+            type: 'SYSTEM_WAKEUP' 
+        });
+
+        // B. Breakfast (Add 1 hour 45 min = 105 min)
+        const breakfastTime = calculateScheduledTime(wakeUpAnchor, 105); 
+        timeline.push({ 
+            scheduledTime: breakfastTime.format('HH:mm'), 
+            title: 'Breakfast', 
+            type: 'SYSTEM_NUTRITION',
+            description: 'Boost your energy'
+        });
+
+        // C. Sleep (Add 16 hours = 960 min)
+        const sleepTime = calculateScheduledTime(wakeUpAnchor, 16 * 60); 
+        timeline.push({ 
+            scheduledTime: sleepTime.format('HH:mm'), 
+            title: 'Sleep', 
+            type: 'SYSTEM_REST',
+            description: 'Restore & repair'
+        });
+        
+        // NOTE: Other system cards (Lunch, Dinner, Fitness) would be added here
+
+        // --- 3. Integrate User Reminders and Medications ---
+
+        // Helper to check if entry is active on the target date 
+        const isActiveOnDate = (entry, date) => {
+            return dayjs(entry.startDate).isSameOrBefore(date, 'day') && (entry.endDate === null || dayjs(entry.endDate).isSameOrAfter(date, 'day'));
+        };
+        
+        // Fetch user-defined entries
+        const rawReminders = await Reminder.find({ userId, isActive: true });
+        const rawMedications = await Medication.find({ userId, isActive: true });
+
+        // Add active user entries to the timeline
+        [...rawReminders, ...rawMedications].forEach(entry => {
+            if (isActiveOnDate(entry, targetDate)) {
+                timeline.push({
+                    scheduledTime: entry.time,
+                    title: entry.title || entry.name,
+                    type: entry.name ? 'USER_MEDICATION' : 'USER_REMINDER',
+                    sourceId: entry._id
+                });
+            }
+        });
+
+        // --- 4. Final Sorting and Output ---
+        
+        timeline.sort((a, b) => a.scheduledTime.localeCompare(b.scheduledTime));
+
+        return res.status(200).json({ date: dateString, timeline });
+
+    } catch (error) {
+        console.error('Error getting timeline:', error);
+        return res.status(500).json({ error: "Internal server error." });
+    }
 };
 
 // ----------------------------------------------------------------------
-// GET /api/v1/users/:id/timeline - Get the full daily schedule
+// Placeholder for Step 6: POST /api/v1/users/:id/timeline/cards/:card_id/complete
 // ----------------------------------------------------------------------
-exports.getTimeline = async (req, res) => {
-    // This is a placeholder for the timeline generation logic
-    res.status(501).json({ message: "Not Implemented Yet. This will generate the timeline." });
+exports.completeCard = async (req, res) => {
+    res.status(501).json({ message: "Not Implemented Yet. This will mark a task as complete." });
 };
