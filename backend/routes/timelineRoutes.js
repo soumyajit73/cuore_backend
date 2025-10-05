@@ -24,6 +24,9 @@ router.put('/:userId/reminders/:reminderId', protect, timelineController.updateE
 // PUT /api/v1/users/:userId/medications/:medId - Update a Medication
 router.put('/:userId/medications/:medId', protect, timelineController.updateEntry);
 
+// get cuore score
+router.get('/:userId/cuore-score', protect, timelineController.getCuoreScore);
+
 // --- Placeholders for future APIs ---
 // router.get('/:userId/medications', protect, timelineController.getEntries); 
 router.get('/:userId/timeline', protect, timelineController.getTimeline);

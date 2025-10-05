@@ -676,30 +676,34 @@ exports.processAndStoreBiomarkers = async (userId, o7Data = {}) => {
             score_hscrp(processedO7Data.HsCRP) +
             score_trig_hdl_ratio(processedO7Data.trig_hdl_ratio);
 
-        // Assign the calculated O7 data and score
+        // Temporarily assign the data for the final score calculation
         userDoc.o7Data = processedO7Data;
         userDoc.scores.o7Score = o7Score;
-        
-        // Calculate the Cuore score
+
         const cuoreScore = calculateCuoreScore(userDoc);
-        userDoc.scores.cuoreScore = cuoreScore;
-        
-        // --- DEBUGGING: Check values before save ---
-        console.log("User document before saving:");
-        console.log(userDoc);
-        console.log("Calculated cuoreScore:", userDoc.scores.cuoreScore);
-        
-        // Save the modified document
-        const updatedDoc = await userDoc.save();
-        
-        console.log("Document successfully saved.");
+
+        // --- FINAL FIX: Use a more direct update query ---
+        const updatedDoc = await Onboarding.findOneAndUpdate(
+            { userId },
+            {
+                $set: {
+                    o7Data: processedO7Data,
+                    'scores.o7Score': o7Score,
+                    'scores.cuoreScore': cuoreScore
+                }
+            },
+            { new: true, runValidators: true }
+        );
+
+        if (!updatedDoc) {
+            throw new ValidationError("User not found during update.");
+        }
 
         return {
             userId: updatedDoc.userId,
             o7Data: updatedDoc.o7Data,
             scores: updatedDoc.scores
         };
-
     } catch (error) {
         console.error('Error in processAndStoreBiomarkers:', error.name, error.message);
         if (error.errors) {
@@ -711,6 +715,5 @@ exports.processAndStoreBiomarkers = async (userId, o7Data = {}) => {
         throw new Error("Internal Server Error occurred during biomarker processing.");
     }
 };
-
 
 exports.ValidationError = ValidationError;

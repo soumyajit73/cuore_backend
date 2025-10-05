@@ -246,6 +246,47 @@ exports.getTimeline = async (req, res) => {
     }
 };
 
+exports.getCuoreScore = async (req, res) => {
+    const userId = req.user.userId;
+
+    try {
+        // Find the user and select only the scores and timestamp fields
+        // The .lean() is for performance, returning a plain JS object
+        const user = await User.findById(userId).select('scores timestamp').lean();
+
+        if (!user) {
+            return res.status(404).json({ error: "User not found." });
+        }
+
+        // Get the latest score dynamically (defaults to 0 if not yet calculated)
+        const latestScore = user.scores.cuoreScore || 0;
+        
+        // Define color status dynamically based on the latestScore
+        let colorStatus;
+        if (latestScore > 75) {
+            colorStatus = 'green';
+        } else if (latestScore >= 50) {
+            colorStatus = 'yellow';
+        } else if (latestScore >= 25) {
+            colorStatus = 'light red';
+        } else {
+            colorStatus = 'deep red';
+        }
+        
+        // This response provides all data needed for the progress bar
+        return res.status(200).json({ 
+            latestScore: latestScore,
+            colorStatus: colorStatus,
+            scoreDate: user.timestamp, // Date when the user was created/onboarding started
+            targetScore: 75 // Fixed target shown in the UI mockups
+        });
+
+    } catch (error) {
+        console.error('Error fetching Cuore score:', error);
+        return res.status(500).json({ error: "Internal server error." });
+    }
+};
+
 // ----------------------------------------------------------------------
 // Placeholder for Step 6: POST /api/v1/users/:id/timeline/cards/:card_id/complete
 // ----------------------------------------------------------------------
