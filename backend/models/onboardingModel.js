@@ -1,5 +1,14 @@
 const mongoose = require('mongoose');
 
+// Custom Error class for validation failures
+class ValidationError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'ValidationError';
+        Object.setPrototypeOf(this, ValidationError.prototype);
+    }
+}
+
 // Define the schema for the user's full onboarding data
 const onboardingSchema = new mongoose.Schema({
     userId: { type: String, required: true, unique: true },
@@ -24,7 +33,7 @@ const onboardingSchema = new mongoose.Schema({
         o4Score: { type: Number, default: 0 },
         o5Score: { type: Number, default: 0 },
         o6Score: { type: Number, default: 0 },
-        o7Score: { type: Number, default: 0 }, // Add O7 score field
+        o7Score: { type: Number, default: 0 },
         cuoreScore: { type: Number, default: 0 }
     },
     o3Data: {
@@ -58,7 +67,7 @@ const onboardingSchema = new mongoose.Schema({
         enjoyable: { type: String },
         felt_nervous: { type: String }
     },
-    o7Data: { // Add O7 data field
+    o7Data: {
         o2_sat: { type: Number },
         pulse: { type: Number },
         bp_upper: { type: Number },
@@ -76,15 +85,8 @@ const onboardingSchema = new mongoose.Schema({
     timestamp: { type: Date, default: Date.now },
 });
 
-const Onboarding = mongoose.model('Onboarding', onboardingSchema, 'onboardings');
-
-// Custom Error class for validation failures
-class ValidationError extends Error {
-    constructor(message) {
-        super(message);
-        this.name = 'ValidationError';
-    }
-}
+// Define the Mongoose Model immediately after the schema.
+const OnboardingModel = mongoose.model('Onboarding', onboardingSchema, 'onboardings');
 
 // Mappings for O4 and O5 scoring
 const SMOKING_SCORES = { "never": 0, "quit_gt_6m": 2, "occasionally": 6, "regularly": 10 };
@@ -107,7 +109,6 @@ const SLEEP_MAP = { "<6": 8, "6-7": 4, "7-8": 0, "8-9": 1, ">9": 4 };
 const STRESS_MAP = { "never": 0, "sometimes": 3, "often": 6, "always": 8 };
 
 function score_o6(sleep_hours_str, problems_over, enjoyable, felt_nervous) {
-    // Determine sleep score based on the string value
     const lookupSleep = (hours) => {
         if (hours < 6) return SLEEP_MAP["<6"];
         if (hours <= 7) return SLEEP_MAP["6-7"];
@@ -117,11 +118,10 @@ function score_o6(sleep_hours_str, problems_over, enjoyable, felt_nervous) {
     };
     
     let sleepScore;
-    // Handle both string and number inputs for sleep_hours
     if (typeof sleep_hours_str === 'number') {
         sleepScore = lookupSleep(sleep_hours_str);
     } else {
-        sleepScore = SLEEP_MAP[sleep_hours_str] || 0; // Fallback to 0 if not found
+        sleepScore = SLEEP_MAP[sleep_hours_str] || 0;
     }
 
     const stress_avg = (STRESS_MAP[problems_over] + STRESS_MAP[enjoyable] + STRESS_MAP[felt_nervous]) / 3;
@@ -230,7 +230,7 @@ exports.processAndStoreBasicInfo = async (data) => {
     const processedData = validateAndCalculateScores(data);
     const userId = new mongoose.Types.ObjectId().toString();
 
-    const newOnboardingDoc = new Onboarding({
+    const newOnboardingDoc = new OnboardingModel({
         userId,
         onboardingVersion: processedData.onboardingVersion,
         o2Data: processedData.o2Data,
@@ -271,7 +271,6 @@ exports.processAndStoreHealthHistory = async (userId, o3Data) => {
     const htnSynonyms = /hypertension|htn|high\sblood\spressure|bp/i;
     if (htnSynonyms.test(otherConditionsString)) {
         updatedFlags.hasHypertension = true;
-        // Remove synonyms to avoid duplication
         otherConditionsString = otherConditionsString.replace(htnSynonyms, '').trim();
     }
 
@@ -279,12 +278,11 @@ exports.processAndStoreHealthHistory = async (userId, o3Data) => {
     const dmSynonyms = /diabetes|dm|high\sblood\ssugar|sugar/i;
     if (dmSynonyms.test(otherConditionsString)) {
         updatedFlags.hasDiabetes = true;
-        // Remove synonyms to avoid duplication
         otherConditionsString = otherConditionsString.replace(dmSynonyms, '').trim();
     }
 
     // 3. Find the existing user document and update it
-    const updatedDoc = await Onboarding.findOneAndUpdate(
+    const updatedDoc = await OnboardingModel.findOneAndUpdate(
         { userId: userId },
         {
             $set: {
@@ -328,7 +326,7 @@ exports.processAndStoreLifestyle = async (userId, o4Data) => {
     const o4Score = SMOKING_SCORES[o4Data.smoking] + ALCOHOL_SCORES[o4Data.alcohol];
 
     // 3. Find the existing user document and update it
-    const updatedDoc = await Onboarding.findOneAndUpdate(
+    const updatedDoc = await OnboardingModel.findOneAndUpdate(
         { userId: userId },
         {
             $set: {
@@ -369,7 +367,7 @@ exports.processAndStoreExerciseEating = async (userId, o5Data) => {
     const o5Score = exerciseScore + foodsScore;
 
     // 3. Find the existing user document and update it
-    const updatedDoc = await Onboarding.findOneAndUpdate(
+    const updatedDoc = await OnboardingModel.findOneAndUpdate(
         { userId: userId },
         {
             $set: {
@@ -400,12 +398,10 @@ exports.processAndStoreSleepStress = async (userId, o6Data) => {
     // 1. Validate O6 data based on mapping tables
     const { sleep_hours, problems_overwhelming, enjoyable, felt_nervous } = o6Data;
     
-    // Check sleep_hours value type and range
     if (typeof sleep_hours !== 'number' && !SLEEP_MAP.hasOwnProperty(sleep_hours)) {
         throw new ValidationError(`Invalid sleep_hours value: ${sleep_hours}.`);
     }
     
-    // Validate stress fields
     if (!STRESS_MAP.hasOwnProperty(problems_overwhelming) ||
         !STRESS_MAP.hasOwnProperty(enjoyable) ||
         !STRESS_MAP.hasOwnProperty(felt_nervous)) {
@@ -416,7 +412,7 @@ exports.processAndStoreSleepStress = async (userId, o6Data) => {
     const o6Score = score_o6(sleep_hours, problems_overwhelming, enjoyable, felt_nervous);
 
     // 3. Find the existing user document and update it
-    const updatedDoc = await Onboarding.findOneAndUpdate(
+    const updatedDoc = await OnboardingModel.findOneAndUpdate(
         { userId: userId },
         {
             $set: {
@@ -548,87 +544,89 @@ const getAutofillData = (totalScore) => {
 };
 
 /**
- * Calculates the final Cuore score based on all stage scores.
- * @param {object} userDoc - The full user document with all data and scores.
- * @returns {number} The calculated and clamped Cuore score.
- */
-/**
- * Calculates the final Cuore score based on all stage scores.
- * @param {object} userDoc - The full user document with all data and scores.
- * @returns {number} The calculated and clamped Cuore score.
- */
-/**
- * Calculates the final Cuore score based on all stage scores.
+ * Calculates the final Cuore score based on the user-provided formula.
  * @param {object} userDoc - The full user document with all data and scores.
  * @returns {number} The calculated and clamped Cuore score.
  */
 function calculateCuoreScore(userDoc) {
-    const { o2Data, o5Data, o6Data, o7Data } = userDoc;
+    const { o5Data, o6Data, o7Data } = userDoc;
 
     // Helper to safely get a value or default to 0
     const safeGet = (obj, prop) => (obj && obj[prop] != null ? obj[prop] : 0);
     const safeGetScore = (prop) => safeGet(userDoc.scores, prop);
     
-    // --- O2 Scores (Averaged components from previous steps) ---
-    const o2Total = (safeGetScore('ageScore') + safeGetScore('genderScore')) / 2;
+    // --- Components from your formula, using data from the document ---
+    const ageGenderAvg = (safeGetScore('ageScore') + safeGetScore('genderScore')) / 2;
     const bmiScore = safeGetScore('bmiScore');
     const wthrScore = safeGetScore('wthrScore');
-    
-    // --- O3 & O4 Scores (Totals from previous steps) ---
     const o3Score = safeGetScore('o3Score');
     const o4Score = safeGetScore('o4Score');
+    const minExerciseScore = score_exercise(safeGet(o5Data, 'min_exercise_per_week'));
 
-    // --- O5 Scores (Re-calculated components for final summation) ---
-    const exerciseScore = score_exercise(safeGet(o5Data, 'min_exercise_per_week'));
-    const foodsScoreSum = score_foods(
-        safeGet(o5Data, 'fruits_veg'), 
-        safeGet(o5Data, 'processed_food'), 
-        safeGet(o5Data, 'high_fiber')
-    );
-    const foodsScoreAvg = foodsScoreSum / 3;
-    const o5ScoreTotal = exerciseScore + foodsScoreAvg; // Sum of exercise score and average food score
-
-    // --- O6 Scores (Re-calculated components for final summation) ---
-    const sleepHours = safeGet(o6Data, 'sleep_hours');
-    const problemsOverScore = STRESS_MAP[safeGet(o6Data, 'problems_overwhelming')] || 0;
-    const enjoyableScore = STRESS_MAP[safeGet(o6Data, 'enjoyable')] || 0;
-    const feltNervousScore = STRESS_MAP[safeGet(o6Data, 'felt_nervous')] || 0;
-    
-    const sleepScore = (sleepHours != null) ? (SLEEP_MAP[sleepHours] || 0) : 0;
-    const stressScoreAvg = (problemsOverScore + enjoyableScore + feltNervousScore) / 3;
-    
-    // NOTE: O6Score in processAndStoreSleepStress is sleepScore + stress_avg, so we sum them here too.
-    const o6ScoreTotal = sleepScore + stressScoreAvg; 
-
-    // --- O7 Scores (Use the total calculated in processAndStoreBiomarkers) ---
-    // Since O7 is fully calculated and assigned to userDoc.scores.o7Score just before this function is called, 
-    // we should use the single total.
-    const o7ScoreTotal = safeGetScore('o7Score'); 
-    
-    // --- FINAL SUMMATION (Total Score is the sum of all section totals) ---
-    const totalScore = (
-        o2Total + 
-        bmiScore + 
-        wthrScore + 
-        o3Score + 
-        o4Score + 
-        o5ScoreTotal + 
-        o6ScoreTotal + 
-        o7ScoreTotal
+    const foodsScore = (
+        score_foods(safeGet(o5Data, 'fruits_veg'), safeGet(o5Data, 'processed_food'), safeGet(o5Data, 'high_fiber')) / 3
     );
 
-    // Calculate the Cuore score and clamp it between 5 and 95
-    let cuoreScore = 100 - (totalScore / 100);
-    cuoreScore = roundTo(Math.min(Math.max(cuoreScore, 5), 95), 1); // Round to 1 decimal place
-    
-    return cuoreScore;
+    const sleepScore = (safeGet(o6Data, 'sleep_hours') != null) ? (SLEEP_MAP[safeGet(o6Data, 'sleep_hours')] || 0) : 0;
+    const stressScore = (
+        (STRESS_MAP[safeGet(o6Data, 'problems_overwhelming')] || 0) +
+        (STRESS_MAP[safeGet(o6Data, 'enjoyable')] || 0) +
+        (STRESS_MAP[safeGet(o6Data, 'felt_nervous')] || 0)
+    ) / 3;
+
+    const o2SatScore = score_o2_sat(safeGet(o7Data, 'o2_sat'));
+    const hrScore = score_hr(safeGet(o7Data, 'pulse'));
+    const bpScore = (
+        score_bp_upper(safeGet(o7Data, 'bp_upper')) + 
+        score_bp_lower(safeGet(o7Data, 'bp_lower'))
+    ) / 2;
+    const ldlScore = score_ldl(safeGet(o7Data, 'LDL'));
+    const hscrpScore = score_hscrp(safeGet(o7Data, 'HsCRP'));
+    const bsScore = (
+        score_bs_am(safeGet(o7Data, 'bs_am')) + 
+        score_bs_f(safeGet(o7Data, 'bs_f')) + 
+        score_a1c(safeGet(o7Data, 'A1C'))
+    ) / 3;
+    const trigHdlRatioScore = score_trig_hdl_ratio(safeGet(o7Data, 'trig_hdl_ratio'));
+
+    // --- FINAL SUMMATION BASED ON YOUR PROVIDED FORMULA ---
+   // Calculate the totalScore as you are now
+const totalScore = (
+    ageGenderAvg +
+    bmiScore +
+    wthrScore +
+    o3Score +
+    o4Score +
+    minExerciseScore +
+    foodsScore +
+    sleepScore +
+    stressScore +
+    o2SatScore +
+    hrScore +
+    bpScore +
+    ldlScore +
+    hscrpScore +
+    bsScore +
+    trigHdlRatioScore
+);
+
+// Define the maximum possible total score
+const MAX_POSSIBLE_SCORE = 132; 
+
+// Normalize the total score and calculate the final Cuore score
+let cuoreScore = 100 - ((totalScore / MAX_POSSIBLE_SCORE) * 100);
+
+// Clamp the score between 5 and 95
+cuoreScore = roundTo(Math.min(Math.max(cuoreScore, 5), 95), 1);
+
+return cuoreScore;
 }
 
 
 // Main O7 processing function
 exports.processAndStoreBiomarkers = async (userId, o7Data = {}) => {
     try {
-        const userDoc = await Onboarding.findOne({ userId });
+        const userDoc = await OnboardingModel.findOne({ userId });
 
         if (!userDoc) {
             throw new ValidationError("User not found.");
@@ -643,10 +641,8 @@ exports.processAndStoreBiomarkers = async (userId, o7Data = {}) => {
         let calculatedA1C;
 
         if (isAutofill) {
-            // Note: This logic for totalScore uses the already SAVED o5/o6 scores, 
-            // which is fine for triggering autofill logic based on previous progress.
             const totalScoreBeforeO7 = userDoc.scores.ageScore + userDoc.scores.genderScore + userDoc.scores.bmiScore + userDoc.scores.wthrScore +
-                                       userDoc.scores.o3Score + userDoc.scores.o4Score + userDoc.scores.o5Score + userDoc.scores.o6Score;
+                                         userDoc.scores.o3Score + userDoc.scores.o4Score + userDoc.scores.o5Score + userDoc.scores.o6Score;
             processedO7Data = getAutofillData(totalScoreBeforeO7);
         } else {
             const { o2_sat, pulse, bp_upper, bp_lower, bs_f, bs_am, A1C, HDL, LDL, Trig, HsCRP } = o7Data;
@@ -656,7 +652,6 @@ exports.processAndStoreBiomarkers = async (userId, o7Data = {}) => {
             }
             const normalizedHsCRP = (o7Data.HsCRP_unit && o7Data.HsCRP_unit.toLowerCase() === "mg/l") ? HsCRP : HsCRP / 10;
             
-            // Calculate A1C if not provided
             calculatedA1C = A1C || roundTo(((bs_f + bs_am) / 2 + 46.7) / 28.7, 2);
             
             const trig_hdl_ratio = roundTo(Trig / HDL, 2);
@@ -671,39 +666,33 @@ exports.processAndStoreBiomarkers = async (userId, o7Data = {}) => {
             };
         }
         
-        // Ensure A1C is always available for scoring, even if calculated
         if (!processedO7Data.A1C) {
              processedO7Data.A1C = calculatedA1C;
         }
 
-
-        // --- CALCULATE O7 TOTAL SCORE ---
         const o7Score =
             score_o2_sat(processedO7Data.o2_sat) +
             score_hr(processedO7Data.pulse) +
-            (score_bp_upper(processedO7Data.bp_upper) + score_bp_lower(processedO7Data.bp_lower)) / 2 + // Avg BP Score
-            (score_bs_f(processedO7Data.bs_f) + score_bs_am(processedO7Data.bs_am) + score_a1c(processedO7Data.A1C)) / 3 + // Avg BS Score
+            (score_bp_upper(processedO7Data.bp_upper) + score_bp_lower(processedO7Data.bp_lower)) / 2 +
+            (score_bs_f(processedO7Data.bs_f) + score_bs_am(processedO7Data.bs_am) + score_a1c(processedO7Data.A1C)) / 3 +
             score_hdl(processedO7Data.HDL) +
             score_ldl(processedO7Data.LDL) +
             score_trig(processedO7Data.Trig) +
             score_hscrp(processedO7Data.HsCRP) +
             score_trig_hdl_ratio(processedO7Data.trig_hdl_ratio);
 
-        
-        // --- PREPARE FOR FINAL CALCULATION AND DB UPDATE ---
         userDoc.o7Data = processedO7Data;
-        userDoc.scores.o7Score = o7Score; // Assign the newly calculated O7 score to the document
+        userDoc.scores.o7Score = o7Score;
 
-        const cuoreScore = calculateCuoreScore(userDoc); // Call the fixed final calculator
+        const cuoreScore = calculateCuoreScore(userDoc);
 
-        // --- SAVE ALL NEW DATA AND SCORES ---
-        const updatedDoc = await Onboarding.findOneAndUpdate(
+        const updatedDoc = await OnboardingModel.findOneAndUpdate(
             { userId },
             {
                 $set: {
                     o7Data: processedO7Data,
                     'scores.o7Score': o7Score,
-                    'scores.cuoreScore': cuoreScore // THIS IS NOW SAVED CORRECTLY
+                    'scores.cuoreScore': cuoreScore
                 }
             },
             { new: true, runValidators: true }
@@ -719,22 +708,21 @@ exports.processAndStoreBiomarkers = async (userId, o7Data = {}) => {
             scores: updatedDoc.scores
         };
     } catch (error) {
-        console.error('Error in processAndStoreBiomarkers:', error.name, error.message);
-        if (error.errors) {
-            console.error('Validation Errors:', error.errors);
-        }
-        if (error instanceof ValidationError) {
+        console.error('Error:', error.name, error.message);
+        if (error.name === 'ValidationError') {
             throw error;
         }
-        throw new Error("Internal Server Error occurred during biomarker processing.");
+        throw new Error("Internal Server Error");
     }
 };
 
-
-exports.ValidationError = ValidationError;
-exports.processAndStoreBiomarkers = exports.processAndStoreBiomarkers; 
-exports.processAndStoreBasicInfo = exports.processAndStoreBasicInfo;
-exports.processAndStoreHealthHistory = exports.processAndStoreHealthHistory;
-exports.processAndStoreLifestyle = exports.processAndStoreLifestyle;
-exports.processAndStoreExerciseEating = exports.processAndStoreExerciseEating;
-exports.processAndStoreSleepStress = exports.processAndStoreSleepStress;
+module.exports = {
+    Onboarding: OnboardingModel,
+    ValidationError,
+    processAndStoreBiomarkers: exports.processAndStoreBiomarkers,
+    processAndStoreBasicInfo: exports.processAndStoreBasicInfo,
+    processAndStoreHealthHistory: exports.processAndStoreHealthHistory,
+    processAndStoreLifestyle: exports.processAndStoreLifestyle,
+    processAndStoreExerciseEating: exports.processAndStoreExerciseEating,
+    processAndStoreSleepStress: exports.processAndStoreSleepStress
+};
