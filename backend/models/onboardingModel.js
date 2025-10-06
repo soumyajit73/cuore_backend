@@ -224,12 +224,19 @@ const validateAndCalculateScores = (data) => {
 
 /**
  * Main model function to process and store O2 data in MongoDB.
+ * @param {string} userId - The user's ID obtained from authentication.
  * @param {object} data - The request payload.
  */
-exports.processAndStoreBasicInfo = async (data) => {
-    const processedData = validateAndCalculateScores(data);
-    const userId = new mongoose.Types.ObjectId().toString();
+exports.processAndStoreBasicInfo = async (userId, data) => {
+    // Check if an onboarding document already exists for this user to prevent duplicates
+    const existingDoc = await OnboardingModel.findOne({ userId });
+    if (existingDoc) {
+        throw new ValidationError("Onboarding data already exists for this user. Cannot create a new document.");
+    }
 
+    const processedData = validateAndCalculateScores(data);
+
+    // Use the userId from the authentication token to create the new document
     const newOnboardingDoc = new OnboardingModel({
         userId,
         onboardingVersion: processedData.onboardingVersion,
@@ -589,37 +596,32 @@ function calculateCuoreScore(userDoc) {
     ) / 3;
     const trigHdlRatioScore = score_trig_hdl_ratio(safeGet(o7Data, 'trig_hdl_ratio'));
 
-    // --- FINAL SUMMATION BASED ON YOUR PROVIDED FORMULA ---
-   // Calculate the totalScore as you are now
-const totalScore = (
-    ageGenderAvg +
-    bmiScore +
-    wthrScore +
-    o3Score +
-    o4Score +
-    minExerciseScore +
-    foodsScore +
-    sleepScore +
-    stressScore +
-    o2SatScore +
-    hrScore +
-    bpScore +
-    ldlScore +
-    hscrpScore +
-    bsScore +
-    trigHdlRatioScore
-);
+    const totalScore = (
+        ageGenderAvg +
+        bmiScore +
+        wthrScore +
+        o3Score +
+        o4Score +
+        minExerciseScore +
+        foodsScore +
+        sleepScore +
+        stressScore +
+        o2SatScore +
+        hrScore +
+        bpScore +
+        ldlScore +
+        hscrpScore +
+        bsScore +
+        trigHdlRatioScore
+    );
 
-// Define the maximum possible total score
-const MAX_POSSIBLE_SCORE = 132; 
+    const MAX_POSSIBLE_SCORE = 132; 
 
-// Normalize the total score and calculate the final Cuore score
-let cuoreScore = 100 - ((totalScore / MAX_POSSIBLE_SCORE) * 100);
+    let cuoreScore = 100 - ((totalScore / MAX_POSSIBLE_SCORE) * 100);
 
-// Clamp the score between 5 and 95
-cuoreScore = roundTo(Math.min(Math.max(cuoreScore, 5), 95), 1);
-
-return cuoreScore;
+    cuoreScore = roundTo(Math.min(Math.max(cuoreScore, 5), 95), 1);
+    
+    return cuoreScore;
 }
 
 

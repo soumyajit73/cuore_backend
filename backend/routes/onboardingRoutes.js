@@ -1,24 +1,30 @@
 const express = require('express');
 const router = express.Router();
 const controller = require('../controllers/onboardingController.js');
-const { protect } = require('../middleware/authMiddleware');
+const { protect } = require('../middleware/authMiddleware.js');
 
 // o2
-router.post('/basic-info', controller.submitBasicInfo);
+// This route is already correct and protected.
+router.post('/basic-info', protect, controller.submitBasicInfo);
 
 // o3
-router.post('/health-history', controller.submitHealthHistory);
+// ADD the 'protect' middleware here.
+router.post('/health-history', protect, controller.submitHealthHistory);
 
-//o4
-router.post('/lifestyle', controller.submitLifestyle);
+// o4
+// ADD the 'protect' middleware here.
+router.post('/lifestyle', protect, controller.submitLifestyle);
 
 // o5
-router.post('/exercise-eating', controller.submitExerciseEating);
+// ADD the 'protect' middleware here.
+router.post('/exercise-eating', protect, controller.submitExerciseEating);
 
 // o6
-router.post('/sleep-stress', controller.submitSleepStress);
+// ADD the 'protect' middleware here.
+router.post('/sleep-stress', protect, controller.submitSleepStress);
 
 // o7
-router.post('/biomarkers', controller.submitBiomarkers);
+// ADD the 'protect' middleware here.
+router.post('/biomarkers', protect, controller.submitBiomarkers);
 
 module.exports = router;

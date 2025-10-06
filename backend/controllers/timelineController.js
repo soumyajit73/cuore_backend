@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 const Medication = require('../models/Medication');
 const Reminder = require('../models/Reminder');
 const User = require('../models/User'); 
-const Onboarding = require('../models/onboardingModel'); // <--- CORRECT MODEL IMPORTED
+const { Onboarding, ValidationError } = require('../models/onboardingModel.js'); // <--- CORRECT MODEL IMPORTED
 
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
@@ -162,11 +162,13 @@ exports.getCuoreScore = async (req, res) => {
 
     try {
         // 1. Fetch ALL finalized scores from the Onboarding collection
+        // --- FIX: Change findOne to find to get an array of documents ---
         const scoreHistory = await Onboarding.find({ userId, 'scores.cuoreScore': { $exists: true, $ne: 0 } })
             .select('scores.cuoreScore scores.o7Score timestamp')
             .sort({ timestamp: 1 }) // 1 = ascending (oldest first) for charting
             .lean();
 
+        // --- FIX: Correctly check for an empty array ---
         if (scoreHistory.length === 0) {
             // If no scores found, return a default state for the progress bar
             return res.status(200).json({ 
@@ -179,6 +181,7 @@ exports.getCuoreScore = async (req, res) => {
         }
 
         // 2. Get the latest score and date (The last item in the sorted array)
+        // --- This line is now correct as scoreHistory is an array ---
         const latestDoc = scoreHistory[scoreHistory.length - 1];
         const latestScore = latestDoc.scores.cuoreScore;
 
