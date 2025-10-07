@@ -219,12 +219,36 @@ const processO3Data = (o3Data) => {
     return { o3Data: mappedO3Data, o3Score };
 };
 
+const FRONTEND_O4_MAP = {
+    "Never": "never",
+    "Occasionally": "occasionally",
+    "Regularly": "regularly",
+    "Quit > 6 months ago": "quit_gt_6m",
+    "1-2": "1-2",
+    "2-3 twice a week": "2-3_twice_week",
+    ">3": ">3"
+};
 const processO4Data = (o4Data) => {
-    if (!SMOKING_SCORES.hasOwnProperty(o4Data.smoking) || !ALCOHOL_SCORES.hasOwnProperty(o4Data.alcohol)) {
+    // Look up the value from the frontend in the new map
+    const smokingValue = FRONTEND_O4_MAP[o4Data.smoking];
+    const alcoholValue = FRONTEND_O4_MAP[o4Data.alcohol];
+    
+    // Validate the mapped values before proceeding
+    if (!SMOKING_SCORES.hasOwnProperty(smokingValue) || !ALCOHOL_SCORES.hasOwnProperty(alcoholValue)) {
         throw new ValidationError(`Invalid value for smoking or alcohol.`);
     }
-    const o4Score = SMOKING_SCORES[o4Data.smoking] + ALCOHOL_SCORES[o4Data.alcohol];
-    return { o4Data, o4Score };
+    
+    // Use the mapped values for the score calculation
+    const o4Score = SMOKING_SCORES[smokingValue] + ALCOHOL_SCORES[alcoholValue];
+    
+    // You may also want to save the original frontend values for display purposes, 
+    // or the standardized backend values.
+    const finalO4Data = {
+        smoking: smokingValue, // or o4Data.smoking if you want the original string
+        alcohol: alcoholValue  // or o4Data.alcohol
+    };
+
+    return { o4Data: finalO4Data, o4Score };
 };
 
 const processO5Data = (o5Data) => {
