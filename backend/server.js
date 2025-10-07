@@ -7,7 +7,8 @@ const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 
 // 2️⃣ Import all routes AFTER dotenv loads
-const onboardingRoutes = require('./routes/onboardingRoutes.js'); // Renamed for clarity
+const onboardingRoutes = require('./routes/onboardingRoutes.js'); 
+const finalSubmissionRoutes = require('./routes/finalSubmissionRoutes.js');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes'); 
 const timelineRoutes = require('./routes/timelineRoutes'); 
@@ -31,6 +32,7 @@ app.get("/", (req,res)=>{
 
 // Set up the routes for the API with corrected paths
 app.use('/api/v1/onboarding', onboardingRoutes); // Correct path for onboarding
+app.use('/api/v1/onboarding', finalSubmissionRoutes);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes); 
 app.use('/api/v1/users', timelineRoutes); // This is still a conflict
