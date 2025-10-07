@@ -191,25 +191,28 @@ const validateAndCalculateScores = (data) => {
 // O3, O4, O5, O6 Processing Functions
 const processO3Data = (o3Data) => {
     // New logic for mapping frontend's selectedOptions array to boolean flags
-    const q1 = o3Data.selectedOptions ? o3Data.selectedOptions.includes("One of my parents was diagnosed with diabetes before the age of 60") : false;
-    const q2 = o3Data.selectedOptions ? o3Data.selectedOptions.includes("One of my parents had a heart attack before the age of 60") : false;
-    const q3 = o3Data.selectedOptions ? o3Data.selectedOptions.includes("I have Hypertension (High blood pressure)") : false;
-    const q4 = o3Data.selectedOptions ? o3Data.selectedOptions.includes("I have Diabetes (High blood sugar)") : false;
-    const q5 = o3Data.selectedOptions ? o3Data.selectedOptions.includes("I feel short of breath or experience chest discomfort even during mild activity or at rest") : false;
-    const q6 = o3Data.selectedOptions ? o3Data.selectedOptions.includes("I've noticed an increase in hunger, thirst, or the need to urinate frequently") : false;
+    const selectedOptions = o3Data.selectedOptions || [];
+    const q1 = selectedOptions.includes("One of my parents was diagnosed with diabetes before the age of 60");
+    const q2 = selectedOptions.includes("One of my parents had a heart attack before the age of 60");
+    const q3 = selectedOptions.includes("I have Hypertension (High blood pressure)");
+    const q4 = selectedOptions.includes("I have Diabetes (High blood sugar)");
+    const q5 = selectedOptions.includes("I feel short of breath or experience chest discomfort even during mild activity or at rest");
+    const q6 = selectedOptions.includes("I've noticed an increase in hunger, thirst, or or the need to urinate frequently");
 
     const o3Score = (q1 ? 2 : 0) + (q2 ? 2 : 0) + (q3 ? 4 : 0) + (q4 ? 6 : 0) + (q5 ? 8 : 0) + (q6 ? 4 : 0);
-    let otherConditionsString = o3Data.other_conditions || "";
+    
+    const originalOtherConditions = o3Data.other_conditions || "";
     const updatedFlags = { hasHypertension: q3, hasDiabetes: q4 };
+    
     const htnSynonyms = /hypertension|htn|high\sblood\spressure|bp/i;
-    if (htnSynonyms.test(otherConditionsString)) updatedFlags.hasHypertension = true;
+    if (htnSynonyms.test(originalOtherConditions)) updatedFlags.hasHypertension = true;
+    
     const dmSynonyms = /diabetes|dm|high\sblood\ssugar|sugar/i;
-    if (dmSynonyms.test(otherConditionsString)) updatedFlags.hasDiabetes = true;
+    if (dmSynonyms.test(originalOtherConditions)) updatedFlags.hasDiabetes = true;
 
-    // Use the mapped booleans for the saved data
     const mappedO3Data = {
         q1, q2, q3, q4, q5, q6,
-        other_conditions: otherConditionsString,
+        other_conditions: originalOtherConditions,
         ...updatedFlags
     };
 
@@ -301,65 +304,40 @@ const calculateCuoreScore = (allData, allScores) => {
 // --- NEW FUNCTION: The single point of entry for final onboarding submission ---
 exports.processAndSaveFinalSubmission = async (userId, payload) => {
     try {
-        // Check for existing document to prevent duplicate submissions
         const existingDoc = await OnboardingModel.findOne({ userId });
         if (existingDoc) {
             throw new ValidationError("Onboarding data for this user already exists. Cannot submit again.");
         }
 
-        // 1. Map frontend payload keys to backend keys, using default empty objects for safety
-        const { 
-            o2Data, 
-            o4Data, 
-            o5Data, 
-            o6Data,
-            onboarding3 = {}, 
-            onboarding7 = {}
-        } = payload;
+        const { o2Data, o3Data, o4Data, o5Data, o6Data, o7Data = {} } = payload;
         
-        // --- Mapping for O3 data ---
-        const mappedO3Data = {
-            q1: onboarding3.selectedOptions ? onboarding3.selectedOptions.includes("One of my parents was diagnosed with diabetes before the age of 60") : false,
-            q2: onboarding3.selectedOptions ? onboarding3.selectedOptions.includes("One of my parents had a heart attack before the age of 60") : false,
-            q3: onboarding3.selectedOptions ? onboarding3.selectedOptions.includes("I have Hypertension (High blood pressure)") : false,
-            q4: onboarding3.selectedOptions ? onboarding3.selectedOptions.includes("I have Diabetes (High blood sugar)") : false,
-            q5: onboarding3.selectedOptions ? onboarding3.selectedOptions.includes("I feel short of breath or experience chest discomfort even during mild activity or at rest") : false,
-            q6: onboarding3.selectedOptions ? onboarding3.selectedOptions.includes("I've noticed an increase in hunger, thirst, or the need to urinate frequently") : false,
-            other_conditions: onboarding3.other_conditions || ""
-        };
-        
-        // --- Mapping for O7 data ---
-        const mappedO7Data = {
-            o2_sat: onboarding7.oxygen,
-            pulse: onboarding7.pulse,
-            bp_upper: onboarding7.bpUpper,
-            bp_lower: onboarding7.bpLower,
-            bs_f: onboarding7.fastingSugar,
-            bs_am: onboarding7.afterMealSugar,
-            A1C: onboarding7.hba1c,
-            HDL: onboarding7.hdl,
-            LDL: onboarding7.ldl,
-            Trig: onboarding7.triglycerides,
-            HsCRP: onboarding7.hscrp
-        };
-
-
-        // 2. Validate required top-level modules
-        if (!o2Data || !onboarding3 || !o4Data || !o5Data || !o6Data) {
+        if (!o2Data || !o3Data || !o4Data || !o5Data || !o6Data) {
             throw new ValidationError("Missing required modules. Please submit all data.");
         }
-
-        // 3. Process and calculate scores for each module
+        
         const o2Metrics = validateAndCalculateScores(o2Data);
-        const o3Metrics = processO3Data(onboarding3);
+        const o3Metrics = processO3Data(o3Data);
         const o4Metrics = processO4Data(o4Data);
         const o5Metrics = processO5Data(o5Data);
         const o6Metrics = processO6Data(o6Data);
 
-        // 4. Handle O7 data and calculate its scores
+        const mappedO7Data = {
+            o2_sat: o7Data.o2_sat,
+            pulse: o7Data.pulse,
+            bp_upper: o7Data.bp_upper,
+            bp_lower: o7Data.bp_lower,
+            bs_f: o7Data.bs_f,
+            bs_am: o7Data.bs_am,
+            A1C: o7Data.A1C,
+            HDL: o7Data.HDL,
+            LDL: o7Data.LDL,
+            Trig: o7Data.Trig,
+            HsCRP: o7Data.HsCRP
+        };
+
         let processedO7Data;
         let o7Score;
-        const isAutofill = Object.keys(onboarding7).length === 0;
+        const isAutofill = Object.keys(o7Data).length === 0;
         
         if (isAutofill) {
             const totalScoreBeforeO7 = o2Metrics.scores.ageScore + o2Metrics.scores.genderScore + o2Metrics.scores.bmiScore + o2Metrics.scores.wthrScore + o3Metrics.o3Score + o4Metrics.o4Score + o5Metrics.o5Score + o6Metrics.o6Score;
@@ -369,13 +347,12 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
             if (o2_sat == null || pulse == null || bp_upper == null || bp_lower == null || bs_f == null || bs_am == null || HDL == null || LDL == null || Trig == null || HsCRP == null) {
                 throw new ValidationError("Missing required biomarker fields for manual entry.");
             }
-            const normalizedHsCRP = (onboarding7.hscrp_unit && onboarding7.hscrp_unit.toLowerCase() === "mg/l") ? HsCRP : HsCRP / 10;
+            const normalizedHsCRP = (o7Data.hscrp_unit && o7Data.hscrp_unit.toLowerCase() === "mg/l") ? HsCRP : HsCRP / 10;
             const calculatedA1C = A1C || roundTo(((bs_f + bs_am) / 2 + 46.7) / 28.7, 2);
             const trig_hdl_ratio = roundTo(Trig / HDL, 2);
             processedO7Data = { ...mappedO7Data, HsCRP: normalizedHsCRP, A1C: calculatedA1C, trig_hdl_ratio, auto_filled: false };
         }
 
-        // Calculate O7 score
         o7Score = score_o2_sat(processedO7Data.o2_sat) +
                   score_hr(processedO7Data.pulse) +
                   (score_bp_upper(processedO7Data.bp_upper) + score_bp_lower(processedO7Data.bp_lower)) / 2 +
@@ -398,7 +375,6 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
         const finalCuoreScore = calculateCuoreScore(payload, allScores);
         allScores.cuoreScore = finalCuoreScore;
         
-        // 5. Create and save the final, complete document
         const newOnboardingDoc = await OnboardingModel.create({
             userId,
             onboardingVersion: "7",
@@ -422,7 +398,6 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     }
 };
 
-// --- UPDATED EXPORTS: Only the new function and necessary constants are exported ---
 module.exports = {
     Onboarding: OnboardingModel,
     ValidationError,
