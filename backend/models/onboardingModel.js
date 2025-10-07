@@ -87,9 +87,9 @@ const onboardingSchema = new mongoose.Schema({
 
 const OnboardingModel = mongoose.model('Onboarding', onboardingSchema, 'onboardings');
 
-// Mappings for O4 and O5 scoring
-const SMOKING_SCORES = { "never": 0, "quit_gt_6m": 2, "occasionally": 6, "regularly": 10 };
-const ALCOHOL_SCORES = { "never": 0, "1-2": 2, "2-3_twice_week": 4, ">3": 8 };
+// --- FIX: Updated the scoring maps to use the exact strings from the Figma design ---
+const SMOKING_SCORES = { "Never": 0, "Quit >6 months ago": 2, "Occasionally": 6, "Daily": 10 };
+const ALCOHOL_SCORES = { "Never": 0, "1-2 drinks occasionally": 2, "2 or more drinks at least twice per week": 4, ">3": 8 }; // The ">3" is an assumption from the previous code.
 const FOODS_SCORE_MAP = { "rarely": 8, "sometimes": 6, "often": 2, "daily": 0 };
 const MIN_AGE = 18;
 const MAX_AGE = 88;
@@ -190,7 +190,6 @@ const validateAndCalculateScores = (data) => {
 
 // O3, O4, O5, O6 Processing Functions
 const processO3Data = (o3Data) => {
-    // New logic for mapping frontend's selectedOptions array to boolean flags
     const selectedOptions = o3Data.selectedOptions || [];
     const q1 = selectedOptions.includes("One of my parents was diagnosed with diabetes before the age of 60");
     const q2 = selectedOptions.includes("One of my parents had a heart attack before the age of 60");
@@ -219,34 +218,18 @@ const processO3Data = (o3Data) => {
     return { o3Data: mappedO3Data, o3Score };
 };
 
-const FRONTEND_O4_MAP = {
-    "Never": "never",
-    "Occasionally": "occasionally",
-    "Regularly": "regularly",
-    "Quit > 6 months ago": "quit_gt_6m",
-    "1-2": "1-2",
-    "2-3 twice a week": "2-3_twice_week",
-    ">3": ">3"
-};
 const processO4Data = (o4Data) => {
-    // Look up the value from the frontend in the new map
-    const smokingValue = FRONTEND_O4_MAP[o4Data.smoking];
-    const alcoholValue = FRONTEND_O4_MAP[o4Data.alcohol];
+    // This is the new simplified logic. It uses the direct keys from the frontend payload.
+    // The scoring objects have been updated to match these keys.
+    const { smoking, alcohol } = o4Data;
     
-    // Validate the mapped values before proceeding
-    if (!SMOKING_SCORES.hasOwnProperty(smokingValue) || !ALCOHOL_SCORES.hasOwnProperty(alcoholValue)) {
+    if (!SMOKING_SCORES.hasOwnProperty(smoking) || !ALCOHOL_SCORES.hasOwnProperty(alcohol)) {
         throw new ValidationError(`Invalid value for smoking or alcohol.`);
     }
     
-    // Use the mapped values for the score calculation
-    const o4Score = SMOKING_SCORES[smokingValue] + ALCOHOL_SCORES[alcoholValue];
+    const o4Score = SMOKING_SCORES[smoking] + ALCOHOL_SCORES[alcohol];
     
-    // You may also want to save the original frontend values for display purposes, 
-    // or the standardized backend values.
-    const finalO4Data = {
-        smoking: smokingValue, // or o4Data.smoking if you want the original string
-        alcohol: alcoholValue  // or o4Data.alcohol
-    };
+    const finalO4Data = { smoking, alcohol };
 
     return { o4Data: finalO4Data, o4Score };
 };
@@ -340,8 +323,10 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
         }
         
         const o2Metrics = validateAndCalculateScores(o2Data);
+        // --- FIX: This is the corrected o4Data processing ---
+        const o4Metrics = processO4Data(o4Data); 
+
         const o3Metrics = processO3Data(o3Data);
-        const o4Metrics = processO4Data(o4Data);
         const o5Metrics = processO5Data(o5Data);
         const o6Metrics = processO6Data(o6Data);
 
