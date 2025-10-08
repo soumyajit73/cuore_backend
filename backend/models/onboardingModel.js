@@ -52,7 +52,7 @@ const onboardingSchema = new mongoose.Schema({
         alcohol: { type: String }
     },
     o5Data: {
-        min_exercise_per_week: { type: Number },
+        min_exercise_per_week: { type: String },
         preferred_ex_time: { type: String },
         rest_day: { type: String },
         eating_preference: { type: String },
@@ -61,7 +61,7 @@ const onboardingSchema = new mongoose.Schema({
         high_fiber: { type: String }
     },
     o6Data: {
-        sleep_hours: { type: Number },
+        sleep_hours: { type: String },
         wake_time: { type: String },
         problems_overwhelming: { type: String },
         enjoyable: { type: String },
@@ -87,10 +87,14 @@ const onboardingSchema = new mongoose.Schema({
 
 const OnboardingModel = mongoose.model('Onboarding', onboardingSchema, 'onboardings');
 
-// --- FIX: Updated the scoring maps to use the exact strings from the Figma design ---
-const SMOKING_SCORES = { "Never": 0, "Quit >6 months ago": 2, "Occasionally": 6, "Daily": 10 };
-const ALCOHOL_SCORES = { "Never": 0, "1-2 drinks occasionally": 2, "2 or more drinks at least twice per week": 4, ">3": 8 }; // The ">3" is an assumption from the previous code.
-const FOODS_SCORE_MAP = { "rarely": 8, "sometimes": 6, "often": 2, "daily": 0 };
+// --- Corrected Scoring Maps to match document rules ---
+const SMOKING_SCORES = { "Never": 0, "Quit >6 months ago": 2, "Occasionally": 6, "Regularly": 10 };
+const ALCOHOL_SCORES = { "Never": 0, "Quit >6 months ago": 2, "1-2 drinks occasionally": 4, "2 or more drinks at least twice per week": 8 }; 
+const FOODS_SCORE_MAP = { "Rarely": 8, "Sometimes": 6, "Often": 2, "Daily": 0 };
+const EXERCISE_SCORE_MAP = { "Less than 75 min": 8, "75 to 150 min": 3, "More than 150 min": -1 };
+const SLEEP_MAP = { "Less than 6 hours": 8, "6 to 7 hours": 4, "7 to 8 hours": 0, "8 to 9 hours": 1, "More than 9 hours": 4 };
+const STRESS_MAP = { "Never": 0, "Sometimes": 3, "Often": 6, "Always": 8 };
+
 const MIN_AGE = 18;
 const MAX_AGE = 88;
 const MIN_HEIGHT = 120;
@@ -99,64 +103,21 @@ const MIN_WEIGHT = 25;
 const MAX_WEIGHT = 200;
 const MIN_WAIST = 15;
 const MAX_WAIST = 75;
-const SLEEP_MAP = { "<6": 8, "6-7": 4, "7-8": 0, "8-9": 1, ">9": 4 };
-const STRESS_MAP = { "never": 0, "sometimes": 3, "often": 6, "always": 8 };
 
-// O5 Constants and Scoring Functions
-function score_exercise(min_ex_per_week) {
-    if (min_ex_per_week < 90) return 8;
-    if (min_ex_per_week <= 150) return 3;
-    return -1;
-}
-
-function score_foods(fruits_veg, processed, high_fiber) {
-    return FOODS_SCORE_MAP[fruits_veg] + FOODS_SCORE_MAP[processed] + FOODS_SCORE_MAP[high_fiber];
-}
-
-// O6 Constants and Scoring Functions
-function score_o6(sleep_hours_str, problems_over, enjoyable, felt_nervous) {
-    const lookupSleep = (hours) => {
-        if (hours < 6) return SLEEP_MAP["<6"];
-        if (hours <= 7) return SLEEP_MAP["6-7"];
-        if (hours <= 8) return SLEEP_MAP["7-8"];
-        if (hours <= 9) return SLEEP_MAP["8-9"];
-        return SLEEP_MAP[">9"];
-    };
-    
-    let sleepScore;
-    if (typeof sleep_hours_str === 'number') {
-        sleepScore = lookupSleep(sleep_hours_str);
-    } else {
-        sleepScore = SLEEP_MAP[sleep_hours_str] || 0;
-    }
-    const stress_avg = (STRESS_MAP[problems_over] + STRESS_MAP[enjoyable] + STRESS_MAP[felt_nervous]) / 3;
-    return sleepScore + stress_avg;
-}
-
-// Validation and Scoring Functions for O2
 const roundTo = (val, decimals) => Math.round(val * Math.pow(10, decimals)) / Math.pow(10, decimals);
+
 const validateAndCalculateScores = (data) => {
     const { age, gender, height_cm, weight_kg, waist_cm } = data;
     const parsedAge = parseInt(age);
-    if (isNaN(parsedAge) || parsedAge < MIN_AGE || parsedAge > MAX_AGE) {
-        throw new ValidationError(`Age must be between ${MIN_AGE} and ${MAX_AGE}`);
-    }
+    if (isNaN(parsedAge) || parsedAge < MIN_AGE || parsedAge > MAX_AGE) throw new ValidationError(`Age must be between ${MIN_AGE} and ${MAX_AGE}`);
     const parsedGender = gender.toLowerCase();
-    if (!["male", "female", "other"].includes(parsedGender)) {
-        throw new ValidationError("Invalid gender. Must be 'male', 'female', or 'other'");
-    }
+    if (!["male", "female", "other"].includes(parsedGender)) throw new ValidationError("Invalid gender. Must be 'male', 'female', or 'other'");
     const parsedHeight = parseFloat(height_cm);
-    if (isNaN(parsedHeight) || parsedHeight < MIN_HEIGHT || parsedHeight > MAX_HEIGHT) {
-        throw new ValidationError(`Height must be between ${MIN_HEIGHT} and ${MAX_HEIGHT}`);
-    }
+    if (isNaN(parsedHeight) || parsedHeight < MIN_HEIGHT || parsedHeight > MAX_HEIGHT) throw new ValidationError(`Height must be between ${MIN_HEIGHT} and ${MAX_HEIGHT}`);
     const parsedWeight = parseFloat(weight_kg);
-    if (isNaN(parsedWeight) || parsedWeight < MIN_WEIGHT || parsedWeight > MAX_WEIGHT) {
-        throw new ValidationError(`Weight must be between ${MIN_WEIGHT} and ${MAX_WEIGHT}`);
-    }
+    if (isNaN(parsedWeight) || parsedWeight < MIN_WEIGHT || parsedWeight > MAX_WEIGHT) throw new ValidationError(`Weight must be between ${MIN_WEIGHT} and ${MAX_WEIGHT}`);
     const parsedWaist = parseFloat(waist_cm);
-    if (isNaN(parsedWaist) || parsedWaist < MIN_WAIST || parsedWaist > MAX_WAIST) {
-        throw new ValidationError(`Waist must be between ${MIN_WAIST} and ${MAX_WAIST}`);
-    }
+    if (isNaN(parsedWaist) || parsedWaist < MIN_WAIST || parsedWaist > MAX_WAIST) throw new ValidationError(`Waist must be between ${MIN_WAIST} and ${MAX_WAIST}`);
     const calculateBmi = (weight_kg, height_cm) => roundTo((weight_kg / Math.pow(height_cm, 2)) * 10000.0, 1);
     const scoreAge = (age, gender) => {
         if (gender === "male" || gender === "other") return age < 20 ? 0 : (age > 45 ? 4 : 2);
@@ -170,25 +131,22 @@ const validateAndCalculateScores = (data) => {
         return 0;
     };
     const scoreWthr = (waist_cm, height_cm) => {
-        const wthr = roundTo(waist_cm / height_cm, 2);
+        const wthr = roundTo(waist_cm / (height_cm * 0.393), 2);
         return wthr < 0.47 ? -1 : (wthr > 0.52 ? 4 : 2);
     };
     const bmi = calculateBmi(parsedWeight, parsedHeight);
-    const wthr = roundTo(parsedWaist / parsedHeight, 2);
+    const wthr = roundTo(parsedWaist / (parsedHeight * 0.393), 2);
     const ageScore = scoreAge(parsedAge, parsedGender);
     const genderScore = scoreGender(parsedGender);
     const bmiScore = scoreBmi(bmi, parsedGender);
     const wthrScore = scoreWthr(parsedWaist, parsedHeight);
     return {
-        o2Data: {
-            age: parsedAge, gender: parsedGender, height_cm: parsedHeight, weight_kg: parsedWeight, waist_cm: parsedWaist
-        },
+        o2Data: { age: parsedAge, gender: parsedGender, height_cm: parsedHeight, weight_kg: parsedWeight, waist_cm: parsedWaist },
         derivedMetrics: { bmi, wthr },
         scores: { ageScore, genderScore, bmiScore, wthrScore }
     };
 };
 
-// O3, O4, O5, O6 Processing Functions
 const processO3Data = (o3Data) => {
     const selectedOptions = o3Data.selectedOptions || [];
     const q1 = selectedOptions.includes("One of my parents was diagnosed with diabetes before the age of 60");
@@ -196,63 +154,54 @@ const processO3Data = (o3Data) => {
     const q3 = selectedOptions.includes("I have Hypertension (High blood pressure)");
     const q4 = selectedOptions.includes("I have Diabetes (High blood sugar)");
     const q5 = selectedOptions.includes("I feel short of breath or experience chest discomfort even during mild activity or at rest");
-    const q6 = selectedOptions.includes("I've noticed an increase in hunger, thirst, or or the need to urinate frequently");
+    const q6 = selectedOptions.includes("I've noticed an increase in hunger, thirst, or the need to urinate frequently");
 
     const o3Score = (q1 ? 2 : 0) + (q2 ? 2 : 0) + (q3 ? 4 : 0) + (q4 ? 6 : 0) + (q5 ? 8 : 0) + (q6 ? 4 : 0);
-    
     const originalOtherConditions = o3Data.other_conditions || "";
     const updatedFlags = { hasHypertension: q3, hasDiabetes: q4 };
-    
     const htnSynonyms = /hypertension|htn|high\sblood\spressure|bp/i;
     if (htnSynonyms.test(originalOtherConditions)) updatedFlags.hasHypertension = true;
-    
     const dmSynonyms = /diabetes|dm|high\sblood\ssugar|sugar/i;
     if (dmSynonyms.test(originalOtherConditions)) updatedFlags.hasDiabetes = true;
 
-    const mappedO3Data = {
-        q1, q2, q3, q4, q5, q6,
-        other_conditions: originalOtherConditions,
-        ...updatedFlags
-    };
-
+    const mappedO3Data = { q1, q2, q3, q4, q5, q6, other_conditions: originalOtherConditions, ...updatedFlags };
     return { o3Data: mappedO3Data, o3Score };
 };
 
 const processO4Data = (o4Data) => {
-    // This is the new simplified logic. It uses the direct keys from the frontend payload.
-    // The scoring objects have been updated to match these keys.
     const { smoking, alcohol } = o4Data;
-    
     if (!SMOKING_SCORES.hasOwnProperty(smoking) || !ALCOHOL_SCORES.hasOwnProperty(alcohol)) {
         throw new ValidationError(`Invalid value for smoking or alcohol.`);
     }
-    
     const o4Score = SMOKING_SCORES[smoking] + ALCOHOL_SCORES[alcohol];
-    
-    const finalO4Data = { smoking, alcohol };
-
-    return { o4Data: finalO4Data, o4Score };
+    return { o4Data: { smoking, alcohol }, o4Score };
 };
 
 const processO5Data = (o5Data) => {
-    if (!FOODS_SCORE_MAP.hasOwnProperty(o5Data.fruits_veg) || !FOODS_SCORE_MAP.hasOwnProperty(o5Data.processed_food) || !FOODS_SCORE_MAP.hasOwnProperty(o5Data.high_fiber)) {
+    const { min_exercise_per_week, fruits_veg, processed_food, high_fiber } = o5Data;
+    if (!EXERCISE_SCORE_MAP.hasOwnProperty(min_exercise_per_week)) {
+        throw new ValidationError(`Invalid value for min_exercise_per_week.`);
+    }
+    if (!FOODS_SCORE_MAP.hasOwnProperty(fruits_veg) || !FOODS_SCORE_MAP.hasOwnProperty(processed_food) || !FOODS_SCORE_MAP.hasOwnProperty(high_fiber)) {
         throw new ValidationError("Invalid value for one of the food-related fields.");
     }
-    const exerciseScore = score_exercise(o5Data.min_exercise_per_week);
-    const foodsScore = score_foods(o5Data.fruits_veg, o5Data.processed_food, o5Data.high_fiber);
+    const exerciseScore = EXERCISE_SCORE_MAP[min_exercise_per_week];
+    const foodsScore = FOODS_SCORE_MAP[fruits_veg] + FOODS_SCORE_MAP[processed_food] + FOODS_SCORE_MAP[high_fiber];
     const o5Score = exerciseScore + foodsScore;
     return { o5Data, o5Score };
 };
 
 const processO6Data = (o6Data) => {
     const { sleep_hours, problems_overwhelming, enjoyable, felt_nervous } = o6Data;
-    if (typeof sleep_hours !== 'number' && !SLEEP_MAP.hasOwnProperty(sleep_hours)) {
+    if (!SLEEP_MAP.hasOwnProperty(sleep_hours)) {
         throw new ValidationError(`Invalid sleep_hours value: ${sleep_hours}.`);
     }
     if (!STRESS_MAP.hasOwnProperty(problems_overwhelming) || !STRESS_MAP.hasOwnProperty(enjoyable) || !STRESS_MAP.hasOwnProperty(felt_nervous)) {
         throw new ValidationError("Invalid value for one of the stress-related fields.");
     }
-    const o6Score = score_o6(sleep_hours, problems_overwhelming, enjoyable, felt_nervous);
+    const sleepScore = SLEEP_MAP[sleep_hours];
+    const stress_avg = (STRESS_MAP[problems_overwhelming] + STRESS_MAP[enjoyable] + STRESS_MAP[felt_nervous]) / 3;
+    const o6Score = sleepScore + stress_avg;
     return { o6Data, o6Score };
 };
 
@@ -261,16 +210,15 @@ const score_o2_sat = (value_pct) => value_pct > 95 ? 0 : value_pct >= 93 ? 4 : v
 const score_hr = (hr) => hr < 65 || hr > 95 ? 4 : 0;
 const score_bp_upper = (val) => val < 100 ? 2 : val <= 124 ? 0 : val <= 139 ? 3 : val <= 160 ? 6 : 8;
 const score_bp_lower = (val) => val < 70 ? 2 : val <= 84 ? 0 : val <= 99 ? 3 : val <= 110 ? 6 : 8;
-const score_bs_f = (val) => val < 70 ? 2 : val <= 100 ? 0 : val <= 125 ? 4 : 8;
-const score_bs_am = (val) => val < 70 ? 2 : val <= 140 ? 0 : val <= 160 ? 4 : 8;
-const score_a1c = (val) => val < 5.7 ? 0 : val <= 6.4 ? 4 : 8;
-const score_hdl = (val) => val >= 60 ? 0 : val >= 40 ? 2 : 4;
-const score_ldl = (val) => val < 100 ? 0 : val <= 129 ? 2 : val <= 159 ? 4 : val <= 189 ? 6 : 8;
-const score_trig = (val) => val < 150 ? 0 : val <= 199 ? 2 : val <= 499 ? 4 : 8;
+const score_bs_f = (val) => val < 80 ? 2 : val <= 100 ? 0 : val <= 130 ? 2 : val <= 160 ? 6 : 8;
+const score_bs_am = (val) => val < 110 ? 2 : val <= 140 ? 0 : val <= 190 ? 2 : val <= 240 ? 6 : 8;
+const score_a1c = (val) => val < 5.8 ? 0 : val <= 8.6 ? 4 : 8;
+const score_hdl = (val) => val < 50 ? 4 : val > 60 ? -1 : 2;
+const score_ldl = (val) => val < 71 ? 0 : val > 139 ? 4 : 2;
+const score_trig = (val) => val < 131 ? 0 : val > 159 ? 4 : 2;
 const score_hscrp = (val) => val < 1 ? 0 : val <= 3 ? 2 : 4;
-const score_trig_hdl_ratio = (val) => val < 2 ? 0 : val <= 4 ? 2 : 4;
+const score_trig_hdl_ratio = (val) => val < 2.5 ? 0 : val > 4.0 ? 8 : 3;
 
-// Autofill logic
 const getAutofillData = (totalScore) => {
     const round2 = (val) => roundTo(val, 2);
     let data = totalScore <= 15 ? { o2_sat: 97, pulse: 78, bp_upper: 122, bp_lower: 80, bs_f: 90, bs_am: 118, HDL: 60, LDL: 120, Trig: 130, HsCRP: 0.1 }
@@ -290,9 +238,9 @@ const calculateCuoreScore = (allData, allScores) => {
     const wthrScore = safeGetScore('wthrScore');
     const o3Score = safeGetScore('o3Score');
     const o4Score = safeGetScore('o4Score');
-    const minExerciseScore = score_exercise(safeGet(allData.o5Data, 'min_exercise_per_week'));
-    const foodsScore = (score_foods(safeGet(allData.o5Data, 'fruits_veg'), safeGet(allData.o5Data, 'processed_food'), safeGet(allData.o5Data, 'high_fiber')) / 3);
-    const sleepScore = (safeGet(allData.o6Data, 'sleep_hours') != null) ? (SLEEP_MAP[safeGet(allData.o6Data, 'sleep_hours')] || 0) : 0;
+    const minExerciseScore = EXERCISE_SCORE_MAP[safeGet(allData.o5Data, 'min_exercise_per_week')];
+    const foodsScore = (FOODS_SCORE_MAP[safeGet(allData.o5Data, 'fruits_veg')] + FOODS_SCORE_MAP[safeGet(allData.o5Data, 'processed_food')] + FOODS_SCORE_MAP[safeGet(allData.o5Data, 'high_fiber')]);
+    const sleepScore = SLEEP_MAP[safeGet(allData.o6Data, 'sleep_hours')];
     const stressScore = ((STRESS_MAP[safeGet(allData.o6Data, 'problems_overwhelming')] || 0) + (STRESS_MAP[safeGet(allData.o6Data, 'enjoyable')] || 0) + (STRESS_MAP[safeGet(allData.o6Data, 'felt_nervous')] || 0)) / 3;
     const o2SatScore = score_o2_sat(safeGet(allData.o7Data, 'o2_sat'));
     const hrScore = score_hr(safeGet(allData.o7Data, 'pulse'));
@@ -323,7 +271,6 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
         }
         
         const o2Metrics = validateAndCalculateScores(o2Data);
-        // --- FIX: This is the corrected o4Data processing ---
         const o4Metrics = processO4Data(o4Data); 
 
         const o3Metrics = processO3Data(o3Data);
