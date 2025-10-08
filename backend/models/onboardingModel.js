@@ -101,8 +101,8 @@ const MIN_HEIGHT = 120;
 const MAX_HEIGHT = 210;
 const MIN_WEIGHT = 25;
 const MAX_WEIGHT = 200;
-const MIN_WAIST = 20;  // minimum waist in inches
-const MAX_WAIST = 60;  // maximum waist in inches
+const MIN_WAIST = 15;   // back to cm
+const MAX_WAIST = 75;  // maximum waist in inches
 
 const roundTo = (val, decimals) => Math.round(val * Math.pow(10, decimals)) / Math.pow(10, decimals);
 
@@ -110,16 +110,21 @@ const validateAndCalculateScores = (data) => {
     const { age, gender, height_cm, weight_kg, waist_cm } = data;
     const parsedAge = parseInt(age);
     if (isNaN(parsedAge) || parsedAge < MIN_AGE || parsedAge > MAX_AGE) throw new ValidationError(`Age must be between ${MIN_AGE} and ${MAX_AGE}`);
+    
     const parsedGender = gender.toLowerCase();
     if (!["male", "female", "other"].includes(parsedGender)) throw new ValidationError("Invalid gender. Must be 'male', 'female', or 'other'");
+    
     const parsedHeight = parseFloat(height_cm);
-    if (isNaN(parsedHeight) || parsedHeight < MIN_HEIGHT || parsedHeight > MAX_HEIGHT) throw new ValidationError(`Height must be between ${MIN_HEIGHT} and ${MAX_HEIGHT}`);
+    if (isNaN(parsedHeight) || parsedHeight < MIN_HEIGHT || parsedHeight > MAX_HEIGHT) {
+        throw new ValidationError(`Height must be between ${MIN_HEIGHT} and ${MAX_HEIGHT} cm`);
+    }
+    
     const parsedWeight = parseFloat(weight_kg);
     if (isNaN(parsedWeight) || parsedWeight < MIN_WEIGHT || parsedWeight > MAX_WEIGHT) throw new ValidationError(`Weight must be between ${MIN_WEIGHT} and ${MAX_WEIGHT}`);
+    
     const parsedWaist = parseFloat(waist_cm);
-    // const waistInInches = parsedWaist * 0.393701;
-    if (isNaN(waistInInches) || waistInInches < MIN_WAIST || waistInInches > MAX_WAIST) {
-        throw new ValidationError(`Waist must be between ${MIN_WAIST} and ${MAX_WAIST} inches`);
+    if (isNaN(parsedWaist) || parsedWaist < MIN_WAIST || parsedWaist > MAX_WAIST) {
+        throw new ValidationError(`Waist must be between ${MIN_WAIST} and ${MAX_WAIST} cm`);
     }
     const calculateBmi = (weight_kg, height_cm) => roundTo((weight_kg / Math.pow(height_cm, 2)) * 10000.0, 1);
     const scoreAge = (age, gender) => {
@@ -133,10 +138,8 @@ const validateAndCalculateScores = (data) => {
         if (gender === "female") return bmi < 23.5 ? -1 : (bmi > 26.5 ? 4 : 2);
         return 0;
     };
-     const scoreWthr = (waist_cm, height_cm) => {
-        // const waistInches = waist_cm * 0.393701;
-        const heightInches = height_cm * 0.393701;
-        const wthr = roundTo(waistInches / heightInches, 2);
+    const scoreWthr = (waist_cm, height_cm) => {
+        const wthr = roundTo(waist_cm / height_cm, 2);
         return wthr < 0.47 ? -1 : (wthr > 0.52 ? 4 : 2);
     };
     const bmi = calculateBmi(parsedWeight, parsedHeight);
