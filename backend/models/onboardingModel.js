@@ -117,7 +117,7 @@ const validateAndCalculateScores = (data) => {
     const parsedWeight = parseFloat(weight_kg);
     if (isNaN(parsedWeight) || parsedWeight < MIN_WEIGHT || parsedWeight > MAX_WEIGHT) throw new ValidationError(`Weight must be between ${MIN_WEIGHT} and ${MAX_WEIGHT}`);
     const parsedWaist = parseFloat(waist_cm);
-    const waistInInches = parsedWaist * 0.393701;
+    // const waistInInches = parsedWaist * 0.393701;
     if (isNaN(waistInInches) || waistInInches < MIN_WAIST || waistInInches > MAX_WAIST) {
         throw new ValidationError(`Waist must be between ${MIN_WAIST} and ${MAX_WAIST} inches`);
     }
@@ -134,7 +134,7 @@ const validateAndCalculateScores = (data) => {
         return 0;
     };
      const scoreWthr = (waist_cm, height_cm) => {
-        const waistInches = waist_cm * 0.393701;
+        // const waistInches = waist_cm * 0.393701;
         const heightInches = height_cm * 0.393701;
         const wthr = roundTo(waistInches / heightInches, 2);
         return wthr < 0.47 ? -1 : (wthr > 0.52 ? 4 : 2);
