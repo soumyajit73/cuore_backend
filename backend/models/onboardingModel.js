@@ -92,7 +92,7 @@ const SMOKING_SCORES = { "Never": 0, "Quit >6 months ago": 2, "Occasionally": 6,
 const ALCOHOL_SCORES = { "Never": 0, "Quit >6 months ago": 2, "1-2 drinks occasionally": 4, "2 or more drinks at least twice per week": 8 }; 
 const FOODS_SCORE_MAP = { "Rarely": 8, "Sometimes": 6, "Often": 2, "Daily": 0 };
 const EXERCISE_SCORE_MAP = { "Less than 75 min": 8, "75 to 150 min": 3, "More than 150 min": -1 };
-const SLEEP_MAP = { "Less than 6 hours": 8, "6 to 7 hours": 4, "7 to 8 hours": 0, "8 to 9 hours": 1, "More than 9 hours": 4 };
+const SLEEP_MAP = { "Less than 6 hours": 8, "Between 6 to 7 hours": 4, "Between 7 to 8 hours": 0, "Between 8 to 9 hours": 1, "More than 9 hours": 4 };
 const STRESS_MAP = { "Never": 0, "Sometimes": 3, "Often": 6, "Always": 8 };
 
 const MIN_AGE = 18;
@@ -101,8 +101,8 @@ const MIN_HEIGHT = 120;
 const MAX_HEIGHT = 210;
 const MIN_WEIGHT = 25;
 const MAX_WEIGHT = 200;
-const MIN_WAIST = 15;
-const MAX_WAIST = 75;
+const MIN_WAIST = 20;  // minimum waist in inches
+const MAX_WAIST = 60;  // maximum waist in inches
 
 const roundTo = (val, decimals) => Math.round(val * Math.pow(10, decimals)) / Math.pow(10, decimals);
 
@@ -117,7 +117,10 @@ const validateAndCalculateScores = (data) => {
     const parsedWeight = parseFloat(weight_kg);
     if (isNaN(parsedWeight) || parsedWeight < MIN_WEIGHT || parsedWeight > MAX_WEIGHT) throw new ValidationError(`Weight must be between ${MIN_WEIGHT} and ${MAX_WEIGHT}`);
     const parsedWaist = parseFloat(waist_cm);
-    if (isNaN(parsedWaist) || parsedWaist < MIN_WAIST || parsedWaist > MAX_WAIST) throw new ValidationError(`Waist must be between ${MIN_WAIST} and ${MAX_WAIST}`);
+    const waistInInches = parsedWaist * 0.393701;
+    if (isNaN(waistInInches) || waistInInches < MIN_WAIST || waistInInches > MAX_WAIST) {
+        throw new ValidationError(`Waist must be between ${MIN_WAIST} and ${MAX_WAIST} inches`);
+    }
     const calculateBmi = (weight_kg, height_cm) => roundTo((weight_kg / Math.pow(height_cm, 2)) * 10000.0, 1);
     const scoreAge = (age, gender) => {
         if (gender === "male" || gender === "other") return age < 20 ? 0 : (age > 45 ? 4 : 2);
@@ -130,8 +133,10 @@ const validateAndCalculateScores = (data) => {
         if (gender === "female") return bmi < 23.5 ? -1 : (bmi > 26.5 ? 4 : 2);
         return 0;
     };
-    const scoreWthr = (waist_cm, height_cm) => {
-        const wthr = roundTo(waist_cm / (height_cm * 0.393), 2);
+     const scoreWthr = (waist_cm, height_cm) => {
+        const waistInches = waist_cm * 0.393701;
+        const heightInches = height_cm * 0.393701;
+        const wthr = roundTo(waistInches / heightInches, 2);
         return wthr < 0.47 ? -1 : (wthr > 0.52 ? 4 : 2);
     };
     const bmi = calculateBmi(parsedWeight, parsedHeight);
