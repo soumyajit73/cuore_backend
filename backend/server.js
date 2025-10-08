@@ -42,3 +42,4 @@ app.use('/api/v1/users', timelineRoutes); // This is still a conflict
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
 });
+

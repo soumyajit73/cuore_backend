@@ -1,6 +1,5 @@
-// New controller logic
-
 const model = require('../models/onboardingModel.js');
+
 exports.submitFinalOnboarding = async (req, res) => {
     const userId = req.user.userId;
     const payload = req.body;
@@ -8,7 +7,7 @@ exports.submitFinalOnboarding = async (req, res) => {
     try {
         const result = await model.processAndSaveFinalSubmission(userId, payload);
         
-        // --- NEW LOGIC: Construct the response body from the model result ---
+        // This is the single, consistent response body object.
         const responseBody = {
             status: "success",
             message: "Onboarding completed successfully",
@@ -88,13 +87,41 @@ exports.submitFinalOnboarding = async (req, res) => {
             }
         };
 
-        return res.status(201).json(responseBody);
+        // --- NEW LOGIC: Use a conditional to determine the status code and message ---
+        if (req.method === 'POST') {
+            return res.status(201).json(responseBody);
+        } else { // This will be true for PUT requests
+            // Change the message for reassessment
+            responseBody.message = "Reassessment completed successfully";
+            return res.status(200).json(responseBody);
+        }
 
     } catch (error) {
         if (error instanceof model.ValidationError) {
             return res.status(400).json({ error: error.message });
         }
         console.error('Internal server error:', error);
+        return res.status(500).json({ error: "Internal server error." });
+    }
+};
+
+exports.getOnboardingData = async (req, res) => {
+    const userId = req.user.userId;
+
+    try {
+        const onboardingData = await model.getOnboardingDataByUserId(userId);
+        
+        if (!onboardingData) {
+            return res.status(404).json({ message: "Onboarding data not found for this user." });
+        }
+
+        return res.status(200).json({
+            status: "success",
+            message: "Onboarding data retrieved successfully",
+            data: onboardingData
+        });
+    } catch (error) {
+        console.error('Error fetching onboarding data:', error);
         return res.status(500).json({ error: "Internal server error." });
     }
 };

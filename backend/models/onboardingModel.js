@@ -9,7 +9,6 @@ class ValidationError extends Error {
     }
 }
 
-// Define the schema for the user's full onboarding data
 const onboardingSchema = new mongoose.Schema({
     userId: { type: String, required: true, unique: true },
     onboardingVersion: { type: String, required: true },
@@ -87,9 +86,8 @@ const onboardingSchema = new mongoose.Schema({
 
 const OnboardingModel = mongoose.model('Onboarding', onboardingSchema, 'onboardings');
 
-// --- Corrected Scoring Maps to match document rules ---
 const SMOKING_SCORES = { "Never": 0, "Quit >6 months ago": 2, "Occasionally": 6, "Regularly": 10 };
-const ALCOHOL_SCORES = { "Never": 0, "Quit >6 months ago": 2, "1-2 drinks occasionally": 4, "2 or more drinks at least twice per week": 8 }; 
+const ALCOHOL_SCORES = { "Never": 0, "Quit >6 months ago": 2, "1-2 drinks occasionally": 4, "2 or more drinks at least twice per week": 8 };  // Corrected alcohol scores from your document
 const FOODS_SCORE_MAP = { "Rarely": 8, "Sometimes": 6, "Often": 2, "Daily": 0 };
 const EXERCISE_SCORE_MAP = { "Less than 75 min": 8, "75 to 150 min": 3, "More than 150 min": -1 };
 const SLEEP_MAP = { "Less than 6 hours": 8, "Between 6 to 7 hours": 4, "Between 7 to 8 hours": 0, "Between 8 to 9 hours": 1, "More than 9 hours": 4 };
@@ -101,8 +99,8 @@ const MIN_HEIGHT = 120;
 const MAX_HEIGHT = 210;
 const MIN_WEIGHT = 25;
 const MAX_WEIGHT = 200;
-const MIN_WAIST = 15;   // back to cm
-const MAX_WAIST = 75;  // maximum waist in inches
+const MIN_WAIST = 15;
+const MAX_WAIST = 75;
 
 const roundTo = (val, decimals) => Math.round(val * Math.pow(10, decimals)) / Math.pow(10, decimals);
 
@@ -110,22 +108,14 @@ const validateAndCalculateScores = (data) => {
     const { age, gender, height_cm, weight_kg, waist_cm } = data;
     const parsedAge = parseInt(age);
     if (isNaN(parsedAge) || parsedAge < MIN_AGE || parsedAge > MAX_AGE) throw new ValidationError(`Age must be between ${MIN_AGE} and ${MAX_AGE}`);
-    
     const parsedGender = gender.toLowerCase();
     if (!["male", "female", "other"].includes(parsedGender)) throw new ValidationError("Invalid gender. Must be 'male', 'female', or 'other'");
-    
     const parsedHeight = parseFloat(height_cm);
-    if (isNaN(parsedHeight) || parsedHeight < MIN_HEIGHT || parsedHeight > MAX_HEIGHT) {
-        throw new ValidationError(`Height must be between ${MIN_HEIGHT} and ${MAX_HEIGHT} cm`);
-    }
-    
+    if (isNaN(parsedHeight) || parsedHeight < MIN_HEIGHT || parsedHeight > MAX_HEIGHT) throw new ValidationError(`Height must be between ${MIN_HEIGHT} and ${MAX_HEIGHT} cm`);
     const parsedWeight = parseFloat(weight_kg);
     if (isNaN(parsedWeight) || parsedWeight < MIN_WEIGHT || parsedWeight > MAX_WEIGHT) throw new ValidationError(`Weight must be between ${MIN_WEIGHT} and ${MAX_WEIGHT}`);
-    
     const parsedWaist = parseFloat(waist_cm);
-    if (isNaN(parsedWaist) || parsedWaist < MIN_WAIST || parsedWaist > MAX_WAIST) {
-        throw new ValidationError(`Waist must be between ${MIN_WAIST} and ${MAX_WAIST} cm`);
-    }
+    if (isNaN(parsedWaist) || parsedWaist < MIN_WAIST || parsedWaist > MAX_WAIST) throw new ValidationError(`Waist must be between ${MIN_WAIST} and ${MAX_WAIST} cm`);
     const calculateBmi = (weight_kg, height_cm) => roundTo((weight_kg / Math.pow(height_cm, 2)) * 10000.0, 1);
     const scoreAge = (age, gender) => {
         if (gender === "male" || gender === "other") return age < 20 ? 0 : (age > 45 ? 4 : 2);
@@ -139,7 +129,7 @@ const validateAndCalculateScores = (data) => {
         return 0;
     };
     const scoreWthr = (waist_cm, height_cm) => {
-        const wthr = roundTo(waist_cm / height_cm, 2);
+        const wthr = roundTo(waist_cm / (height_cm * 0.393), 2);
         return wthr < 0.47 ? -1 : (wthr > 0.52 ? 4 : 2);
     };
     const bmi = calculateBmi(parsedWeight, parsedHeight);
@@ -188,7 +178,7 @@ const processO4Data = (o4Data) => {
 const processO5Data = (o5Data) => {
     const { min_exercise_per_week, fruits_veg, processed_food, high_fiber } = o5Data;
     if (!EXERCISE_SCORE_MAP.hasOwnProperty(min_exercise_per_week)) {
-        throw new ValidationError(`Invalid value for min_exercise_per_week.`);
+        throw new ValidationError(`Invalid value for min_exercise_per_week: ${min_exercise_per_week}.`);
     }
     if (!FOODS_SCORE_MAP.hasOwnProperty(fruits_veg) || !FOODS_SCORE_MAP.hasOwnProperty(processed_food) || !FOODS_SCORE_MAP.hasOwnProperty(high_fiber)) {
         throw new ValidationError("Invalid value for one of the food-related fields.");
@@ -213,7 +203,6 @@ const processO6Data = (o6Data) => {
     return { o6Data, o6Score };
 };
 
-// O7 Scoring Functions
 const score_o2_sat = (value_pct) => value_pct > 95 ? 0 : value_pct >= 93 ? 4 : value_pct >= 91 ? 6 : 10;
 const score_hr = (hr) => hr < 65 || hr > 95 ? 4 : 0;
 const score_bp_upper = (val) => val < 100 ? 2 : val <= 124 ? 0 : val <= 139 ? 3 : val <= 160 ? 6 : 8;
@@ -268,10 +257,7 @@ const calculateCuoreScore = (allData, allScores) => {
 exports.processAndSaveFinalSubmission = async (userId, payload) => {
     try {
         const existingDoc = await OnboardingModel.findOne({ userId });
-        if (existingDoc) {
-            throw new ValidationError("Onboarding data for this user already exists. Cannot submit again.");
-        }
-
+        
         const { o2Data, o3Data, o4Data, o5Data, o6Data, o7Data = {} } = payload;
         
         if (!o2Data || !o3Data || !o4Data || !o5Data || !o6Data) {
@@ -280,7 +266,6 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
         
         const o2Metrics = validateAndCalculateScores(o2Data);
         const o4Metrics = processO4Data(o4Data); 
-
         const o3Metrics = processO3Data(o3Data);
         const o5Metrics = processO5Data(o5Data);
         const o6Metrics = processO6Data(o6Data);
@@ -339,20 +324,47 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
         const finalCuoreScore = calculateCuoreScore(payload, allScores);
         allScores.cuoreScore = finalCuoreScore;
         
-        const newOnboardingDoc = await OnboardingModel.create({
-            userId,
-            onboardingVersion: "7",
-            o2Data: o2Metrics.o2Data,
-            derivedMetrics: o2Metrics.derivedMetrics,
-            o3Data: o3Metrics.o3Data,
-            o4Data: o4Metrics.o4Data,
-            o5Data: o5Metrics.o5Data,
-            o6Data: o6Metrics.o6Data,
-            o7Data: processedO7Data,
-            scores: allScores,
-        });
+        // --- FIX: Logic to handle both initial submission and reassessment ---
+        let finalOnboardingDoc;
+        if (existingDoc) {
+             finalOnboardingDoc = await OnboardingModel.findOneAndUpdate(
+                { userId },
+                {
+                    $set: {
+                        onboardingVersion: "7",
+                        o2Data: o2Metrics.o2Data,
+                        derivedMetrics: o2Metrics.derivedMetrics,
+                        o3Data: o3Metrics.o3Data,
+                        o4Data: o4Metrics.o4Data,
+                        o5Data: o5Metrics.o5Data,
+                        o6Data: o6Metrics.o6Data,
+                        o7Data: processedO7Data,
+                        scores: allScores,
+                        timestamp: Date.now() // Update timestamp for reassessment
+                    }
+                },
+                { new: true, upsert: false, runValidators: true }
+            );
+        } else {
+            finalOnboardingDoc = await OnboardingModel.create({
+                userId,
+                onboardingVersion: "7",
+                o2Data: o2Metrics.o2Data,
+                derivedMetrics: o2Metrics.derivedMetrics,
+                o3Data: o3Metrics.o3Data,
+                o4Data: o4Metrics.o4Data,
+                o5Data: o5Metrics.o5Data,
+                o6Data: o6Metrics.o6Data,
+                o7Data: processedO7Data,
+                scores: allScores,
+            });
+        }
 
-        return newOnboardingDoc;
+        if (!finalOnboardingDoc) {
+            throw new ValidationError("Failed to save onboarding data.");
+        }
+
+        return finalOnboardingDoc;
     } catch (error) {
         console.error('Error:', error.name, error.message);
         if (error.name === 'ValidationError') {
