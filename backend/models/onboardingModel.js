@@ -373,9 +373,22 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
         throw new Error("Internal Server Error");
     }
 };
+exports.getOnboardingDataByUserId = async (userId) => {
+    try {
+        const onboardingData = await OnboardingModel.findOne({ userId });
+        if (!onboardingData) {
+            return null;
+        }
+        return onboardingData;
+    } catch (error) {
+        console.error('Error in getOnboardingDataByUserId:', error);
+        throw error;
+    }
+};
 
 module.exports = {
     Onboarding: OnboardingModel,
     ValidationError,
     processAndSaveFinalSubmission: exports.processAndSaveFinalSubmission,
+    getOnboardingDataByUserId: exports.getOnboardingDataByUserId
 };
