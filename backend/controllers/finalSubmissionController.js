@@ -3,9 +3,11 @@ const model = require('../models/onboardingModel.js');
 exports.submitFinalOnboarding = async (req, res) => {
     const userId = req.user.userId;
     const payload = req.body;
+    const requestMethod = req.method; // Retrieve the request method (e.g., 'POST', 'PUT')
 
     try {
-        const result = await model.processAndSaveFinalSubmission(userId, payload);
+        // Pass the requestMethod to the model function
+        const result = await model.processAndSaveFinalSubmission(userId, payload, requestMethod);
         
         // This is the single, consistent response body object.
         const responseBody = {
@@ -87,15 +89,16 @@ exports.submitFinalOnboarding = async (req, res) => {
             }
         };
 
-        // --- NEW LOGIC: Use a conditional to determine the status code and message ---
-        if (req.method === 'POST') {
+        // The conditional now correctly checks the request method for the response message and status code.
+        if (requestMethod === 'POST') {
             return res.status(201).json(responseBody);
-        } else { // This will be true for PUT requests
-            // Change the message for reassessment
+        } else if (requestMethod === 'PUT') {
             responseBody.message = "Reassessment completed successfully";
             return res.status(200).json(responseBody);
+        } else {
+            // Fallback for any other unexpected method
+            return res.status(405).json({ message: "Method Not Allowed" });
         }
-
     } catch (error) {
         if (error instanceof model.ValidationError) {
             return res.status(400).json({ error: error.message });
