@@ -386,9 +386,269 @@ exports.getOnboardingDataByUserId = async (userId) => {
     }
 };
 
+const calculateTimeToTarget = (userData) => {
+    const { o2Data, o7Data, o3Data } = userData;
+    const { height_cm, weight_kg, gender } = o2Data;
+    const { bp_upper, bs_am } = o7Data;
+
+    // Calculate target weight based on gender
+    const heightInInches = (height_cm - 152.4) / 2.4;
+    const targetWeight = gender === 'male' ? 
+        52 + (1.9 * heightInInches) : 
+        50 + (1.7 * heightInInches);
+
+    // Calculate differences
+    const weightDiff = Math.abs(weight_kg - targetWeight) / 1.2;
+    const bpDiff = Math.abs(bp_upper - 120) / 2;
+    const bsDiff = Math.abs(bs_am - 160) / 10;
+
+    // Return highest value + 1
+    return Math.max(weightDiff, bpDiff, bsDiff) + 1;
+};
+
+const calculateMetabolicAge = (userData) => {
+    const { o2Data, scores } = userData;
+    const { age } = o2Data;
+    const { cuoreScore } = scores;
+
+    let multiplier = 1.2; // default for <= 50%
+    if (cuoreScore >= 75) {
+        multiplier = 0.95;
+    } else if (cuoreScore > 50 && cuoreScore < 75) {
+        multiplier = 1.1;
+    }
+
+    const metabolicAge = age * multiplier;
+    return {
+        metabolicAge: Math.round(metabolicAge),
+        gap: Math.round(metabolicAge - age)
+    };
+};
+
+const calculateWeightMetrics = (userData) => {
+    const { o2Data } = userData;
+    const { height_cm, weight_kg, gender } = o2Data;
+    
+    const heightInInches = (height_cm - 152.4) / 2.4;
+    const targetWeight = gender === 'male' ? 
+        52 + (1.9 * heightInInches) : 
+        50 + (1.7 * heightInInches);
+
+    const difference = ((weight_kg - targetWeight) / targetWeight) * 100;
+    
+    return {
+        current: weight_kg,
+        target: Math.round(targetWeight * 10) / 10,
+        difference: Math.round(difference * 10) / 10,
+        status: difference < 5 ? 'green' : 
+               difference < 15 ? 'orange' : 'red'
+    };
+};
+
+const calculateBMIMetrics = (userData) => {
+    const { o2Data, derivedMetrics } = userData;
+    const { gender } = o2Data;
+    const { bmi } = derivedMetrics;
+    
+    const targetBMI = gender === 'male' ? 22.5 : 23.5;
+    const difference = ((bmi - targetBMI) / targetBMI) * 100;
+
+    return {
+        current: bmi,
+        target: targetBMI,
+        difference: Math.round(difference * 10) / 10,
+        status: difference < 5 ? 'green' : 
+               difference < 15 ? 'orange' : 'red'
+    };
+};
+
+const calculateLifestyleScore = (userData) => {
+    const { o5Data, o6Data } = userData;
+    
+    // Calculate food score
+    const foodScore = (
+        FOODS_SCORE_MAP[o5Data.fruits_veg] + 
+        FOODS_SCORE_MAP[o5Data.processed_food] + 
+        FOODS_SCORE_MAP[o5Data.high_fiber]
+    ) / 3;
+
+    // Calculate exercise score
+    const exerciseScore = EXERCISE_SCORE_MAP[o5Data.min_exercise_per_week];
+
+    // Calculate sleep score
+    const sleepScore = SLEEP_MAP[o6Data.sleep_hours];
+
+    // Calculate stress score
+    const stressScore = (
+        STRESS_MAP[o6Data.problems_overwhelming] + 
+        STRESS_MAP[o6Data.enjoyable] + 
+        STRESS_MAP[o6Data.felt_nervous]
+    ) / 3;
+
+    // Calculate final lifestyle score
+    const lifestyleScore = (
+        (100 - foodScore * 12) +
+        (100 - exerciseScore * 12) +
+        (100 - sleepScore * 12) +
+        (100 - stressScore * 12)
+    ) / 4;
+
+    return {
+        score: Math.round(lifestyleScore),
+        status: lifestyleScore > 70 ? 'green' : 
+               lifestyleScore > 55 ? 'orange' : 'red'
+    };
+};
+const calculateRecommendedCalories = (userData) => {
+    const { o2Data, derivedMetrics } = userData;
+    const { age, gender, weight_kg, height_cm } = o2Data;
+    const { bmi } = derivedMetrics;
+
+    let baseCalories;
+    if (gender === 'male') {
+        baseCalories = 66.47 + (13.75 * weight_kg) + (5 * height_cm) - (6.75 * age);
+    } else {
+        baseCalories = 665.1 + (9.563 * weight_kg) + (1.85 * height_cm) - (4.67 * age);
+    }
+
+    // Apply multiplier based on BMI
+    if (bmi < 21) {
+        baseCalories *= 1.15;
+    } else if (bmi > 24) {
+        baseCalories *= 0.80;
+    }
+
+    // Round to nearest 100
+    return Math.round(baseCalories / 100) * 100;
+};
+
+const calculateRecommendedExercise = (o5Data) => {
+    const minExercise = o5Data.min_exercise_per_week;
+    if (minExercise === "Less than 75 min") return 15;
+    if (minExercise === "75 to 150 min") return 30;
+    return 45; // for "More than 150 min"
+};
+
+const calculateBPStatus = (userData) => {
+    const { bp_upper, bp_lower } = userData.o7Data;
+    
+    return {
+        upper: {
+            current: bp_upper,
+            target: 120,
+            status: bp_upper < 100 ? 'orange' :
+                    bp_upper <= 130 ? 'green' :
+                    bp_upper <= 145 ? 'orange' : 'red'
+        },
+        lower: {
+            current: bp_lower,
+            target: 80,
+            status: bp_lower < 64 ? 'orange' :
+                    bp_lower <= 82 ? 'green' :
+                    bp_lower <= 95 ? 'orange' : 'red'
+        }
+    };
+};
+
+const calculateBloodSugar = (userData) => {
+    const { bs_f, bs_am } = userData.o7Data;
+    const hasDiabetes = userData.o3Data.hasDiabetes;
+
+    return {
+        fasting: {
+            current: bs_f,
+            target: 100,
+            status: hasDiabetes ? 
+                (bs_f < 100 ? 'red' :
+                bs_f <= 139 ? 'green' :
+                bs_f <= 170 ? 'orange' : 'red') :
+                (bs_f < 100 ? 'green' :
+                bs_f <= 125 ? 'orange' : 'red')
+        },
+        afterMeal: {
+            current: bs_am,
+            target: hasDiabetes ? 160 : 140,
+            status: hasDiabetes ?
+                (bs_am < 130 ? 'red' :
+                bs_am <= 169 ? 'green' :
+                bs_am <= 220 ? 'orange' : 'red') :
+                (bs_am < 140 ? 'green' :
+                bs_am <= 200 ? 'orange' : 'red')
+        }
+    };
+};
+
+const calculateTrigHDLRatio = (userData) => {
+    const ratio = userData.o7Data.trig_hdl_ratio;
+    return {
+        current: ratio,
+        target: 2.6,
+        status: ratio < 2.8 ? 'green' :
+                ratio <= 4.0 ? 'orange' : 'red'
+    };
+};
+
+const calculateBodyFat = (userData) => {
+    const { age, gender } = userData.o2Data;
+    const { bmi } = userData.derivedMetrics;
+
+    const bodyFat = gender === 'male' ?
+        (1.2 * bmi) + (0.23 * age) - 16.2 :
+        (1.2 * bmi) + (0.23 * age) - 5.4;
+
+    const target = gender === 'male' ? 23 : 30;
+    const difference = ((bodyFat - target) / target) * 100;
+
+    return {
+        current: Math.round(bodyFat * 10) / 10,
+        target,
+        difference: Math.round(difference * 10) / 10,
+        status: difference < 5 ? 'green' :
+                difference < 15 ? 'orange' : 'red'
+    };
+};
+
+const calculateMainFocus = (userData) => {
+    const scores = [
+        { type: "Tobacco Cessation", score: SMOKING_SCORES[userData.o4Data.smoking] },
+        { type: "Nutrition", score: (FOODS_SCORE_MAP[userData.o5Data.fruits_veg] + 
+            FOODS_SCORE_MAP[userData.o5Data.processed_food] + 
+            FOODS_SCORE_MAP[userData.o5Data.high_fiber]) / 3 },
+        { type: "Fitness", score: EXERCISE_SCORE_MAP[userData.o5Data.min_exercise_per_week] },
+        { type: "Sleep", score: SLEEP_MAP[userData.o6Data.sleep_hours] },
+        { type: "Meditation", score: (STRESS_MAP[userData.o6Data.problems_overwhelming] + 
+            STRESS_MAP[userData.o6Data.enjoyable] + 
+            STRESS_MAP[userData.o6Data.felt_nervous]) / 3 }
+    ];
+
+    return scores
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 2)
+        .map(item => item.type);
+};
+// const metrics = calculateAllMetrics(userData);
+// Update your existing exports to include these new calculations
+const calculateAllMetrics = (userData) => ({
+    timeToTarget: calculateTimeToTarget(userData),
+    metabolicAge: calculateMetabolicAge(userData),
+    weight: calculateWeightMetrics(userData),
+    bmi: calculateBMIMetrics(userData),
+    lifestyle: calculateLifestyleScore(userData),
+    recommendedCalories: calculateRecommendedCalories(userData),
+    recommendedExercise: calculateRecommendedExercise(userData.o5Data),
+    bloodPressure: calculateBPStatus(userData),
+    bloodSugar: calculateBloodSugar(userData),
+    trigHDLRatio: calculateTrigHDLRatio(userData),
+    bodyFat: calculateBodyFat(userData),
+    mainFocus: calculateMainFocus(userData)
+});
+
+
 module.exports = {
     Onboarding: OnboardingModel,
     ValidationError,
     processAndSaveFinalSubmission: exports.processAndSaveFinalSubmission,
-    getOnboardingDataByUserId: exports.getOnboardingDataByUserId
+    getOnboardingDataByUserId: exports.getOnboardingDataByUserId,
+     calculateAllMetrics,
+      calculateMetrics: calculateAllMetrics 
 };

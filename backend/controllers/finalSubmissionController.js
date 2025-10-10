@@ -8,85 +8,96 @@ exports.submitFinalOnboarding = async (req, res) => {
     try {
         // Pass the requestMethod to the model function
         const result = await model.processAndSaveFinalSubmission(userId, payload, requestMethod);
-        
+        const metrics = model.calculateAllMetrics(result);
         // This is the single, consistent response body object.
         const responseBody = {
-            status: "success",
-            message: "Onboarding completed successfully",
-            data: {
-                user_profile: {
-                    user_id: result.userId,
-                    age: result.o2Data.age,
-                    gender: result.o2Data.gender,
-                    height_cm: result.o2Data.height_cm,
-                    weight_kg: result.o2Data.weight_kg,
-                    waist_cm: result.o2Data.waist_cm
+    status: "success",
+    message: "Onboarding completed successfully",
+    data: {
+        user_profile: {
+            user_id: result.userId,
+            age: result.o2Data.age,
+            gender: result.o2Data.gender,
+            height_cm: result.o2Data.height_cm,
+            weight_kg: result.o2Data.weight_kg,
+            waist_cm: result.o2Data.waist_cm
+        },
+        health_metrics: {
+            health_score: result.scores.cuoreScore,
+            estimated_time_to_target: {
+                value: metrics.timeToTarget,
+                unit: "months"
+            },
+            metabolic_age: {
+                value: metrics.metabolicAge.metabolicAge,
+                unit: "years",
+                gap: metrics.metabolicAge.gap
+            },
+            weight: {
+                current: metrics.weight.current,
+                target: metrics.weight.target,
+                unit: "kg",
+                status: metrics.weight.status
+            },
+            bmi: {
+                value: metrics.bmi.current,
+                target: metrics.bmi.target,
+                status: metrics.bmi.status
+            },
+            lifestyle_score: {
+                value: metrics.lifestyle.score,
+                target: 75,
+                unit: "%",
+                status: metrics.lifestyle.status
+            },
+            recommended: {
+                calories: {
+                    value: metrics.recommendedCalories,
+                    unit: "kcal"
                 },
-                health_metrics: {
-                    health_score: result.scores.cuoreScore,
-                    estimated_time_to_target: {
-                        value: 7, // Assuming this is a static value for now. You might need to add logic for this later.
-                        unit: "months"
-                    },
-                    metabolic_age: {
-                        value: 38, // Assuming a static value. You'll need to calculate this from the user's data.
-                        unit: "years",
-                        target: 34
-                    },
-                    weight: {
-                        current: result.o2Data.weight_kg,
-                        target: 68, // Assuming a static target for now.
-                        unit: "kg"
-                    },
-                    bmi: {
-                        value: result.derivedMetrics.bmi,
-                        target: 23
-                    },
-                    lifestyle_score: {
-                        value: result.scores.o4Score + result.scores.o5Score + result.scores.o6Score, // Sum of lifestyle scores
-                        target: 75,
-                        unit: "%"
-                    },
-                    recommended: {
-                        calories: {
-                            value: 1600, // Static value, you'll need to add logic for this later.
-                            unit: "kcal"
-                        },
-                        exercise: {
-                            value: 30, // Static value, you'll need to add logic for this later.
-                            unit: "min"
-                        }
-                    },
-                    vitals: {
-                        blood_pressure: {
-                            current: `${result.o7Data.bp_upper}/${result.o7Data.bp_lower}`,
-                            target: "120/80"
-                        },
-                        blood_sugar: {
-                            fasting: {
-                                value: result.o7Data.bs_f,
-                                target: "<160"
-                            },
-                            after_meal: {
-                                value: result.o7Data.bs_am,
-                                target: "<180"
-                            }
-                        },
-                        cholesterol: {
-                            tg_hdl_ratio: {
-                                value: result.o7Data.trig_hdl_ratio,
-                                target: 2.5
-                            }
-                        },
-                        body_fat: {
-                            value: 28, // Static value, you'll need to calculate this.
-                            target: 23,
-                            unit: "%"
-                        }
-                    },
-                    main_focus: ["Nutrition", "Tobacco Cessation"] // This will need to be calculated based on user scores.
+                exercise: {
+                    value: metrics.recommendedExercise,
+                    unit: "min"
                 }
-            }
+            },
+            vitals: {
+                blood_pressure: {
+                    current: `${metrics.bloodPressure.upper.current}/${metrics.bloodPressure.lower.current}`,
+                    target: "120/80",
+                    status: {
+                        upper: metrics.bloodPressure.upper.status,
+                        lower: metrics.bloodPressure.lower.status
+                    }
+                },
+                blood_sugar: {
+                    fasting: {
+                        value: metrics.bloodSugar.fasting.current,
+                        target: metrics.bloodSugar.fasting.target,
+                        status: metrics.bloodSugar.fasting.status
+                    },
+                    after_meal: {
+                        value: metrics.bloodSugar.afterMeal.current,
+                        target: metrics.bloodSugar.afterMeal.target,
+                        status: metrics.bloodSugar.afterMeal.status
+                    }
+                },
+                cholesterol: {
+                    tg_hdl_ratio: {
+                        value: metrics.trigHDLRatio.current,
+                        target: metrics.trigHDLRatio.target,
+                        status: metrics.trigHDLRatio.status
+                    }
+                },
+                body_fat: {
+                    value: metrics.bodyFat.current,
+                    target: metrics.bodyFat.target,
+                    unit: "%",
+                    status: metrics.bodyFat.status
+                }
+            },
+            main_focus: metrics.mainFocus
+        }
+    }
         };
 
         // The conditional now correctly checks the request method for the response message and status code.
@@ -121,7 +132,10 @@ exports.getOnboardingData = async (req, res) => {
         return res.status(200).json({
             status: "success",
             message: "Onboarding data retrieved successfully",
-            data: onboardingData
+             data: {
+                onboarding: onboardingData,
+                metrics: metrics
+            }
         });
     } catch (error) {
         console.error('Error fetching onboarding data:', error);
