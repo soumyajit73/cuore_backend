@@ -145,52 +145,95 @@ exports.getOnboardingData = async (req, res) => {
         const metrics = model.calculateAllMetrics(onboardingData);
 
         // Return formatted response
-        const responseBody = {
-            status: "success",
-            message: "Onboarding data retrieved successfully",
-            data: {
-                user_profile: {
-                    user_id: onboardingData.userId,
-                    age: onboardingData.o2Data.age,
-                    gender: onboardingData.o2Data.gender,
-                    height_cm: onboardingData.o2Data.height_cm,
-                    weight_kg: onboardingData.o2Data.weight_kg,
-                    waist_cm: onboardingData.o2Data.waist_cm
+       const responseBody = {
+    status: "success",
+    message: "Onboarding data retrieved successfully",
+    data: {
+        user_profile: {
+            user_id: onboardingData.userId,
+            age: onboardingData.o2Data.age,
+            gender: onboardingData.o2Data.gender,
+            height_cm: onboardingData.o2Data.height_cm,
+            weight_kg: onboardingData.o2Data.weight_kg,
+            waist_cm: onboardingData.o2Data.waist_cm
+        },
+        health_metrics: {
+            health_score: onboardingData.scores.cuoreScore,
+            estimated_time_to_target: {
+                value: metrics.timeToTarget,
+                unit: "months"
+            },
+            metabolic_age: {
+                value: metrics.metabolicAge.metabolicAge,
+                unit: "years",
+                gap: metrics.metabolicAge.gap
+            },
+            weight: {
+                current: metrics.weight.current,
+                target: metrics.weight.target,
+                unit: "kg",
+                status: metrics.weight.status
+            },
+            bmi: {
+                value: metrics.bmi.current,
+                target: metrics.bmi.target,
+                status: metrics.bmi.status
+            },
+            lifestyle_score: {
+                value: metrics.lifestyle.score,
+                target: 75,
+                unit: "%",
+                status: metrics.lifestyle.status
+            },
+            recommended: {
+                calories: {
+                    value: metrics.recommendedCalories,
+                    unit: "kcal"
                 },
-                health_metrics: {
-                    health_score: onboardingData.scores.cuoreScore,
-                    estimated_time_to_target: {
-                        value: metrics.timeToTarget,
-                        unit: "months"
-                    },
-                    // ... rest of the metrics structure same as submitFinalOnboarding
-                    metabolic_age: metrics.metabolicAge,
-                    weight: metrics.weight,
-                    bmi: metrics.bmi,
-                    lifestyle_score: metrics.lifestyle,
-                    recommended: {
-                        calories: {
-                            value: metrics.recommendedCalories,
-                            unit: "kcal"
-                        },
-                        exercise: {
-                            value: metrics.recommendedExercise,
-                            unit: "min"
-                        }
-                    },
-                    vitals: {
-                        blood_pressure: metrics.bloodPressure,
-                        blood_sugar: metrics.bloodSugar,
-                        cholesterol: {
-                            tg_hdl_ratio: metrics.trigHDLRatio
-                        },
-                        body_fat: metrics.bodyFat
-                    },
-                    main_focus: metrics.mainFocus
+                exercise: {
+                    value: metrics.recommendedExercise,
+                    unit: "min"
                 }
-            }
-        };
-
+            },
+            vitals: {
+                blood_pressure: {
+                    current: `${metrics.bloodPressure.upper.current}/${metrics.bloodPressure.lower.current}`,
+                    target: "120/80",
+                    status: {
+                        upper: metrics.bloodPressure.upper.status,
+                        lower: metrics.bloodPressure.lower.status
+                    }
+                },
+                blood_sugar: {
+                    fasting: {
+                        value: metrics.bloodSugar.fasting.current,
+                        target: metrics.bloodSugar.fasting.target,
+                        status: metrics.bloodSugar.fasting.status
+                    },
+                    after_meal: {
+                        value: metrics.bloodSugar.afterMeal.current,
+                        target: metrics.bloodSugar.afterMeal.target,
+                        status: metrics.bloodSugar.afterMeal.status
+                    }
+                },
+                cholesterol: {
+                    tg_hdl_ratio: {
+                        value: metrics.trigHDLRatio.current,
+                        target: metrics.trigHDLRatio.target,
+                        status: metrics.trigHDLRatio.status
+                    }
+                },
+                body_fat: {
+                    value: metrics.bodyFat.current,
+                    target: metrics.bodyFat.target,
+                    unit: "%",
+                    status: metrics.bodyFat.status
+                }
+            },
+            main_focus: metrics.mainFocus
+        }
+    }
+};
         res.json(responseBody);
 
     } catch (error) {
