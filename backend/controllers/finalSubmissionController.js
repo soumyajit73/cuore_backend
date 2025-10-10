@@ -120,25 +120,85 @@ exports.submitFinalOnboarding = async (req, res) => {
 };
 
 exports.getOnboardingData = async (req, res) => {
-    const userId = req.user.userId;
-
     try {
-        const onboardingData = await model.getOnboardingDataByUserId(userId);
-        
-        if (!onboardingData) {
-            return res.status(404).json({ message: "Onboarding data not found for this user." });
+        // Make sure we have the userId from auth middleware
+        const userId = req.user.userId;
+        if (!userId) {
+            return res.status(401).json({ 
+                status: "error",
+                message: "User ID not found in request" 
+            });
         }
 
-        return res.status(200).json({
+        // Get onboarding data
+        const onboardingData = await model.getOnboardingDataByUserId(userId);
+        
+        // If no data found, return 404
+        if (!onboardingData) {
+            return res.status(404).json({
+                status: "error",
+                message: "No onboarding data found for this user"
+            });
+        }
+
+        // Calculate metrics from onboarding data
+        const metrics = model.calculateAllMetrics(onboardingData);
+
+        // Return formatted response
+        const responseBody = {
             status: "success",
             message: "Onboarding data retrieved successfully",
-             data: {
-                onboarding: onboardingData,
-                metrics: metrics
+            data: {
+                user_profile: {
+                    user_id: onboardingData.userId,
+                    age: onboardingData.o2Data.age,
+                    gender: onboardingData.o2Data.gender,
+                    height_cm: onboardingData.o2Data.height_cm,
+                    weight_kg: onboardingData.o2Data.weight_kg,
+                    waist_cm: onboardingData.o2Data.waist_cm
+                },
+                health_metrics: {
+                    health_score: onboardingData.scores.cuoreScore,
+                    estimated_time_to_target: {
+                        value: metrics.timeToTarget,
+                        unit: "months"
+                    },
+                    // ... rest of the metrics structure same as submitFinalOnboarding
+                    metabolic_age: metrics.metabolicAge,
+                    weight: metrics.weight,
+                    bmi: metrics.bmi,
+                    lifestyle_score: metrics.lifestyle,
+                    recommended: {
+                        calories: {
+                            value: metrics.recommendedCalories,
+                            unit: "kcal"
+                        },
+                        exercise: {
+                            value: metrics.recommendedExercise,
+                            unit: "min"
+                        }
+                    },
+                    vitals: {
+                        blood_pressure: metrics.bloodPressure,
+                        blood_sugar: metrics.bloodSugar,
+                        cholesterol: {
+                            tg_hdl_ratio: metrics.trigHDLRatio
+                        },
+                        body_fat: metrics.bodyFat
+                    },
+                    main_focus: metrics.mainFocus
+                }
             }
-        });
+        };
+
+        res.json(responseBody);
+
     } catch (error) {
-        console.error('Error fetching onboarding data:', error);
-        return res.status(500).json({ error: "Internal server error." });
+        console.error('Error in getOnboardingData:', error);
+        res.status(500).json({
+            status: "error",
+            message: "Error fetching onboarding data",
+            error: error.message
+        });
     }
 };
