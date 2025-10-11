@@ -10,11 +10,13 @@ const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
 const isSameOrAfter = require('dayjs/plugin/isSameOrAfter');
 const isSameOrBefore = require('dayjs/plugin/isSameOrBefore');
+const customParseFormat = require('dayjs/plugin/customParseFormat');
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 dayjs.extend(isSameOrAfter);
 dayjs.extend(isSameOrBefore);
+dayjs.extend(customParseFormat);
 
 const TZ = 'Asia/Kolkata';
 
@@ -54,21 +56,19 @@ function calculateScheduledTime(baseTime, minutesToAdd) {
 }
 
 // -----------------------------------------------------
-// Generate Timeline Cards (Fixed for Timezone + Creation-Day Start)
+// Generate Timeline Cards
 // -----------------------------------------------------
 const generateTimelineCardsForDay = async (userId, targetDate) => {
     const localDay = dayjs(targetDate).tz(TZ).startOf('day');
     const startOfDayUTC = localDay.utc().toDate();
     const endOfDayUTC = localDay.endOf('day').utc().toDate();
 
-    // Delete old cards for this day
     await TimelineCard.deleteMany({
         userId,
         scheduleDate: { $gte: startOfDayUTC, $lte: endOfDayUTC },
         type: { $in: ['USER_REMINDER', 'USER_MEDICATION'] }
     });
 
-    // Fetch active medications and reminders
     const medications = await Medication.find({
         userId,
         isActive: true,
@@ -89,7 +89,7 @@ const generateTimelineCardsForDay = async (userId, targetDate) => {
         const timeStr = convertTo24Hour(med.time) || '00:00';
         newCards.push({
             userId,
-            scheduleDate: med.startDate, // use actual start date
+            scheduleDate: med.startDate,
             scheduledTime: timeStr,
             title: 'Medication',
             description: `${med.name} ${med.dosage}`,
@@ -102,7 +102,7 @@ const generateTimelineCardsForDay = async (userId, targetDate) => {
         const timeStr = convertTo24Hour(rem.time) || '00:00';
         newCards.push({
             userId,
-            scheduleDate: rem.startDate, // use actual start date
+            scheduleDate: rem.startDate,
             scheduledTime: timeStr,
             title: rem.title,
             description: null,
@@ -212,7 +212,6 @@ const getTimelineData = async (userId, dateString) => {
         if (card.type === 'USER_MEDICATION') icon = '💊', editable = false;
         else if (card.type === 'USER_REMINDER') icon = '🔔';
 
-        // ✅ Parse 24h or 12h safely
         let parsedTime;
         if (card.scheduledTime.includes('AM') || card.scheduledTime.includes('PM')) {
             parsedTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD hh:mm A', TZ);
@@ -282,8 +281,7 @@ exports.addEntry = async (req, res) => {
         return res.status(400).json({ error: 'Missing required scheduling fields.' });
 
     try {
-        // Use provided startDate or now
-        const startDay = dayjs.tz(startDate || new Date(), TZ); // <--- don't use startOf('day')
+        const startDay = dayjs.tz(startDate || new Date(), TZ);
         const endDay = endDate && endDate.toLowerCase() !== 'never' ? dayjs.tz(endDate, TZ).endOf('day') : null;
 
         const standardizedTime = convertTo24Hour(time);
@@ -296,7 +294,7 @@ exports.addEntry = async (req, res) => {
                 userId,
                 name: name || title,
                 dosage: dosage || 'N/A',
-                startDate: startDay.toDate(),   // exact timestamp
+                startDate: startDay.toDate(),
                 endDate: endDay ? endDay.toDate() : null,
                 time: standardizedTime,
                 repeatFrequency
@@ -305,14 +303,13 @@ exports.addEntry = async (req, res) => {
             newEntry = await Reminder.create({
                 userId,
                 title,
-                startDate: startDay.toDate(),   // exact timestamp
+                startDate: startDay.toDate(),
                 endDate: endDay ? endDay.toDate() : null,
                 time: standardizedTime,
                 repeatFrequency
             });
         }
 
-        // regenerate timeline for today
         await generateTimelineCardsForDay(userId, dayjs().tz(TZ).toDate());
 
         return res.status(201).json({
@@ -326,8 +323,81 @@ exports.addEntry = async (req, res) => {
     }
 };
 
+// -----------------------------------------------------
+// Update Wake Up Time
+// -----------------------------------------------------
+exports.updateWakeUpTime = async (req, res) => {
+    const userId = req.user.userId;
+    const { newWakeUpTime } = req.body;
 
+    if (!newWakeUpTime) {
+        return res.status(400).json({ error: "Missing newWakeUpTime in request body." });
+    }
 
+    try {
+        const standardizedTime = convertTo24Hour(newWakeUpTime);
+        if (!standardizedTime) {
+            return res.status(400).json({ error: "Invalid time format provided." });
+        }
+        
+        const updatedOnboarding = await Onboarding.findOneAndUpdate(
+            { userId },
+            { $set: { 'o6Data.wake_time': standardizedTime } },
+            { new: true, runValidators: true }
+        );
+
+        if (!updatedOnboarding) {
+            return res.status(404).json({ error: "User onboarding data not found." });
+        }
+
+        const today = dayjs().tz(TZ).toDate();
+        await generateTimelineCardsForDay(userId, today);
+        
+        const [userData, timelineData, cuoreScoreData] = await Promise.all([
+            User.findById(userId).select('name profileImage').lean(),
+            getTimelineData(userId, dayjs(today).format('YYYY-MM-DD')),
+            getCuoreScoreData(userId)
+        ]);
+        
+        const homeScreenPayload = {
+            user: {
+                id: userId,
+                name: userData.name,
+                profileImage: userData.profileImage || 'https://example.com/images/mjohnson.png'
+            },
+            date: dayjs(today).format('YYYY-MM-DD'),
+            summary: {
+                missedTasks: timelineData.missed,
+                message: `${timelineData.missed} ${timelineData.missed === 1 ? 'task' : 'tasks'} missed`,
+            },
+            progress: {
+                periods: cuoreScoreData.history.map((score, i, arr) => ({
+                    month: dayjs(score.date).format("MMM 'YY"),
+                    value: score.cuoreScore,
+                    userImage: i === arr.length - 1 ? (userData.profileImage || 'https://example.com/images/mjohnson.png') : undefined
+                })),
+                goal: '>75%',
+                buttonText: 'Update Biomarkers'
+            },
+            motivationalMessage: 'Every choice you make today sets you up for a healthier tomorrow.',
+            alerts: timelineData.alerts,
+            dailySchedule: timelineData.dailySchedule
+        };
+        
+        res.status(200).json({ 
+            message: "Wake-up time updated successfully. Timeline adjusted.",
+            updatedData: homeScreenPayload
+        });
+
+    } catch (error) {
+        console.error("Error updating wake-up time:", error);
+        res.status(500).json({ error: "Internal server error." });
+    }
+};
+
+// -----------------------------------------------------
+// Existing APIs (kept as-is)
+// -----------------------------------------------------
 
 exports.getEntries = async (req, res) => {
     const userId = req.user.userId;
@@ -358,7 +428,7 @@ exports.updateEntry = async (req, res) => {
     if (title) updateData.title = title;
     if (startDate) updateData.startDate = parseDate(startDate);
     if (endDate !== undefined) updateData.endDate = parseDate(endDate);
-    if (time) updateData.time = time;
+    if (time) updateData.time = convertTo24Hour(time);
     if (repeatFrequency) updateData.repeatFrequency = repeatFrequency;
     
     if (model === Medication) {

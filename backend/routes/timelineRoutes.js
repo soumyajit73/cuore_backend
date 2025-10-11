@@ -30,4 +30,6 @@ router.get('/:userId/home', protect, timelineController.getHomeScreenData);
 // --- Placeholders for future APIs ---
 router.get('/:userId/timeline', protect, timelineController.getTimeline);
 
+router.put('/:userId/timeline/wakeup', protect, timelineController.updateWakeUpTime);
+
 module.exports = router;
