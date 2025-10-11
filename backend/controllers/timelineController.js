@@ -17,9 +17,8 @@ dayjs.extend(timezone);
 dayjs.extend(isSameOrAfter);
 dayjs.extend(isSameOrBefore);
 
-const convertTo24Hour = (timeStr) => {
+function convertTo24Hour(timeStr) {
     if (!timeStr) return null;
-
     const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
     if (!match) return null;
 
@@ -31,7 +30,7 @@ const convertTo24Hour = (timeStr) => {
     if (period.toUpperCase() === 'AM' && hour === 12) hour = 0;
 
     return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-};
+}
 // Utility function to parse date fields from string to Date object
 const parseDate = (dateString) => {
     if (!dateString || dateString.toLowerCase() === 'never') return null;
@@ -47,9 +46,9 @@ const getModelAndId = (req) => {
 };
 
 // Helper to calculate time offsets based on anchor time (wakeUp)
-const calculateScheduledTime = (anchorTime, offsetMinutes) => {
-    return anchorTime.add(offsetMinutes, 'minute');
-};
+function calculateScheduledTime(baseTime, minutesToAdd) {
+    return dayjs(baseTime).add(minutesToAdd, 'minute');
+}
 
 // ----------------------------------------------------------------------
 // NEW HELPER: Generates daily timeline cards from Medication/Reminder schedules
@@ -58,7 +57,7 @@ const generateTimelineCardsForDay = async (userId, targetDate) => {
     const startOfDay = dayjs(targetDate).startOf('day').toDate();
     const endOfDay = dayjs(targetDate).endOf('day').toDate();
 
-    // 1. Delete any existing user-generated cards for this day to prevent duplicates
+    // 1. Delete existing user-generated cards for that day
     await TimelineCard.deleteMany({
         userId,
         scheduleDate: {
@@ -68,7 +67,7 @@ const generateTimelineCardsForDay = async (userId, targetDate) => {
         type: { $in: ['USER_REMINDER', 'USER_MEDICATION'] }
     });
 
-    // 2. Fetch all active medications for the user on the target date
+    // 2. Fetch medications
     const medications = await Medication.find({
         userId,
         isActive: true,
@@ -76,7 +75,7 @@ const generateTimelineCardsForDay = async (userId, targetDate) => {
         $or: [{ endDate: null }, { endDate: { $gte: targetDate } }]
     }).lean();
 
-    // 3. Fetch all active reminders for the user on the target date
+    // 3. Fetch reminders
     const reminders = await Reminder.find({
         userId,
         isActive: true,
@@ -84,14 +83,14 @@ const generateTimelineCardsForDay = async (userId, targetDate) => {
         $or: [{ endDate: null }, { endDate: { $gte: targetDate } }]
     }).lean();
 
-    // 4. Create TimelineCard documents for medications and reminders
+    // 4. Prepare cards
     const newCards = [];
+    const todayStartUTC = dayjs(targetDate).startOf('day').toDate(); // ✅ correct
 
-    // Medication Cards
     medications.forEach(med => {
         newCards.push({
             userId,
-            scheduleDate: startOfDay,
+            scheduleDate: todayStartUTC,
             scheduledTime: med.time,
             title: "Medication",
             description: `${med.name} ${med.dosage}`,
@@ -100,11 +99,10 @@ const generateTimelineCardsForDay = async (userId, targetDate) => {
         });
     });
 
-    // Reminder Cards
     reminders.forEach(rem => {
         newCards.push({
             userId,
-            scheduleDate: startOfDay,
+            scheduleDate: todayStartUTC,
             scheduledTime: rem.time,
             title: rem.title,
             description: null,
@@ -113,11 +111,14 @@ const generateTimelineCardsForDay = async (userId, targetDate) => {
         });
     });
 
-    // 5. Insert the new cards into the TimelineCard collection
+    console.log("Saved scheduleDate:", todayStartUTC);
+
+    // 5. Insert new cards
     if (newCards.length > 0) {
         await TimelineCard.insertMany(newCards);
     }
 };
+
 
 // ----------------------------------------------------------------------
 // Consolidated Home Screen API
@@ -210,121 +211,80 @@ const getCuoreScoreData = async (userId) => {
 };
 
 const getTimelineData = async (userId, dateString) => {
-    const today = dayjs(dateString).startOf('day');
-    const todayDate = today.toDate();
+    // 1. Parse the target date in Asia/Kolkata timezone
+    const localDay = dayjs(dateString).tz('Asia/Kolkata').startOf('day');
 
-    const onboarding = await Onboarding.findOne({ userId }).select('o6Data.sleep_hours o6Data.wake_time').lean();
+    // 2. Compute start and end of day in UTC for DB query
+    const utcStart = localDay.utc().toDate();
+    const utcEnd = localDay.endOf('day').utc().toDate();
 
-    let preferredWakeTime = convertTo24Hour(onboarding?.o6Data?.wake_time);
-    if (!preferredWakeTime) {
-        console.warn("Invalid or missing wake_time, defaulting to 07:00 AM");
-        preferredWakeTime = '07:00';
-    }
+    // 3. Fetch onboarding data for wake time
+    const onboarding = await Onboarding.findOne({ userId })
+        .select('o6Data.sleep_hours o6Data.wake_time')
+        .lean();
 
+    let preferredWakeTime = convertTo24Hour(onboarding?.o6Data?.wake_time) || '07:00';
     const [wakeHour, wakeMinute] = preferredWakeTime.split(':').map(Number);
-    let wakeUpAnchor = dayjs(todayDate).hour(wakeHour).minute(wakeMinute);
-    if (!wakeUpAnchor.isValid()) {
-        console.warn("Invalid wakeUpAnchor, using default 7:00 AM");
-        wakeUpAnchor = dayjs(todayDate).hour(7).minute(0);
-    }
+    let wakeUpAnchor = localDay.hour(wakeHour).minute(wakeMinute);
 
+    if (!wakeUpAnchor.isValid()) wakeUpAnchor = localDay.hour(7).minute(0);
+
+    // 4. System cards with proper times
     const systemCards = [
-        {
-            time: wakeUpAnchor.format('h:mm A'),
-            icon: "🌞",
-            title: "Wake Up",
-            description: "Start your day with Morning Harmony",
-            completed: dayjs().isAfter(wakeUpAnchor),
-            reminder: true,
-            editable: true,
-            type: 'SYSTEM_WAKEUP'
-        },
-        {
-            time: calculateScheduledTime(wakeUpAnchor, 105).format('h:mm A'),
-            icon: "🍳",
-            title: "Breakfast",
-            description: "Healthy smoothie with oats and banana",
-            completed: false,
-            reminder: true,
-            editable: false,
-            type: 'SYSTEM_NUTRITION'
-        },
-        {
-            time: calculateScheduledTime(wakeUpAnchor, 360).format('h:mm A'),
-            icon: "🏃",
-            title: "Fitness",
-            description: "Cardio & strength training",
-            completed: false,
-            reminder: true,
-            editable: false,
-            type: 'SYSTEM_FITNESS'
-        },
-        {
-            time: calculateScheduledTime(wakeUpAnchor, 480).format('h:mm A'),
-            icon: "🍽️",
-            title: "Lunch",
-            description: "Re-energize yourself",
-            completed: false,
-            reminder: true,
-            editable: false,
-            type: 'SYSTEM_NUTRITION'
-        },
-        {
-            time: calculateScheduledTime(wakeUpAnchor, 720).format('h:mm A'),
-            icon: "😴",
-            title: "Short Nap or Walk",
-            description: "Defeat the midday slump",
-            completed: false,
-            reminder: true,
-            editable: false,
-            type: 'SYSTEM_REST'
-        },
-        {
-            time: calculateScheduledTime(wakeUpAnchor, 960).format('h:mm A'),
-            icon: "🌙",
-            title: "Dinner",
-            description: "Balanced and light",
-            completed: false,
-            reminder: true,
-            editable: false,
-            type: 'SYSTEM_NUTRITION'
-        },
-        {
-            time: calculateScheduledTime(wakeUpAnchor, 1200).format('h:mm A'),
-            icon: "🛌",
-            title: "Sleep",
-            description: "Restore & repair",
-            completed: false,
-            reminder: true,
-            editable: false,
-            type: 'SYSTEM_REST'
-        },
-    ];
+        { time: wakeUpAnchor, icon: "🌞", title: "Wake Up", description: "Start your day with Morning Harmony", type: 'SYSTEM_WAKEUP' },
+        { time: calculateScheduledTime(wakeUpAnchor, 105), icon: "🍳", title: "Breakfast", description: "Healthy smoothie with oats and banana", type: 'SYSTEM_NUTRITION' },
+        { time: calculateScheduledTime(wakeUpAnchor, 360), icon: "🏃", title: "Fitness", description: "Cardio & strength training", type: 'SYSTEM_FITNESS' },
+        { time: calculateScheduledTime(wakeUpAnchor, 480), icon: "🍽️", title: "Lunch", description: "Re-energize yourself", type: 'SYSTEM_NUTRITION' },
+        { time: calculateScheduledTime(wakeUpAnchor, 720), icon: "😴", title: "Short Nap or Walk", description: "Defeat the midday slump", type: 'SYSTEM_REST' },
+        { time: calculateScheduledTime(wakeUpAnchor, 960), icon: "🌙", title: "Dinner", description: "Balanced and light", type: 'SYSTEM_NUTRITION' },
+        { time: calculateScheduledTime(wakeUpAnchor, 1200), icon: "🛌", title: "Sleep", description: "Restore & repair", type: 'SYSTEM_REST' },
+    ].map(card => ({
+        ...card,
+        completed: dayjs().isAfter(card.time),
+        reminder: true,
+        editable: card.type === 'SYSTEM_WAKEUP',
+    }));
 
-    const rawTimelineCards = await TimelineCard.find({ userId, scheduleDate: todayDate }).sort('scheduledTime');
+    // 5. Fetch user timeline cards for this day only
+    const rawTimelineCards = await TimelineCard.find({
+        userId,
+        scheduleDate: { $gte: utcStart, $lte: utcEnd }
+    });
 
     const userAndMedicationCards = rawTimelineCards.map(card => {
         let icon = '📝';
         let editable = true;
         let reminder = true;
+
         if (card.type === 'USER_MEDICATION') icon = '💊', editable = false;
         else if (card.type === 'USER_REMINDER') icon = '🔔';
+
+        // Parse the scheduledTime string in local timezone, exact as user entered
+        const parsedTime = dayjs(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD h:mm A');
+
         return {
-            time: card.scheduledTime,
+            time: parsedTime,
             icon,
             title: card.title,
             description: card.description,
             completed: card.isCompleted,
             reminder,
-            editable
+            editable,
+            type: card.type
         };
     });
 
+    // 6. Combine system + user cards and sort by actual time
     const allCards = [...systemCards, ...userAndMedicationCards]
-        .sort((a, b) => dayjs(a.time, 'h:mm A').diff(dayjs(b.time, 'h:mm A')));
+        .sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf())
+        .map(card => ({
+            ...card,
+            time: dayjs(card.time).format('h:mm A') // keep string like "10:00 AM"
+        }));
 
-    const missedTasks = allCards.filter(task => 
-        !task.completed && dayjs(task.time, 'h:mm A').isBefore(dayjs())
+    // 7. Count missed tasks
+    const missedTasks = allCards.filter(task =>
+        !task.completed && dayjs(`${localDay.format('YYYY-MM-DD')} ${task.time}`, 'YYYY-MM-DD h:mm A').isBefore(dayjs())
     ).length;
 
     const alerts = missedTasks > 0 ? [{
