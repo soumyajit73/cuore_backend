@@ -7,13 +7,10 @@ const { protect } = require('../middleware/authMiddleware'); // Middleware to pr
 // ------------------------------------------------------------------------------------
 
 // POST /api/v1/users/:userId/reminders - Add new entry (Reminder or Medication)
-// This matches the POST endpoint in your API inventory (Reminders section)
 router.post('/:userId/reminders', protect, timelineController.addEntry);
 
 // GET /api/v1/users/:userId/reminders - List all reminders
 router.get('/:userId/reminders', protect, timelineController.getEntries);
-
-// router.get('/:userId/reminders', protect, timelineController.getEntries);
 
 // Get all Medications
 router.get('/:userId/medications', protect, timelineController.getEntries);
@@ -27,8 +24,10 @@ router.put('/:userId/medications/:medId', protect, timelineController.updateEntr
 // get cuore score
 router.get('/:userId/cuore-score', protect, timelineController.getCuoreScore);
 
+// New consolidated route for the home screen API
+router.get('/:userId/home', protect, timelineController.getHomeScreenData);
+
 // --- Placeholders for future APIs ---
-// router.get('/:userId/medications', protect, timelineController.getEntries); 
 router.get('/:userId/timeline', protect, timelineController.getTimeline);
 
 module.exports = router;
