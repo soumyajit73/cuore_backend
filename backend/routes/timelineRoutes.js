@@ -32,4 +32,6 @@ router.get('/:userId/timeline', protect, timelineController.getTimeline);
 
 router.put('/:userId/timeline/wakeup', protect, timelineController.updateWakeUpTime);
 
+router.get('/:userId/cuore-score-details' , protect, timelineController.getCuoreScoreDetails);
+
 module.exports = router;

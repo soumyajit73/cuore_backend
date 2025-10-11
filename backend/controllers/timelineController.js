@@ -62,6 +62,116 @@ function getModelAndId(req) {
     return { model, docId };
 }
 
+function getColorStatus(value, greenThreshold, yellowThreshold, redThreshold) {
+    if (value > greenThreshold) return 'green';
+    if (value >= yellowThreshold) return 'yellow';
+    if (value >= redThreshold) return 'red';
+    return 'deep red'; // Or an appropriate default
+}
+
+const calculateHealthMetrics = (onboardingDoc) => {
+    const { o2Data, o7Data, derivedMetrics, scores } = onboardingDoc;
+    const { age, gender, height_cm, weight_kg, waist_cm } = o2Data;
+    const { bmi, wthr } = derivedMetrics;
+
+    // --- Cuore Score ---
+    const health_score = scores.cuoreScore;
+
+    // --- Metabolic Age ---
+    const metabolicAgeFactor = health_score >= 75 ? 0.95 : health_score <= 50 ? 1.2 : 1.1;
+    const metabolicAge = Math.round(age * metabolicAgeFactor);
+    const metabolicAgeGap = metabolicAge - age;
+
+    // --- Time to Target ---
+    const diffWeight = Math.abs(weight_kg - (gender === 'male' ? 52 + 1.9 * ((height_cm - 152.4) / 2.4) : 50 + 1.7 * ((height_cm - 152.4) / 2.4)));
+    const diffBP = Math.abs(o7Data.bp_upper - 120);
+    const diffBS = Math.abs(o7Data.bs_am - 160);
+    const timeToTarget = Math.max(Math.ceil(diffWeight / 1.2), Math.ceil(diffBP / 2), Math.ceil(diffBS / 10)) + 1;
+
+    // --- Weight ---
+    const targetWeight = gender === 'male' ? 52 + 1.9 * ((height_cm - 152.4) / 2.4) : 50 + 1.7 * ((height_cm - 152.4) / 2.4);
+    const weightDiffPercent = Math.abs(weight_kg - targetWeight) / targetWeight * 100;
+    const weightStatus = weightDiffPercent < 5 ? 'green' : weightDiffPercent <= 15 ? 'orange' : 'red';
+
+    // --- BMI ---
+    const targetBMI = gender === 'male' ? 22.5 : 23.5;
+    const bmiDiffPercent = Math.abs(bmi - targetBMI) / targetBMI * 100;
+    const bmiStatus = bmiDiffPercent < 5 ? 'green' : bmiDiffPercent <= 15 ? 'orange' : 'red';
+    
+    // --- Recommended Calories ---
+    let recommendedCalories;
+    if (bmi < 21) {
+        recommendedCalories = (gender === 'male' ? (66.47 + 13.75 * weight_kg + 5 * height_cm - 6.75 * age) * 1.15 : (665.1 + 9.563 * weight_kg + 1.85 * height_cm - 4.67 * age) * 1.15);
+    } else if (bmi >= 21 && bmi <= 24) {
+        recommendedCalories = (gender === 'male' ? (66.47 + 13.75 * weight_kg + 5 * height_cm - 6.75 * age) : (665.1 + 9.563 * weight_kg + 1.85 * height_cm - 4.67 * age));
+    } else {
+        recommendedCalories = (gender === 'male' ? (66.47 + 13.75 * weight_kg + 5 * height_cm - 6.75 * age) * 0.8 : (665.1 + 9.563 * weight_kg + 1.85 * height_cm - 4.67 * age) * 0.8);
+    }
+    recommendedCalories = Math.round(recommendedCalories / 100) * 100;
+
+    // --- Recommended Exercise ---
+    const recommendedExercise = scores.o5Score < 75 ? 15 : scores.o5Score <= 150 ? 30 : 45;
+
+    // --- Lifestyle Score ---
+    const lifestyleScore = 100 - (scores.o5Score / 100); // This is a placeholder, as the formula is complex
+    const lifestyleStatus = lifestyleScore > 70 ? 'green' : lifestyleScore >= 55 ? 'orange' : 'red';
+
+    // --- Vitals ---
+    const bpUpperStatus = o7Data.bp_upper < 100 ? 'orange' : o7Data.bp_upper <= 130 ? 'green' : o7Data.bp_upper <= 145 ? 'orange' : 'red';
+    const bpLowerStatus = o7Data.bp_lower < 64 ? 'orange' : o7Data.bp_lower <= 82 ? 'green' : o7Data.bp_lower <= 95 ? 'orange' : 'red';
+    const bsFastingTarget = scores.o3Data?.hasDiabetes ? '<100' : '<100';
+    const bsFastingStatus = scores.o3Data?.hasDiabetes ? (o7Data.bs_f < 100 ? 'red' : o7Data.bs_f <= 139 ? 'green' : o7Data.bs_f <= 170 ? 'orange' : 'red') : (o7Data.bs_f < 100 ? 'green' : o7Data.bs_f <= 125 ? 'orange' : 'red');
+    const bsAfterMealTarget = scores.o3Data?.hasDiabetes ? '<160' : '<140';
+    const bsAfterMealStatus = scores.o3Data?.hasDiabetes ? (o7Data.bs_am < 130 ? 'red' : o7Data.bs_am <= 169 ? 'green' : o7Data.bs_am <= 220 ? 'orange' : 'red') : (o7Data.bs_am < 140 ? 'green' : o7Data.bs_am <= 200 ? 'orange' : 'red');
+    const trigHDLRatioStatus = o7Data.trig_hdl_ratio < 2.8 ? 'green' : o7Data.trig_hdl_ratio <= 4.0 ? 'orange' : 'red';
+    const targetBodyFat = gender === 'male' ? 23 : 30;
+    const bodyFat = gender === 'male' ? (1.2 * bmi) + (0.23 * age) - 16.2 : (1.2 * bmi) + (0.23 * age) - 5.4;
+    const bodyFatDiffPercent = Math.abs(bodyFat - targetBodyFat) / targetBodyFat * 100;
+    const bodyFatStatus = bodyFatDiffPercent < 5 ? 'green' : bodyFatDiffPercent <= 15 ? 'orange' : 'red';
+    
+    // --- Main Focus ---
+    // Placeholder logic for Main Focus
+    const mainFocus = ["Nutrition", "Fitness"]; // This would be dynamic
+
+    return {
+        health_score,
+        estimated_time_to_target: { value: timeToTarget, unit: "months" },
+        metabolic_age: { value: metabolicAge, unit: "years", gap: metabolicAgeGap },
+        weight: { current: weight_kg, target: targetWeight, unit: "kg", status: weightStatus },
+        bmi: { value: bmi, target: targetBMI, status: bmiStatus },
+        lifestyle_score: { value: lifestyleScore, target: 75, unit: "%", status: lifestyleStatus },
+        recommended: {
+            calories: { value: recommendedCalories, unit: "kcal" },
+            exercise: { value: recommendedExercise, unit: "min" }
+        },
+        vitals: {
+            blood_pressure: {
+                current: `${o7Data.bp_upper}/${o7Data.bp_lower}`,
+                target: "120/80",
+                status: { upper: bpUpperStatus, lower: bpLowerStatus }
+            },
+            blood_sugar: {
+                fasting: { value: o7Data.bs_f, target: bsFastingTarget, status: bsFastingStatus },
+                after_meal: { value: o7Data.bs_am, target: bsAfterMealTarget, status: bsAfterMealStatus }
+            },
+            cholesterol: {
+                tg_hdl_ratio: {
+                    value: o7Data.trig_hdl_ratio,
+                    target: "<2.6",
+                    status: trigHDLRatioStatus
+                }
+            },
+            body_fat: {
+                value: Math.round(bodyFat * 100) / 100,
+                target: targetBodyFat,
+                unit: "%",
+                status: bodyFatStatus
+            }
+        },
+        main_focus: mainFocus
+    };
+};
+
 // -----------------------------------------------------
 // Generate Timeline Cards
 // -----------------------------------------------------
@@ -493,3 +603,23 @@ exports.getTimeline = async (req, res) => {
 exports.completeCard = async (req, res) => {
     res.status(501).json({ message: "Not Implemented Yet. This will mark a task as complete." });
 };
+
+exports.getCuoreScoreDetails = async (req, res) => {
+    const userId = req.user.userId;
+
+    try {
+        const onboardingDoc = await Onboarding.findOne({ userId }).lean();
+        if (!onboardingDoc) {
+            return res.status(404).json({ message: "Onboarding data not found for this user." });
+        }
+        
+        const healthMetrics = calculateHealthMetrics(onboardingDoc);
+        
+        res.status(200).json({ health_metrics: healthMetrics });
+
+    } catch (error) {
+        console.error("Error fetching Cuore Score details:", error);
+        res.status(500).json({ error: "Internal server error." });
+    }
+};
+
