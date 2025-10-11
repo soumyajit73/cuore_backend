@@ -55,6 +55,13 @@ function calculateScheduledTime(baseTime, minutesToAdd) {
     return dayjs(baseTime).add(minutesToAdd, 'minute');
 }
 
+function getModelAndId(req) {
+    const isMedication = req.originalUrl.includes('/medications');
+    const model = isMedication ? Medication : Reminder;
+    const docId = isMedication ? req.params.medId : req.params.reminderId;
+    return { model, docId };
+}
+
 // -----------------------------------------------------
 // Generate Timeline Cards
 // -----------------------------------------------------
