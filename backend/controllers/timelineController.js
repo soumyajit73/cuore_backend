@@ -2,97 +2,96 @@ const mongoose = require('mongoose');
 const Medication = require('../models/Medication');
 const Reminder = require('../models/Reminder');
 const TimelineCard = require('../models/TimelineCard');
-const User = require('../models/User'); 
-const { Onboarding, ValidationError } = require('../models/onboardingModel.js');
+const User = require('../models/User');
+const { Onboarding } = require('../models/onboardingModel.js');
 
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
-const isSameOrAfter = require('dayjs/plugin/isSameOrAfter'); 
+const isSameOrAfter = require('dayjs/plugin/isSameOrAfter');
 const isSameOrBefore = require('dayjs/plugin/isSameOrBefore');
-
 
 dayjs.extend(utc);
 dayjs.extend(timezone);
 dayjs.extend(isSameOrAfter);
 dayjs.extend(isSameOrBefore);
 
+const TZ = 'Asia/Kolkata';
+
+// -----------------------------------------------------
+// Utility Functions
+// -----------------------------------------------------
 function convertTo24Hour(timeStr) {
     if (!timeStr) return null;
-    const match = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
-    if (!match) return null;
-
-    let [_, hour, minute, period] = match;
-    hour = parseInt(hour);
-    minute = parseInt(minute);
-
-    if (period.toUpperCase() === 'PM' && hour !== 12) hour += 12;
-    if (period.toUpperCase() === 'AM' && hour === 12) hour = 0;
-
-    return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+    const match12 = timeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+    if (match12) {
+        let [_, hour, minute, period] = match12;
+        hour = parseInt(hour);
+        minute = parseInt(minute);
+        if (period.toUpperCase() === 'PM' && hour !== 12) hour += 12;
+        if (period.toUpperCase() === 'AM' && hour === 12) hour = 0;
+        return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+    }
+    const match24 = timeStr.match(/(\d{1,2}):(\d{2})/);
+    if (match24) {
+        let [_, hour, minute] = match24;
+        hour = parseInt(hour);
+        minute = parseInt(minute);
+        if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+            return `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+        }
+    }
+    return null;
 }
-// Utility function to parse date fields from string to Date object
+
 const parseDate = (dateString) => {
     if (!dateString || dateString.toLowerCase() === 'never') return null;
     return new Date(dateString);
 };
 
-// Utility to find the correct Model based on the request path
-const getModelAndId = (req) => {
-    const isMedication = req.originalUrl.includes('/medications');
-    const model = isMedication ? Medication : Reminder;
-    const docId = isMedication ? req.params.medId : req.params.reminderId;
-    return { model, docId };
-};
-
-// Helper to calculate time offsets based on anchor time (wakeUp)
 function calculateScheduledTime(baseTime, minutesToAdd) {
     return dayjs(baseTime).add(minutesToAdd, 'minute');
 }
 
-// ----------------------------------------------------------------------
-// NEW HELPER: Generates daily timeline cards from Medication/Reminder schedules
-// ----------------------------------------------------------------------
+// -----------------------------------------------------
+// Generate Timeline Cards (Fixed for Timezone + Creation-Day Start)
+// -----------------------------------------------------
 const generateTimelineCardsForDay = async (userId, targetDate) => {
-    const startOfDay = dayjs(targetDate).startOf('day').toDate();
-    const endOfDay = dayjs(targetDate).endOf('day').toDate();
+    const localDay = dayjs(targetDate).tz(TZ).startOf('day');
+    const startOfDayUTC = localDay.utc().toDate();
+    const endOfDayUTC = localDay.endOf('day').utc().toDate();
 
-    // 1. Delete existing user-generated cards for that day
+    // Delete old cards for this day
     await TimelineCard.deleteMany({
         userId,
-        scheduleDate: {
-            $gte: startOfDay,
-            $lte: endOfDay
-        },
+        scheduleDate: { $gte: startOfDayUTC, $lte: endOfDayUTC },
         type: { $in: ['USER_REMINDER', 'USER_MEDICATION'] }
     });
 
-    // 2. Fetch medications
+    // Fetch active medications and reminders
     const medications = await Medication.find({
         userId,
         isActive: true,
-        startDate: { $lte: targetDate },
-        $or: [{ endDate: null }, { endDate: { $gte: targetDate } }]
+        startDate: { $lte: localDay.endOf('day').toDate() },
+        $or: [{ endDate: null }, { endDate: { $gte: localDay.startOf('day').toDate() } }]
     }).lean();
 
-    // 3. Fetch reminders
     const reminders = await Reminder.find({
         userId,
         isActive: true,
-        startDate: { $lte: targetDate },
-        $or: [{ endDate: null }, { endDate: { $gte: targetDate } }]
+        startDate: { $lte: localDay.endOf('day').toDate() },
+        $or: [{ endDate: null }, { endDate: { $gte: localDay.startOf('day').toDate() } }]
     }).lean();
 
-    // 4. Prepare cards
     const newCards = [];
-    const todayStartUTC = dayjs(targetDate).startOf('day').toDate(); // ✅ correct
 
     medications.forEach(med => {
+        const timeStr = convertTo24Hour(med.time) || '00:00';
         newCards.push({
             userId,
-            scheduleDate: todayStartUTC,
-            scheduledTime: med.time,
-            title: "Medication",
+            scheduleDate: med.startDate, // use actual start date
+            scheduledTime: timeStr,
+            title: 'Medication',
             description: `${med.name} ${med.dosage}`,
             type: 'USER_MEDICATION',
             sourceId: med._id
@@ -100,10 +99,11 @@ const generateTimelineCardsForDay = async (userId, targetDate) => {
     });
 
     reminders.forEach(rem => {
+        const timeStr = convertTo24Hour(rem.time) || '00:00';
         newCards.push({
             userId,
-            scheduleDate: todayStartUTC,
-            scheduledTime: rem.time,
+            scheduleDate: rem.startDate, // use actual start date
+            scheduledTime: timeStr,
             title: rem.title,
             description: null,
             type: 'USER_REMINDER',
@@ -111,40 +111,34 @@ const generateTimelineCardsForDay = async (userId, targetDate) => {
         });
     });
 
-    console.log("Saved scheduleDate:", todayStartUTC);
-
-    // 5. Insert new cards
-    if (newCards.length > 0) {
-        await TimelineCard.insertMany(newCards);
-    }
+    if (newCards.length > 0) await TimelineCard.insertMany(newCards);
 };
 
 
-// ----------------------------------------------------------------------
-// Consolidated Home Screen API
-// ----------------------------------------------------------------------
+// -----------------------------------------------------
+// Home Screen Controller
+// -----------------------------------------------------
 exports.getHomeScreenData = async (req, res) => {
     const userId = req.user.userId;
-    const dateString = req.query.date || dayjs().format('YYYY-MM-DD');
+    const dateString = req.query.date || dayjs().tz(TZ).format('YYYY-MM-DD');
+    const todayDate = dayjs.tz(dateString, TZ).toDate();
 
     try {
-        // Fetch all required data concurrently for efficiency
+        await generateTimelineCardsForDay(userId, todayDate);
+
         const [userData, timelineData, cuoreScoreData] = await Promise.all([
             User.findById(userId).select('name profileImage').lean(),
             getTimelineData(userId, dateString),
             getCuoreScoreData(userId)
         ]);
 
-        if (!userData) {
-            return res.status(404).json({ message: "User data not found." });
-        }
-        
-        // Construct the final payload based on the requested format
-        const homeScreenPayload = {
+        if (!userData) return res.status(404).json({ message: 'User data not found.' });
+
+        const payload = {
             user: {
                 id: userId,
                 name: userData.name,
-                profileImage: userData.profileImage || "https://example.com/images/mjohnson.png"
+                profileImage: userData.profileImage || 'https://example.com/images/mjohnson.png'
             },
             date: dateString,
             summary: {
@@ -152,106 +146,65 @@ exports.getHomeScreenData = async (req, res) => {
                 message: `${timelineData.missed} ${timelineData.missed === 1 ? 'task' : 'tasks'} missed`,
             },
             progress: {
-                periods: cuoreScoreData.history.map((score, index, array) => ({
+                periods: cuoreScoreData.history.map((score, i, arr) => ({
                     month: dayjs(score.date).format("MMM 'YY"),
                     value: score.cuoreScore,
-                    userImage: index === array.length - 1 ? (userData.profileImage || "https://example.com/images/mjohnson.png") : undefined
+                    userImage: i === arr.length - 1 ? (userData.profileImage || 'https://example.com/images/mjohnson.png') : undefined
                 })),
-                goal: ">75%",
-                buttonText: "Update Biomarkers"
+                goal: '>75%',
+                buttonText: 'Update Biomarkers'
             },
-            motivationalMessage: "Every choice you make today sets you up for a healthier tomorrow.",
+            motivationalMessage: 'Every choice you make today sets you up for a healthier tomorrow.',
             alerts: timelineData.alerts,
             dailySchedule: timelineData.dailySchedule
         };
 
-        res.status(200).json(homeScreenPayload);
+        res.status(200).json(payload);
     } catch (error) {
-        console.error("Error fetching home screen data:", error);
-        res.status(500).json({ error: "Internal server error." });
+        console.error('Error fetching home screen data:', error);
+        res.status(500).json({ error: 'Internal server error.' });
     }
 };
 
-// ----------------------------------------------------------------------
-// REUSABLE HELPER FUNCTIONS
-// ----------------------------------------------------------------------
-
-const getCuoreScoreData = async (userId) => {
-    const scoreHistory = await Onboarding.find({ userId, 'scores.cuoreScore': { $exists: true, $ne: 0 } })
-        .select('scores.cuoreScore timestamp')
-        .sort({ timestamp: 1 })
-        .lean();
-
-    if (scoreHistory.length === 0) {
-        return { latestScore: 0, colorStatus: 'deep red', history: [] };
-    }
-
-    const latestDoc = scoreHistory[scoreHistory.length - 1];
-    const latestScore = latestDoc.scores.cuoreScore;
-
-    let colorStatus;
-    if (latestScore > 75) {
-        colorStatus = 'green';
-    } else if (latestScore >= 50) {
-        colorStatus = 'yellow';
-    } else if (latestScore >= 25) {
-        colorStatus = 'light red';
-    } else {
-        colorStatus = 'deep red';
-    }
-
-    return { 
-        latestScore: latestScore,
-        colorStatus: colorStatus,
-        history: scoreHistory.map(doc => ({
-            date: doc.timestamp,
-            cuoreScore: doc.scores.cuoreScore,
-        }))
-    };
-};
-
+// -----------------------------------------------------
+// Timeline Helper
+// -----------------------------------------------------
 const getTimelineData = async (userId, dateString) => {
-    // 1. Parse the target date in Asia/Kolkata timezone
-    const localDay = dayjs(dateString).tz('Asia/Kolkata').startOf('day');
-
-    // 2. Compute start and end of day in UTC for DB query
+    const localDay = dayjs.tz(dateString, TZ).startOf('day');
     const utcStart = localDay.utc().toDate();
     const utcEnd = localDay.endOf('day').utc().toDate();
 
-    // 3. Fetch onboarding data for wake time
     const onboarding = await Onboarding.findOne({ userId })
         .select('o6Data.sleep_hours o6Data.wake_time')
         .lean();
 
-    let preferredWakeTime = convertTo24Hour(onboarding?.o6Data?.wake_time) || '07:00';
-    const [wakeHour, wakeMinute] = preferredWakeTime.split(':').map(Number);
+    const preferredWake = convertTo24Hour(onboarding?.o6Data?.wake_time) || '07:00';
+    const [wakeHour, wakeMinute] = preferredWake.split(':').map(Number);
     let wakeUpAnchor = localDay.hour(wakeHour).minute(wakeMinute);
 
     if (!wakeUpAnchor.isValid()) wakeUpAnchor = localDay.hour(7).minute(0);
 
-    // 4. System cards with proper times
     const systemCards = [
-        { time: wakeUpAnchor, icon: "🌞", title: "Wake Up", description: "Start your day with Morning Harmony", type: 'SYSTEM_WAKEUP' },
-        { time: calculateScheduledTime(wakeUpAnchor, 105), icon: "🍳", title: "Breakfast", description: "Healthy smoothie with oats and banana", type: 'SYSTEM_NUTRITION' },
-        { time: calculateScheduledTime(wakeUpAnchor, 360), icon: "🏃", title: "Fitness", description: "Cardio & strength training", type: 'SYSTEM_FITNESS' },
-        { time: calculateScheduledTime(wakeUpAnchor, 480), icon: "🍽️", title: "Lunch", description: "Re-energize yourself", type: 'SYSTEM_NUTRITION' },
-        { time: calculateScheduledTime(wakeUpAnchor, 720), icon: "😴", title: "Short Nap or Walk", description: "Defeat the midday slump", type: 'SYSTEM_REST' },
-        { time: calculateScheduledTime(wakeUpAnchor, 960), icon: "🌙", title: "Dinner", description: "Balanced and light", type: 'SYSTEM_NUTRITION' },
-        { time: calculateScheduledTime(wakeUpAnchor, 1200), icon: "🛌", title: "Sleep", description: "Restore & repair", type: 'SYSTEM_REST' },
+        { time: wakeUpAnchor, icon: '🌞', title: 'Wake Up', description: 'Start your day with Morning Harmony', type: 'SYSTEM_WAKEUP' },
+        { time: calculateScheduledTime(wakeUpAnchor, 105), icon: '🍳', title: 'Breakfast', description: 'Healthy smoothie with oats and banana', type: 'SYSTEM_NUTRITION' },
+        { time: calculateScheduledTime(wakeUpAnchor, 360), icon: '🏃', title: 'Fitness', description: 'Cardio & strength training', type: 'SYSTEM_FITNESS' },
+        { time: calculateScheduledTime(wakeUpAnchor, 480), icon: '🍽️', title: 'Lunch', description: 'Re-energize yourself', type: 'SYSTEM_NUTRITION' },
+        { time: calculateScheduledTime(wakeUpAnchor, 720), icon: '😴', title: 'Short Nap or Walk', description: 'Defeat the midday slump', type: 'SYSTEM_REST' },
+        { time: calculateScheduledTime(wakeUpAnchor, 960), icon: '🌙', title: 'Dinner', description: 'Balanced and light', type: 'SYSTEM_NUTRITION' },
+        { time: calculateScheduledTime(wakeUpAnchor, 1200), icon: '🛌', title: 'Sleep', description: 'Restore & repair', type: 'SYSTEM_REST' },
     ].map(card => ({
         ...card,
-        completed: dayjs().isAfter(card.time),
+        completed: dayjs().tz(TZ).isAfter(card.time),
         reminder: true,
-        editable: card.type === 'SYSTEM_WAKEUP',
+        editable: card.type === 'SYSTEM_WAKEUP'
     }));
 
-    // 5. Fetch user timeline cards for this day only
-    const rawTimelineCards = await TimelineCard.find({
+    const rawCards = await TimelineCard.find({
         userId,
         scheduleDate: { $gte: utcStart, $lte: utcEnd }
     });
 
-    const userAndMedicationCards = rawTimelineCards.map(card => {
+    const userCards = rawCards.map(card => {
         let icon = '📝';
         let editable = true;
         let reminder = true;
@@ -259,8 +212,13 @@ const getTimelineData = async (userId, dateString) => {
         if (card.type === 'USER_MEDICATION') icon = '💊', editable = false;
         else if (card.type === 'USER_REMINDER') icon = '🔔';
 
-        // Parse the scheduledTime string in local timezone, exact as user entered
-        const parsedTime = dayjs(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD h:mm A');
+        // ✅ Parse 24h or 12h safely
+        let parsedTime;
+        if (card.scheduledTime.includes('AM') || card.scheduledTime.includes('PM')) {
+            parsedTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD hh:mm A', TZ);
+        } else {
+            parsedTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD HH:mm', TZ);
+        }
 
         return {
             time: parsedTime,
@@ -274,51 +232,63 @@ const getTimelineData = async (userId, dateString) => {
         };
     });
 
-    // 6. Combine system + user cards and sort by actual time
-    const allCards = [...systemCards, ...userAndMedicationCards]
-        .sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf())
-        .map(card => ({
-            ...card,
-            time: dayjs(card.time).format('h:mm A') // keep string like "10:00 AM"
-        }));
+    const allCards = [...systemCards, ...userCards]
+        .sort((a, b) => a.time.valueOf() - b.time.valueOf())
+        .map(card => ({ ...card, time: dayjs(card.time).tz(TZ).format('h:mm A') }));
 
-    // 7. Count missed tasks
     const missedTasks = allCards.filter(task =>
-        !task.completed && dayjs(`${localDay.format('YYYY-MM-DD')} ${task.time}`, 'YYYY-MM-DD h:mm A').isBefore(dayjs())
+        !task.completed && dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${task.time}`, 'YYYY-MM-DD h:mm A', TZ).isBefore(dayjs().tz(TZ))
     ).length;
 
     const alerts = missedTasks > 0 ? [{
-        type: "warning",
-        text: "Reassess to keep your plan aligned",
-        action: "Check Plan"
+        type: 'warning',
+        text: 'Reassess to keep your plan aligned',
+        action: 'Check Plan'
     }] : [];
 
     return { dailySchedule: allCards, missed: missedTasks, alerts };
 };
 
-// ----------------------------------------------------------------------
-// REMAINING EXPORTED FUNCTIONS (with critical fixes)
-// ----------------------------------------------------------------------
+// -----------------------------------------------------
+// Cuore Score Helper
+// -----------------------------------------------------
+const getCuoreScoreData = async (userId) => {
+    const scoreHistory = await Onboarding.find({ userId, 'scores.cuoreScore': { $exists: true, $ne: 0 } })
+        .select('scores.cuoreScore timestamp')
+        .sort({ timestamp: 1 })
+        .lean();
 
+    if (scoreHistory.length === 0) return { latestScore: 0, colorStatus: 'deep red', history: [] };
+
+    const latest = scoreHistory.at(-1);
+    const latestScore = latest.scores.cuoreScore;
+    let colorStatus = latestScore > 75 ? 'green' : latestScore >= 50 ? 'yellow' : latestScore >= 25 ? 'light red' : 'deep red';
+
+    return {
+        latestScore,
+        colorStatus,
+        history: scoreHistory.map(doc => ({ date: doc.timestamp, cuoreScore: doc.scores.cuoreScore }))
+    };
+};
+
+// -----------------------------------------------------
+// Add Entry
+// -----------------------------------------------------
 exports.addEntry = async (req, res) => {
     const userId = req.user.userId;
-    const { 
-        title, 
-        startDate, 
-        endDate,
-        time,
-        repeatFrequency,
-        isMedication
-    } = req.body;
+    const { title, startDate, endDate, time, repeatFrequency, isMedication } = req.body;
 
-    if (!title || !startDate || !time || !repeatFrequency) {
-        return res.status(400).json({ error: "Missing required scheduling fields (title / date / time / frequency)." });
-    }
+    if (!title || !time || !repeatFrequency)
+        return res.status(400).json({ error: 'Missing required scheduling fields.' });
 
     try {
-        const start = new Date(startDate);
-        const end = parseDate(endDate);
-        
+        // Use provided startDate or now
+        const startDay = dayjs.tz(startDate || new Date(), TZ); // <--- don't use startOf('day')
+        const endDay = endDate && endDate.toLowerCase() !== 'never' ? dayjs.tz(endDate, TZ).endOf('day') : null;
+
+        const standardizedTime = convertTo24Hour(time);
+        if (!standardizedTime) return res.status(400).json({ error: 'Invalid time format.' });
+
         let newEntry;
         if (isMedication) {
             const [name, dosage] = title.split(' ');
@@ -326,35 +296,38 @@ exports.addEntry = async (req, res) => {
                 userId,
                 name: name || title,
                 dosage: dosage || 'N/A',
-                startDate: start,
-                endDate: end,
-                time,
+                startDate: startDay.toDate(),   // exact timestamp
+                endDate: endDay ? endDay.toDate() : null,
+                time: standardizedTime,
                 repeatFrequency
             });
         } else {
             newEntry = await Reminder.create({
                 userId,
                 title,
-                startDate: start,
-                endDate: end,
-                time,
+                startDate: startDay.toDate(),   // exact timestamp
+                endDate: endDay ? endDay.toDate() : null,
+                time: standardizedTime,
                 repeatFrequency
             });
         }
-        
-        await generateTimelineCardsForDay(userId, dayjs().toDate());
 
-        return res.status(201).json({ 
-            message: `${isMedication ? 'Medication' : 'Reminder'} added successfully.`, 
-            type: isMedication ? 'medication' : 'reminder', 
-            data: newEntry 
+        // regenerate timeline for today
+        await generateTimelineCardsForDay(userId, dayjs().tz(TZ).toDate());
+
+        return res.status(201).json({
+            message: `${isMedication ? 'Medication' : 'Reminder'} added successfully.`,
+            type: isMedication ? 'medication' : 'reminder',
+            data: newEntry
         });
-
     } catch (error) {
         console.error('Error adding new timeline entry:', error);
-        return res.status(500).json({ error: "Internal server error: Could not save entry." });
+        return res.status(500).json({ error: 'Internal server error.' });
     }
 };
+
+
+
 
 exports.getEntries = async (req, res) => {
     const userId = req.user.userId;
