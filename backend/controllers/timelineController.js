@@ -4,6 +4,7 @@ const Reminder = require('../models/Reminder');
 const TimelineCard = require('../models/TimelineCard');
 const User = require('../models/User');
 const { Onboarding } = require('../models/onboardingModel.js');
+const NudgeHistory = require('../models/NudgeHistory');
 
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
@@ -19,6 +20,202 @@ dayjs.extend(isSameOrBefore);
 dayjs.extend(customParseFormat);
 
 const TZ = 'Asia/Kolkata';
+
+const NUDGES = {
+    today: {
+        smoking: [
+            "Smoking increases loss of memory & thinking abilities by 30-50%.",
+            "Smoking lowers testosterone, reducing libido, energy, and performance.",
+            "Smoking damages blood vessels, increasing the risk of heart disease & erectile dysfunction.",
+            "Smoking accelerates aging, leading to wrinkles and premature sagging.",
+            "Every cigarette takes minutes from your life—quitting gives them back.",
+            "An urge is just a thought, not a command. If you don’t act on it, it will pass.",
+            "The hardest part is starting. Once you do, you’re already ahead.",
+            "Don’t wait for motivation—take action, and motivation will follow.",
+            "Every choice you make today sets you up for a healthier tomorrow.",
+            "Your habits shape not only you but also your family’s future."
+        ],
+        medication_missed: [
+            "Your medications work best when they’re on schedule—set the alarm",
+            "Every missed dose is a missed opportunity for healing—stay on track",
+            "Medication is a bridge to better health—don’t leave gaps in the path.",
+            "Skipping your meds is like skipping steps on a ladder—sooner or later, you’ll fall.",
+            "Medication only helps if it’s in you, not the bottle—set a reminder, stay healthy."
+        ],
+        sleep_less: [
+            "Sleep is the foundation of your health.\" – Everything else rests on a good night’s sleep",
+            "Go to bed and wake up at the same time every day. (Yes, even on weekends)",
+            "Your body heals when you sleep.\" – Let sleep be the time when your body recovers and regenerates.",
+            "Nap wisely — too long or too late in the day can disrupt sleep.",
+            "Avoid distractions, keep phones and other devices out of the bedroom or in do not disturb mode",
+            "Sleep improves the ability to learn, memorize, retain, recall, and use the knowledge to solve problems creatively",
+            "Sleeping late or skipping sleep disrupts memory processing."
+        ],
+        stress: [
+            "A positive mindset makes every goal more achievable.",
+            "Take life one breath at a time—stress doesn’t control you, you control it.",
+            "Inhale calm, exhale stress – Every breath is a chance to reset.",
+            "Peace begins when you stop fighting your thoughts and start embracing the present.",
+            "Release what you can’t control and focus on what you can.",
+            "One step, one breath, one moment at a time—you are doing better than you think.",
+            "Cultivate a positive mindset – Mental health is key to overall wellness.",
+            "Deep breaths refresh the mind, just as sleep restores the body.",
+            "A relaxed mind is a creative mind—clarity comes when stress fades.",
+            "Your mind deserves the same care and rest as your body—nurture it."
+        ],
+        meditation_missed: [
+            "Pair your meditation with a morning activity or while drifting off to sleep",
+            "Meditation doesn’t require perfection; it just needs your presence.",
+            "Even a minute of mindful breathing can reset your day—start small and watch it grow.",
+            "Breathe in clarity, breathe out stress: a small daily ritual can spark a big change",
+            "Begin each day with a gentle pause—just a few breaths can open the door to peace.",
+            "Turn waiting time into mindful time—every quiet moment is a chance to reset.",
+            "Inhale peace, exhale worry: let each breath be your anchor to the present moment"
+        ],
+        nutrition: [
+            "You can’t outwork a bad diet—a healthy lifestyle starts in the kitchen.",
+            "Small, smart choices in the kitchen lead to big results in your health.",
+            "Healthy eating is about sustainable habits, not restrictions.",
+            "Hydration is the foundation of good health—drink water, not sugar.",
+            "Your gut health influences everything—choose foods that support digestion.",
+            "Higher intake of vegetables, fiber, and fruits promotes better heart health.",
+            "Maintain vigor & vitality through balanced nutrition and exercise.",
+            "A high-fat, sugary diet may lead to long-lasting memory impairments.",
+            "Healthy meals are linked to improved memory.",
+            "Processed foods drain energy, while real foods sustain it."
+        ],
+        fitness: [
+            "You are stronger than your excuses—push through!",
+            "Just exercise – Every bit of movement counts, no matter how small.",
+            "Movement is medicine – Every step strengthens your body and mind.",
+            "Consistency beats intensity—small, daily efforts bring the best results.",
+            "Strength training slows bone loss that comes with age.",
+            "A combination of strength and cardio training is optimal for heart health.",
+            "Moderate-intensity exercise improves thinking and memory.",
+            "Physical activity is a natural stress reliever.",
+            "The only bad workout is the one you didn’t do.",
+            "Yoga supports a healthy circulatory and respiratory system.",
+            "Active bodies age better—keep moving for longevity"
+        ],
+        breakfast_missed: [
+            "When you skip breakfast, your body runs on stress, not strength.",
+            "Eat well, feel well, do well—never underestimate the power of breakfast",
+            "Skipping breakfast won’t save time—it’ll cost you energy, focus, and mood.",
+            "A morning without breakfast leads to sluggish steps and scattered thoughts.",
+            "Skipping breakfast is like hitting snooze on your metabolism—wake it up with real food.",
+            "Ditching breakfast doesn’t mean eating less—it means craving more junk later.",
+            "No breakfast, no balance—hunger now, cravings later, exhaustion all day.",
+            "When you wake up, your brain is ready to go—don’t leave it starving at the start line.",
+            "Your morning meal is the foundation of your day—skip it, and cracks will show.",
+            "Skipping breakfast won’t make you lighter, just weaker."
+        ],
+        default: [
+            "Children learn healthy choices by observing you.",
+            "Small steps lead to big changes—keep moving forward.",
+            "It’s not about being the best; it’s about being better than yesterday.",
+            "Stay patient, stay committed, and the results will come.",
+            "Progress isn’t about perfection—it’s about consistency.",
+            "Every workout, every healthy meal, every mindful choice adds up.",
+            "You don’t have to be perfect, just persistent.",
+            "Success is built on daily choices—make today count!",
+            "Believe in your journey, even when results take time to show."
+        ],
+    }
+};
+
+async function hasMissedTaskInPastDays(userId, taskTitle, days) {
+    const thresholdDate = dayjs().tz(TZ).subtract(days, 'day').startOf('day').toDate();
+    const missedTaskCount = await TimelineCard.countDocuments({
+        userId,
+        title: taskTitle,
+        isCompleted: false,
+        scheduleDate: { $gte: thresholdDate }
+    });
+    return missedTaskCount > 0;
+}
+
+async function getNudge(userId) {
+    const now = dayjs().tz(TZ);
+    const onboarding = await Onboarding.findOne({ userId }).lean();
+    if (!onboarding) return NUDGES.today.default[0];
+
+    // Condition: Nudge refreshes on 1st app opening of the day
+    if (onboarding.nudgeLastRefresh && dayjs(onboarding.nudgeLastRefresh).tz(TZ).isSame(now, 'day')) {
+        return onboarding.lastShownNudgeText || NUDGES.today.default[0];
+    }
+
+    // --- Calculate scores for all "Today" conditions based on the document ---
+    const scores = {
+        smoking: onboarding.scores?.o2Score || 0,
+        medication_missed: await hasMissedTaskInPastDays(userId, 'Medication', 1) ? 8 : 0,
+        sleep_less: (onboarding.scores?.o6Score || 0) > 3 ? (onboarding.scores.o6Score) : 0,
+        stress: 0, // Calculated below
+        meditation_missed: await hasMissedTaskInPastDays(userId, 'Short Nap or Walk', 3) ? 4 : 0, // Assuming "Short Nap or Walk" is the meditation task
+        nutrition: (onboarding.scores?.nutrition_score || 0) > 3 ? (onboarding.scores.nutrition_score) : 0,
+        fitness: await hasMissedTaskInPastDays(userId, 'Fitness', 3) ? 4 : 0,
+        breakfast_missed: await hasMissedTaskInPastDays(userId, 'Breakfast', 2) ? 4 : 0,
+    };
+
+    // Calculate average stress score from O6
+    const stressScores = onboarding.scores?.stressScores || {}; // Assuming stress scores are stored here
+    const stressValues = Object.values(stressScores);
+    if (stressValues.length > 0) {
+        const avgStress = stressValues.reduce((a, b) => a + b, 0) / stressValues.length;
+        if (avgStress > 3) {
+            scores.stress = avgStress;
+        }
+    }
+
+    // --- Determine the winning segment based on the highest score ---
+    let highestScore = 0;
+    Object.values(scores).forEach(score => {
+        if (score > highestScore) highestScore = score;
+    });
+
+    let winningSegments = [];
+    if (highestScore > 0) {
+        Object.entries(scores).forEach(([segment, score]) => {
+            if (score === highestScore) winningSegments.push(segment);
+        });
+    }
+
+    let selectedSegment = 'default';
+    if (winningSegments.length > 0) {
+        if (winningSegments.length > 1) { // Handle ties by alternating
+            const lastWinner = onboarding.lastNudgeWinner || '';
+            const lastWinnerIndex = winningSegments.indexOf(lastWinner);
+            const nextIndex = (lastWinnerIndex + 1) % winningSegments.length;
+            selectedSegment = winningSegments[nextIndex];
+        } else { // Only one winner
+            selectedSegment = winningSegments[0];
+        }
+    }
+    
+    // --- Get the next nudge from the selected segment, ensuring no repeats ---
+    const nudgeHistory = await NudgeHistory.findOneAndUpdate(
+        { userId, segment: `today_${selectedSegment}` },
+        { $inc: { lastShownIndex: 1 } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+    ).lean();
+    
+    const nudgeArray = NUDGES.today[selectedSegment];
+    const nextIndex = nudgeHistory.lastShownIndex % nudgeArray.length;
+    const nudgeText = nudgeArray[nextIndex];
+
+    // --- Save the state for the next day/request ---
+    await Onboarding.updateOne(
+        { userId },
+        {
+            $set: {
+                nudgeLastRefresh: now.toDate(),
+                lastShownNudgeText: nudgeText,
+                lastNudgeWinner: selectedSegment
+            }
+        }
+    );
+
+    return nudgeText;
+}
 
 // -----------------------------------------------------
 // Utility Functions
@@ -345,11 +542,13 @@ exports.getHomeScreenData = async (req, res) => {
     try {
         await generateTimelineCardsForDay(userId, todayDate);
 
-        const [userData, timelineData, cuoreScoreData, alerts] = await Promise.all([
+        // **MODIFIED**: Added getNudge back into the Promise.all
+        const [userData, timelineData, cuoreScoreData, alerts, motivationalMessage] = await Promise.all([
             User.findById(userId).select('name profileImage').lean(),
             getTimelineData(userId, dateString),
             getCuoreScoreData(userId),
-            getAlerts(userId)
+            getAlerts(userId),
+            getNudge(userId) // Now gets the dynamic nudge
         ]);
 
         if (!userData) return res.status(404).json({ message: 'User data not found.' });
@@ -374,8 +573,9 @@ exports.getHomeScreenData = async (req, res) => {
                 goal: '>75%',
                 buttonText: 'Update Biomarkers'
             },
-            motivationalMessage: 'Every choice you make today sets you up for a healthier tomorrow.',
-            alerts: alerts, // Now populated by the getAlerts helper
+            // **MODIFIED**: This message is now dynamic based on your nudge logic
+            motivationalMessage: motivationalMessage,
+            alerts: alerts,
             dailySchedule: timelineData.dailySchedule
         };
 
@@ -725,4 +925,3 @@ exports.getCuoreScoreDetails = async (req, res) => {
         res.status(500).json({ error: "Internal server error." });
     }
 };
-

@@ -12,6 +12,9 @@ class ValidationError extends Error {
 const onboardingSchema = new mongoose.Schema({
     userId: { type: String, required: true, unique: true },
     onboardingVersion: { type: String, required: true },
+    nudgeLastRefresh: { type: Date },
+lastShownNudgeText: { type: String },
+lastNudgeWinner: { type: String },
     o2Data: {
         age: { type: Number, required: true },
         gender: { type: String, required: true },
