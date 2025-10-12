@@ -172,6 +172,108 @@ const calculateHealthMetrics = (onboardingDoc) => {
     };
 };
 
+// Alerts function
+const getAlerts = async (userId) => {
+    const alerts = [];
+    const onboarding = await Onboarding.findOne({ userId }).lean();
+    if (!onboarding) return [];
+
+    const { scores, o3Data, o7Data } = onboarding;
+    const now = dayjs();
+
+    // --- Red Alerts (Critical) ---
+    // Rule 225: SOB or chest discomfort in Onboarding 3
+    if (o3Data.q5) {
+        alerts.push({ type: 'red', text: 'Consult your doctor promptly.', action: 'Consult' });
+    }
+    // Rule 234, 244: High/low BP
+    if (o7Data.bp_upper > 170 || o7Data.bp_upper < 90 || o7Data.bp_lower > 110 || o7Data.bp_lower < 60) {
+        alerts.push({ type: 'red', text: 'Consult your doctor for BP.', action: 'Consult' });
+    }
+    // Rule 254: High/low pulse rate
+    if (o7Data.pulse < 50 || o7Data.pulse > 120) {
+        alerts.push({ type: 'red', text: 'Consult your doctor for heart rate.', action: 'Consult' });
+    }
+    // Rule 287: O2 Saturation
+    if (o7Data.o2_sat < 91) {
+        alerts.push({ type: 'red', text: 'Consult your doctor for O2 Sat.', action: 'Consult' });
+    }
+    // Rule 223: Check-in requested by doctor (Requires a flag from Veyra/doctor app)
+    // if (onboarding.doctorCheckinRequested) {
+    //     alerts.push({ type: 'red', text: 'Check-in requested by doctor.' });
+    // }
+
+    // --- Orange Alerts (Important) ---
+    // Rule 224: Cuore score low and last consultation is old
+    // NOTE: Requires a last_consultation_date field in the Onboarding model
+    // if (scores.cuoreScore < 55 && dayjs(onboarding.lastConsultationDate).isBefore(now.subtract(100, 'days'))) {
+    //     alerts.push({ type: 'orange', text: 'It’s time to check in with your doctor.' });
+    // }
+    // Rule 227: Diabetes symptoms in Onboarding 3
+    if (o3Data.q6) {
+        alerts.push({ type: 'orange', text: 'Consult your doctor for diabetes.', action: 'Consult' });
+    }
+    // Rule 228: Reassessment not done
+    // NOTE: Requires a last_reassessment_date field in Onboarding model
+    // if (dayjs(onboarding.lastReassessmentDate).isBefore(now.subtract(55, 'days'))) {
+    //     alerts.push({ type: 'orange', text: 'Reassess now to keep your plan aligned.', action: 'Reassess' });
+    // }
+    // Rule 235, 245: Borderline BP
+    if ((o7Data.bp_upper >= 150 && o7Data.bp_upper <= 170) || (o7Data.bp_upper >= 90 && o7Data.bp_upper <= 100) ||
+        (o7Data.bp_lower >= 100 && o7Data.bp_lower <= 110) || (o7Data.bp_lower >= 60 && o7Data.bp_lower <= 66)) {
+        alerts.push({ type: 'orange', text: 'Consult your doctor for BP.', action: 'Consult' });
+    }
+    // Rule 261, 268: Borderline blood sugar
+    if (o7Data.bs_f > 240 || o7Data.bs_f < 100 || o7Data.bs_am > 260 || o7Data.bs_am < 120) {
+        alerts.push({ type: 'orange', text: 'Monitor sugar & consult your doctor.', action: 'Monitor' });
+    }
+    // Rule 295: Cholesterol
+    if (o7Data.HDL < 45 || o7Data.LDL > 180 || o7Data.Trig > 200) {
+        alerts.push({ type: 'orange', text: 'Consult your doctor for Cholesterol.', action: 'Consult' });
+    }
+
+    // --- Yellow Alerts (Warning) ---
+    // Rule 236, 246: Monitor BP
+    if ((o7Data.bp_upper >= 140 && o7Data.bp_upper <= 150) || (o7Data.bp_upper >= 100 && o7Data.bp_upper <= 110) ||
+        (o7Data.bp_lower >= 88 && o7Data.bp_lower <= 100) || (o7Data.bp_lower >= 66 && o7Data.bp_lower <= 74)) {
+        alerts.push({ type: 'yellow', text: 'Monitor BP.', action: 'Monitor' });
+    }
+    // Rule 262, 269: Monitor sugar
+    if ((o7Data.bs_f >= 200 && o7Data.bs_f <= 240) || (o7Data.bs_f >= 100 && o7Data.bs_f <= 140) ||
+        (o7Data.bs_am >= 220 && o7Data.bs_am <= 260) || (o7Data.bs_am >= 120 && o7Data.bs_am <= 160)) {
+        alerts.push({ type: 'yellow', text: 'Monitor sugar.', action: 'Monitor' });
+    }
+    // Rule 237, 247: BP spike (Requires previous readings)
+    // if (o7Data.bp_upper - previous_bp_upper > 20 || o7Data.bp_lower - previous_bp_lower > 10) {
+    //     alerts.push({ type: 'yellow', text: 'BP spike! Try deep breathing.', action: 'Breathing' });
+    // }
+    // Rule 293: Exercise timing
+    // NOTE: This requires knowing meal times, a complex check
+    // if (exerciseTime is within 60 mins of a meal) {
+    //     alerts.push({ type: 'yellow', text: 'Avoid exercising within 60 minutes of eating.' });
+    // }
+
+    // --- Pale Yellow Alerts (Advisory) ---
+    // Rule 232: Update blood reports
+    // NOTE: Requires last_report_date fields
+    // if (dayjs(onboarding.lastBloodReportDate).isBefore(now.subtract(12, 'months'))) {
+    //     alerts.push({ type: 'pale_yellow', text: 'Update blood reports.', action: 'Update' });
+    // }
+    // Rule 294: Connect to a doctor
+    if (!onboarding.doctor_code) {
+        alerts.push({ type: 'pale_yellow', text: 'Connect to a doctor for alert monitoring.', action: 'Connect' });
+    }
+
+    // Sort alerts by severity (Red > Orange > Yellow > Pale Yellow)
+    const severityOrder = { 'red': 1, 'orange': 2, 'yellow': 3, 'pale_yellow': 4 };
+    if (alerts.length > 0) {
+        alerts.sort((a, b) => severityOrder[a.type] - severityOrder[b.type]);
+        // Return only the most critical alert
+        return [alerts[0]];
+    }
+
+    return [];
+};
 // -----------------------------------------------------
 // Generate Timeline Cards
 // -----------------------------------------------------
@@ -243,10 +345,11 @@ exports.getHomeScreenData = async (req, res) => {
     try {
         await generateTimelineCardsForDay(userId, todayDate);
 
-        const [userData, timelineData, cuoreScoreData] = await Promise.all([
+        const [userData, timelineData, cuoreScoreData, alerts] = await Promise.all([
             User.findById(userId).select('name profileImage').lean(),
             getTimelineData(userId, dateString),
-            getCuoreScoreData(userId)
+            getCuoreScoreData(userId),
+            getAlerts(userId)
         ]);
 
         if (!userData) return res.status(404).json({ message: 'User data not found.' });
@@ -272,7 +375,7 @@ exports.getHomeScreenData = async (req, res) => {
                 buttonText: 'Update Biomarkers'
             },
             motivationalMessage: 'Every choice you make today sets you up for a healthier tomorrow.',
-            alerts: timelineData.alerts,
+            alerts: alerts, // Now populated by the getAlerts helper
             dailySchedule: timelineData.dailySchedule
         };
 
