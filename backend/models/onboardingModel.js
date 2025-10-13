@@ -39,12 +39,12 @@ lastNudgeWinner: { type: String },
         cuoreScore: { type: Number, default: 0 }
     },
     o3Data: {
-        q1: { type: Boolean },
-        q2: { type: Boolean },
-        q3: { type: Boolean },
-        q4: { type: Boolean },
-        q5: { type: Boolean },
-        q6: { type: Boolean },
+        q1: { type: String },
+        q2: { type: String },
+        q3: { type: String },
+        q4: { type: String },
+        q5: { type: String },
+        q6: { type: String },
         other_conditions: { type: String },
         hasHypertension: { type: Boolean, default: false },
         hasDiabetes: { type: Boolean, default: false }
@@ -154,23 +154,48 @@ const validateAndCalculateScores = (data) => {
 };
 
 const processO3Data = (o3Data) => {
-    const selectedOptions = o3Data.selectedOptions || [];
-    const q1 = selectedOptions.includes("One of my parents was diagnosed with diabetes before the age of 60");
-    const q2 = selectedOptions.includes("One of my parents had a heart attack before the age of 60");
-    const q3 = selectedOptions.includes("I have Hypertension (High blood pressure)");
-    const q4 = selectedOptions.includes("I have Diabetes (High blood sugar)");
-    const q5 = selectedOptions.includes("I feel short of breath or experience chest discomfort even during mild activity or at rest");
-    const q6 = selectedOptions.includes("I've noticed an increase in hunger, thirst, or the need to urinate frequently");
+    // Define the question strings to avoid repetition
+    const Q1_TEXT = "One of my parents was diagnosed with diabetes before the age of 60";
+    const Q2_TEXT = "One of my parents had a heart attack before the age of 60";
+    const Q3_TEXT = "I have Hypertension (High blood pressure)";
+    const Q4_TEXT = "I have Diabetes (High blood sugar)";
+    const Q5_TEXT = "I feel short of breath or experience chest discomfort even during mild activity or at rest";
+    const Q6_TEXT = "I've noticed an increase in hunger, thirst, or the need to urinate frequently";
 
-    const o3Score = (q1 ? 2 : 0) + (q2 ? 2 : 0) + (q3 ? 4 : 0) + (q4 ? 6 : 0) + (q5 ? 8 : 0) + (q6 ? 4 : 0);
+    const selectedOptions = o3Data.selectedOptions || [];
+
+    // Use boolean flags for score calculation and hasHypertension/hasDiabetes flags
+    const q1_selected = selectedOptions.includes(Q1_TEXT);
+    const q2_selected = selectedOptions.includes(Q2_TEXT);
+    const q3_selected = selectedOptions.includes(Q3_TEXT);
+    const q4_selected = selectedOptions.includes(Q4_TEXT);
+    const q5_selected = selectedOptions.includes(Q5_TEXT);
+    const q6_selected = selectedOptions.includes(Q6_TEXT);
+
+    // The score calculation remains the same, as the boolean flags work perfectly
+    const o3Score = (q1_selected ? 2 : 0) + (q2_selected ? 2 : 0) + (q3_selected ? 4 : 0) + (q4_selected ? 6 : 0) + (q5_selected ? 8 : 0) + (q6_selected ? 4 : 0);
+    
     const originalOtherConditions = o3Data.other_conditions || "";
-    const updatedFlags = { hasHypertension: q3, hasDiabetes: q4 };
+    const updatedFlags = { hasHypertension: q3_selected, hasDiabetes: q4_selected };
+
+    // This logic also remains unchanged
     const htnSynonyms = /hypertension|htn|high\sblood\spressure|bp/i;
     if (htnSynonyms.test(originalOtherConditions)) updatedFlags.hasHypertension = true;
     const dmSynonyms = /diabetes|dm|high\sblood\ssugar|sugar/i;
     if (dmSynonyms.test(originalOtherConditions)) updatedFlags.hasDiabetes = true;
 
-    const mappedO3Data = { q1, q2, q3, q4, q5, q6, other_conditions: originalOtherConditions, ...updatedFlags };
+    // **NEW**: Create the final object with the full string for selected options, or `false` if not selected.
+    const mappedO3Data = {
+        q1: q1_selected ? Q1_TEXT : false,
+        q2: q2_selected ? Q2_TEXT : false,
+        q3: q3_selected ? Q3_TEXT : false,
+        q4: q4_selected ? Q4_TEXT : false,
+        q5: q5_selected ? Q5_TEXT : false,
+        q6: q6_selected ? Q6_TEXT : false,
+        other_conditions: originalOtherConditions,
+        ...updatedFlags
+    };
+
     return { o3Data: mappedO3Data, o3Score };
 };
 
@@ -266,50 +291,44 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     try {
         const existingDoc = await OnboardingModel.findOne({ userId });
 
-        const isFullReassessment = !!(payload.o2Data && payload.o3Data);
-        // An O7 flow can be a manual update (payload.o7Data exists) or an autofill trigger (empty payload).
-        const isO7Flow = !isFullReassessment && existingDoc;
-
-        if (!isFullReassessment && !isO7Flow) {
-            throw new ValidationError("Invalid payload for this user state. Must provide full reassessment data or have existing data to update.");
-        }
-
-        let finalDataToSave = { userId, timestamp: new Date() };
-        let baseScores;
-
-        if (isFullReassessment) {
-            // --- FLOW 1: FULL REASSESSMENT (O2-O7) ---
-            const o2Metrics = validateAndCalculateScores(payload.o2Data);
-            const o3Metrics = processO3Data(payload.o3Data);
-            const o4Metrics = processO4Data(payload.o4Data);
-            const o5Metrics = processO5Data(payload.o5Data);
-            const o6Metrics = processO6Data(payload.o6Data);
-
-            finalDataToSave = { ...finalDataToSave, onboardingVersion: "7", o2Data: o2Metrics.o2Data, derivedMetrics: o2Metrics.derivedMetrics, o3Data: o3Metrics.o3Data, o4Data: o4Metrics.o4Data, o5Data: o5Metrics.o5Data, o6Data: o6Metrics.o6Data };
-            baseScores = { ...o2Metrics.scores, o3Score: o3Metrics.o3Score, o4Score: o4Metrics.o4Score, o5Score: o5Metrics.o5Score, o6Score: o6Metrics.o6Score };
-
-        } else { // isO7Flow
-            // --- FLOW 2: BIOMARKER-ONLY UPDATE (O7) ---
-            finalDataToSave = { ...finalDataToSave, onboardingVersion: existingDoc.onboardingVersion, o2Data: existingDoc.o2Data, derivedMetrics: existingDoc.derivedMetrics, o3Data: existingDoc.o3Data, o4Data: existingDoc.o4Data, o5Data: existingDoc.o5Data, o6Data: existingDoc.o6Data };
-            baseScores = existingDoc.scores;
+        if (!existingDoc && !payload.o2Data) {
+            throw new ValidationError("A full submission (starting with o2Data) is required for the first onboarding.");
         }
 
         // ============================================================================
-        // ## MODIFIED SECTION: AUTO-CALCULATION LOGIC ADDED ##
+        // ## NEW UNIFIED LOGIC: MERGE INCOMING PAYLOAD WITH EXISTING DATA ##
         // ============================================================================
+        // Start with the existing data (if it exists), then intelligently merge the new payload on top.
+        // The spread operator (...) handles this perfectly. Any new values in the payload
+        // will overwrite old ones, and empty objects will have no effect.
+        const mergedData = {
+            ...(existingDoc ? existingDoc.toObject() : {}),
+            ...payload,
+            o2Data: { ...(existingDoc ? existingDoc.o2Data : {}), ...payload.o2Data },
+            o3Data: { ...(existingDoc ? existingDoc.o3Data : {}), ...payload.o3Data },
+            o4Data: { ...(existingDoc ? existingDoc.o4Data : {}), ...payload.o4Data },
+            o5Data: { ...(existingDoc ? existingDoc.o5Data : {}), ...payload.o5Data },
+            o6Data: { ...(existingDoc ? existingDoc.o6Data : {}), ...payload.o6Data },
+            o7Data: { ...(existingDoc ? existingDoc.o7Data : {}), ...payload.o7Data },
+        };
+
+        // --- ALWAYS PROCESS THE FINAL, MERGED DATA ---
+        const o2Metrics = validateAndCalculateScores(mergedData.o2Data);
+        const o3Metrics = processO3Data(mergedData.o3Data);
+        const o4Metrics = processO4Data(mergedData.o4Data);
+        const o5Metrics = processO5Data(mergedData.o5Data);
+        const o6Metrics = processO6Data(mergedData.o6Data);
+
+        // --- O7 PROCESSING (INCLUDES AUTO-FILL LOGIC IF NEEDED) ---
         let processedO7Data;
-        const isAutofill = !payload.o7Data || Object.keys(payload.o7Data).length === 0;
+        const isO7Empty = !mergedData.o7Data || Object.keys(mergedData.o7Data).length === 0;
 
-        if (isAutofill) {
-            // **AUTO-CALCULATION PATH**
-            const totalScoreBeforeO7 = Object.values(baseScores)
-                .filter(score => typeof score === 'number')
-                .reduce((sum, score) => sum + score, 0);
-
+        if (isO7Empty) {
+            const tempScores = { ...o2Metrics.scores, o3Score: o3Metrics.o3Score, o4Score: o4Metrics.o4Score, o5Score: o5Metrics.o5Score, o6Score: o6Metrics.o6Score };
+            const totalScoreBeforeO7 = Object.values(tempScores).filter(s => typeof s === 'number').reduce((a, b) => a + b, 0);
             processedO7Data = getAutofillData(totalScoreBeforeO7);
         } else {
-            // **MANUAL ENTRY VALIDATION PATH**
-            const { o7Data } = payload;
+            const { o7Data } = mergedData;
             const { o2_sat, pulse, bp_upper, bp_lower, bs_f, bs_am, A1C, HDL, LDL, Trig, HsCRP } = o7Data;
             if ([o2_sat, pulse, bp_upper, bp_lower, bs_f, bs_am, HDL, LDL, Trig, HsCRP].some(v => v == null)) {
                 throw new ValidationError("Missing required biomarker fields for manual entry.");
@@ -319,21 +338,45 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
             const trig_hdl_ratio = roundTo(Trig / HDL, 2);
             processedO7Data = { ...o7Data, HsCRP: normalizedHsCRP, A1C: calculatedA1C, trig_hdl_ratio, auto_filled: false };
         }
-        
-        // --- COMMON LOGIC: RECALCULATE FINAL SCORES AND SAVE ---
+
+        // --- ALWAYS RECALCULATE ALL SCORES ---
         const o7Score = score_o2_sat(processedO7Data.o2_sat) + score_hr(processedO7Data.pulse) + (score_bp_upper(processedO7Data.bp_upper) + score_bp_lower(processedO7Data.bp_lower)) / 2 + (score_bs_f(processedO7Data.bs_f) + score_bs_am(processedO7Data.bs_am) + score_a1c(processedO7Data.A1C)) / 3 + score_hdl(processedO7Data.HDL) + score_ldl(processedO7Data.LDL) + score_trig(processedO7Data.Trig) + score_hscrp(processedO7Data.HsCRP) + score_trig_hdl_ratio(processedO7Data.trig_hdl_ratio);
-        const allScores = { ...baseScores, o7Score };
+        const allScores = { ...o2Metrics.scores, o3Score: o3Metrics.o3Score, o4Score: o4Metrics.o4Score, o5Score: o5Metrics.o5Score, o6Score: o6Metrics.o6Score, o7Score };
+        
+        const finalDataToSave = {
+            userId,
+            onboardingVersion: "7",
+            o2Data: o2Metrics.o2Data,
+            derivedMetrics: o2Metrics.derivedMetrics,
+            o3Data: o3Metrics.o3Data,
+            o4Data: o4Metrics.o4Data,
+            o5Data: o5Metrics.o5Data,
+            o6Data: o6Metrics.o6Data,
+            o7Data: processedO7Data,
+            timestamp: new Date(),
+        };
+
         allScores.cuoreScore = calculateCuoreScore(finalDataToSave, allScores);
-
         finalDataToSave.scores = allScores;
-        finalDataToSave.o7Data = processedO7Data;
 
+        // --- DATABASE UPDATE ---
+        const updateOperation = {
+            $set: finalDataToSave
+        };
+
+        // Only add to history if the user actually submitted new O7 data
+        if (payload.o7Data && Object.keys(payload.o7Data).length > 0) {
+            updateOperation.$push = {
+                o7History: {
+                    data: processedO7Data,
+                    timestamp: finalDataToSave.timestamp
+                }
+            };
+        }
+        
         const finalOnboardingDoc = await OnboardingModel.findOneAndUpdate(
             { userId },
-            {
-                $set: finalDataToSave,
-                $push: { o7History: { data: processedO7Data, timestamp: finalDataToSave.timestamp } }
-            },
+            updateOperation,
             { new: true, upsert: true, runValidators: true }
         );
 
