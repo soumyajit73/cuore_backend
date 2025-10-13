@@ -593,7 +593,13 @@ exports.getHomeScreenData = async (req, res) => {
 // Timeline Helper
 // -----------------------------------------------------
 const getTimelineData = async (userId, dateString) => {
-    const localDay = dayjs.tz(dateString, TZ).startOf('day');
+    let localDay = dayjs.tz(dateString, TZ);
+    if (!localDay.isValid()) {
+        console.warn(`Invalid dateString received in getTimelineData: "${dateString}". Falling back to today.`);
+        localDay = dayjs().tz(TZ);
+    }
+    localDay = localDay.startOf('day');
+
     const utcStart = localDay.utc().toDate();
     const utcEnd = localDay.endOf('day').utc().toDate();
 
@@ -627,32 +633,41 @@ const getTimelineData = async (userId, dateString) => {
         scheduleDate: { $gte: utcStart, $lte: utcEnd }
     });
 
-    const userCards = rawCards.map(card => {
-        let icon = '📝';
-        let editable = true;
-        let reminder = true;
+    const userCards = rawCards
+        .map(card => {
+            if (!card.scheduledTime) return null;
 
-        if (card.type === 'USER_MEDICATION') icon = '💊', editable = false;
-        else if (card.type === 'USER_REMINDER') icon = '🔔';
+            let parsedTime;
+            if (card.scheduledTime.includes('AM') || card.scheduledTime.includes('PM')) {
+                parsedTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD hh:mm A', TZ);
+            } else {
+                parsedTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD HH:mm', TZ);
+            }
+            if (!parsedTime.isValid()) return null;
 
-        let parsedTime;
-        if (card.scheduledTime.includes('AM') || card.scheduledTime.includes('PM')) {
-            parsedTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD hh:mm A', TZ);
-        } else {
-            parsedTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD HH:mm', TZ);
-        }
+            // =====================================================
+            // ## THIS IS THE CHANGE YOU REQUESTED ##
+            // =====================================================
+            const cardObject = {
+                time: parsedTime,
+                icon: card.type === 'USER_MEDICATION' ? '💊' : '🔔',
+                title: card.title,
+                description: card.description,
+                completed: card.isCompleted,
+                reminder: true,
+                editable: card.type !== 'USER_MEDICATION',
+                type: card.type
+            };
 
-        return {
-            time: parsedTime,
-            icon,
-            title: card.title,
-            description: card.description,
-            completed: card.isCompleted,
-            reminder,
-            editable,
-            type: card.type
-        };
-    });
+            // Add the original ID for user-generated cards to make editing easy
+            if (card.type === 'USER_REMINDER' || card.type === 'USER_MEDICATION') {
+                cardObject.id = card.sourceId.toString();
+            }
+
+            return cardObject;
+            // =====================================================
+        })
+        .filter(Boolean);
 
     const allCards = [...systemCards, ...userCards]
         .sort((a, b) => a.time.valueOf() - b.time.valueOf())
