@@ -82,8 +82,13 @@ lastNudgeWinner: { type: String },
         Trig: { type: Number },
         HsCRP: { type: Number },
         trig_hdl_ratio: { type: Number },
-        auto_filled: { type: Boolean, default: false }
+        auto_filled: { type: Boolean, default: false },
+        
     },
+    o7History: [{
+    data: { type: Object }, // This will store a snapshot of the o7Data
+    timestamp: { type: Date, default: Date.now }
+}],
     timestamp: { type: Date, default: Date.now },
 });
 
@@ -260,114 +265,84 @@ const calculateCuoreScore = (allData, allScores) => {
 exports.processAndSaveFinalSubmission = async (userId, payload) => {
     try {
         const existingDoc = await OnboardingModel.findOne({ userId });
-        
-        const { o2Data, o3Data, o4Data, o5Data, o6Data, o7Data = {} } = payload;
-        
-        if (!o2Data || !o3Data || !o4Data || !o5Data || !o6Data) {
-            throw new ValidationError("Missing required modules. Please submit all data.");
+
+        const isFullReassessment = !!(payload.o2Data && payload.o3Data);
+        // An O7 flow can be a manual update (payload.o7Data exists) or an autofill trigger (empty payload).
+        const isO7Flow = !isFullReassessment && existingDoc;
+
+        if (!isFullReassessment && !isO7Flow) {
+            throw new ValidationError("Invalid payload for this user state. Must provide full reassessment data or have existing data to update.");
         }
-        
-        const o2Metrics = validateAndCalculateScores(o2Data);
-        const o4Metrics = processO4Data(o4Data); 
-        const o3Metrics = processO3Data(o3Data);
-        const o5Metrics = processO5Data(o5Data);
-        const o6Metrics = processO6Data(o6Data);
 
-        const mappedO7Data = {
-            o2_sat: o7Data.o2_sat,
-            pulse: o7Data.pulse,
-            bp_upper: o7Data.bp_upper,
-            bp_lower: o7Data.bp_lower,
-            bs_f: o7Data.bs_f,
-            bs_am: o7Data.bs_am,
-            A1C: o7Data.A1C,
-            HDL: o7Data.HDL,
-            LDL: o7Data.LDL,
-            Trig: o7Data.Trig,
-            HsCRP: o7Data.HsCRP
-        };
+        let finalDataToSave = { userId, timestamp: new Date() };
+        let baseScores;
 
+        if (isFullReassessment) {
+            // --- FLOW 1: FULL REASSESSMENT (O2-O7) ---
+            const o2Metrics = validateAndCalculateScores(payload.o2Data);
+            const o3Metrics = processO3Data(payload.o3Data);
+            const o4Metrics = processO4Data(payload.o4Data);
+            const o5Metrics = processO5Data(payload.o5Data);
+            const o6Metrics = processO6Data(payload.o6Data);
+
+            finalDataToSave = { ...finalDataToSave, onboardingVersion: "7", o2Data: o2Metrics.o2Data, derivedMetrics: o2Metrics.derivedMetrics, o3Data: o3Metrics.o3Data, o4Data: o4Metrics.o4Data, o5Data: o5Metrics.o5Data, o6Data: o6Metrics.o6Data };
+            baseScores = { ...o2Metrics.scores, o3Score: o3Metrics.o3Score, o4Score: o4Metrics.o4Score, o5Score: o5Metrics.o5Score, o6Score: o6Metrics.o6Score };
+
+        } else { // isO7Flow
+            // --- FLOW 2: BIOMARKER-ONLY UPDATE (O7) ---
+            finalDataToSave = { ...finalDataToSave, onboardingVersion: existingDoc.onboardingVersion, o2Data: existingDoc.o2Data, derivedMetrics: existingDoc.derivedMetrics, o3Data: existingDoc.o3Data, o4Data: existingDoc.o4Data, o5Data: existingDoc.o5Data, o6Data: existingDoc.o6Data };
+            baseScores = existingDoc.scores;
+        }
+
+        // ============================================================================
+        // ## MODIFIED SECTION: AUTO-CALCULATION LOGIC ADDED ##
+        // ============================================================================
         let processedO7Data;
-        let o7Score;
-        const isAutofill = Object.keys(o7Data).length === 0;
-        
+        const isAutofill = !payload.o7Data || Object.keys(payload.o7Data).length === 0;
+
         if (isAutofill) {
-            const totalScoreBeforeO7 = o2Metrics.scores.ageScore + o2Metrics.scores.genderScore + o2Metrics.scores.bmiScore + o2Metrics.scores.wthrScore + o3Metrics.o3Score + o4Metrics.o4Score + o5Metrics.o5Score + o6Metrics.o6Score;
+            // **AUTO-CALCULATION PATH**
+            const totalScoreBeforeO7 = Object.values(baseScores)
+                .filter(score => typeof score === 'number')
+                .reduce((sum, score) => sum + score, 0);
+
             processedO7Data = getAutofillData(totalScoreBeforeO7);
         } else {
-            const { o2_sat, pulse, bp_upper, bp_lower, bs_f, bs_am, A1C, HDL, LDL, Trig, HsCRP } = mappedO7Data;
-            if (o2_sat == null || pulse == null || bp_upper == null || bp_lower == null || bs_f == null || bs_am == null || HDL == null || LDL == null || Trig == null || HsCRP == null) {
+            // **MANUAL ENTRY VALIDATION PATH**
+            const { o7Data } = payload;
+            const { o2_sat, pulse, bp_upper, bp_lower, bs_f, bs_am, A1C, HDL, LDL, Trig, HsCRP } = o7Data;
+            if ([o2_sat, pulse, bp_upper, bp_lower, bs_f, bs_am, HDL, LDL, Trig, HsCRP].some(v => v == null)) {
                 throw new ValidationError("Missing required biomarker fields for manual entry.");
             }
             const normalizedHsCRP = (o7Data.hscrp_unit && o7Data.hscrp_unit.toLowerCase() === "mg/l") ? HsCRP : HsCRP / 10;
             const calculatedA1C = A1C || roundTo(((bs_f + bs_am) / 2 + 46.7) / 28.7, 2);
             const trig_hdl_ratio = roundTo(Trig / HDL, 2);
-            processedO7Data = { ...mappedO7Data, HsCRP: normalizedHsCRP, A1C: calculatedA1C, trig_hdl_ratio, auto_filled: false };
+            processedO7Data = { ...o7Data, HsCRP: normalizedHsCRP, A1C: calculatedA1C, trig_hdl_ratio, auto_filled: false };
         }
-
-        o7Score = score_o2_sat(processedO7Data.o2_sat) +
-                  score_hr(processedO7Data.pulse) +
-                  (score_bp_upper(processedO7Data.bp_upper) + score_bp_lower(processedO7Data.bp_lower)) / 2 +
-                  (score_bs_f(processedO7Data.bs_f) + score_bs_am(processedO7Data.bs_am) + score_a1c(processedO7Data.A1C)) / 3 +
-                  score_hdl(processedO7Data.HDL) +
-                  score_ldl(processedO7Data.LDL) +
-                  score_trig(processedO7Data.Trig) +
-                  score_hscrp(processedO7Data.HsCRP) +
-                  score_trig_hdl_ratio(processedO7Data.trig_hdl_ratio);
-
-        const allScores = {
-            ...o2Metrics.scores,
-            o3Score: o3Metrics.o3Score,
-            o4Score: o4Metrics.o4Score,
-            o5Score: o5Metrics.o5Score,
-            o6Score: o6Metrics.o6Score,
-            o7Score: o7Score
-        };
-
-        const finalCuoreScore = calculateCuoreScore(payload, allScores);
-        allScores.cuoreScore = finalCuoreScore;
         
-        // --- FIX: Logic to handle both initial submission and reassessment ---
-        let finalOnboardingDoc;
-        if (existingDoc) {
-             finalOnboardingDoc = await OnboardingModel.findOneAndUpdate(
-                { userId },
-                {
-                    $set: {
-                        onboardingVersion: "7",
-                        o2Data: o2Metrics.o2Data,
-                        derivedMetrics: o2Metrics.derivedMetrics,
-                        o3Data: o3Metrics.o3Data,
-                        o4Data: o4Metrics.o4Data,
-                        o5Data: o5Metrics.o5Data,
-                        o6Data: o6Metrics.o6Data,
-                        o7Data: processedO7Data,
-                        scores: allScores,
-                        timestamp: Date.now() // Update timestamp for reassessment
-                    }
-                },
-                { new: true, upsert: false, runValidators: true }
-            );
-        } else {
-            finalOnboardingDoc = await OnboardingModel.create({
-                userId,
-                onboardingVersion: "7",
-                o2Data: o2Metrics.o2Data,
-                derivedMetrics: o2Metrics.derivedMetrics,
-                o3Data: o3Metrics.o3Data,
-                o4Data: o4Metrics.o4Data,
-                o5Data: o5Metrics.o5Data,
-                o6Data: o6Metrics.o6Data,
-                o7Data: processedO7Data,
-                scores: allScores,
-            });
-        }
+        // --- COMMON LOGIC: RECALCULATE FINAL SCORES AND SAVE ---
+        const o7Score = score_o2_sat(processedO7Data.o2_sat) + score_hr(processedO7Data.pulse) + (score_bp_upper(processedO7Data.bp_upper) + score_bp_lower(processedO7Data.bp_lower)) / 2 + (score_bs_f(processedO7Data.bs_f) + score_bs_am(processedO7Data.bs_am) + score_a1c(processedO7Data.A1C)) / 3 + score_hdl(processedO7Data.HDL) + score_ldl(processedO7Data.LDL) + score_trig(processedO7Data.Trig) + score_hscrp(processedO7Data.HsCRP) + score_trig_hdl_ratio(processedO7Data.trig_hdl_ratio);
+        const allScores = { ...baseScores, o7Score };
+        allScores.cuoreScore = calculateCuoreScore(finalDataToSave, allScores);
+
+        finalDataToSave.scores = allScores;
+        finalDataToSave.o7Data = processedO7Data;
+
+        const finalOnboardingDoc = await OnboardingModel.findOneAndUpdate(
+            { userId },
+            {
+                $set: finalDataToSave,
+                $push: { o7History: { data: processedO7Data, timestamp: finalDataToSave.timestamp } }
+            },
+            { new: true, upsert: true, runValidators: true }
+        );
 
         if (!finalOnboardingDoc) {
             throw new ValidationError("Failed to save onboarding data.");
         }
 
         return finalOnboardingDoc;
+
     } catch (error) {
         console.error('Error:', error.name, error.message);
         if (error.name === 'ValidationError') {
@@ -376,6 +351,7 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
         throw new Error("Internal Server Error");
     }
 };
+
 exports.getOnboardingDataByUserId = async (userId) => {
     try {
         const onboardingData = await OnboardingModel.findOne({ userId });
