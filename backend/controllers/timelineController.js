@@ -139,10 +139,14 @@ async function getNudge(userId) {
     const onboarding = await Onboarding.findOne({ userId }).lean();
     if (!onboarding) return NUDGES.today.default[0];
 
-    // Condition: Nudge refreshes on 1st app opening of the day
+    // -- REMOVED --
+    // The following block of code that checks if the nudge has already been refreshed today has been removed.
+    /*
     if (onboarding.nudgeLastRefresh && dayjs(onboarding.nudgeLastRefresh).tz(TZ).isSame(now, 'day')) {
         return onboarding.lastShownNudgeText || NUDGES.today.default[0];
     }
+    */
+    // By removing the check above, the logic below will now run on every API call.
 
     // --- Calculate scores for all "Today" conditions based on the document ---
     const scores = {
@@ -150,14 +154,14 @@ async function getNudge(userId) {
         medication_missed: await hasMissedTaskInPastDays(userId, 'Medication', 1) ? 8 : 0,
         sleep_less: (onboarding.scores?.o6Score || 0) > 3 ? (onboarding.scores.o6Score) : 0,
         stress: 0, // Calculated below
-        meditation_missed: await hasMissedTaskInPastDays(userId, 'Short Nap or Walk', 3) ? 4 : 0, // Assuming "Short Nap or Walk" is the meditation task
+        meditation_missed: await hasMissedTaskInPastDays(userId, 'Short Nap or Walk', 3) ? 4 : 0,
         nutrition: (onboarding.scores?.nutrition_score || 0) > 3 ? (onboarding.scores.nutrition_score) : 0,
         fitness: await hasMissedTaskInPastDays(userId, 'Fitness', 3) ? 4 : 0,
         breakfast_missed: await hasMissedTaskInPastDays(userId, 'Breakfast', 2) ? 4 : 0,
     };
 
-    // Calculate average stress score from O6
-    const stressScores = onboarding.scores?.stressScores || {}; // Assuming stress scores are stored here
+    // Calculate average stress score
+    const stressScores = onboarding.scores?.stressScores || {};
     const stressValues = Object.values(stressScores);
     if (stressValues.length > 0) {
         const avgStress = stressValues.reduce((a, b) => a + b, 0) / stressValues.length;
@@ -202,13 +206,12 @@ async function getNudge(userId) {
     const nextIndex = nudgeHistory.lastShownIndex % nudgeArray.length;
     const nudgeText = nudgeArray[nextIndex];
 
-    // --- Save the state for the next day/request ---
+    // --- Save state for next time ---
+    // We only need to save the last winner for the tie-breaking logic.
     await Onboarding.updateOne(
         { userId },
         {
             $set: {
-                nudgeLastRefresh: now.toDate(),
-                lastShownNudgeText: nudgeText,
                 lastNudgeWinner: selectedSegment
             }
         }
@@ -466,7 +469,7 @@ const getAlerts = async (userId) => {
     if (alerts.length > 0) {
         alerts.sort((a, b) => severityOrder[a.type] - severityOrder[b.type]);
         // Return only the most critical alert
-        return [alerts[0]];
+        return alerts;
     }
 
     return [];
