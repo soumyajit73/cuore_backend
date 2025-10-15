@@ -25,7 +25,7 @@ const otpRequestSchema = new mongoose.Schema({
     lastRequestedAt: { type: Date, default: Date.now },
      userData: {
         type: Object,
-        required: true
+        // required: true
     }
 
 }, { timestamps: true });
