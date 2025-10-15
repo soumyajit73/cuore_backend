@@ -14,7 +14,7 @@ const { Onboarding } = require('../models/onboardingModel.js'); // Corrected imp
 // --- CONSTANTS ---
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'fallback-access-secret';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'fallback-refresh-secret';
-const ACCESS_EXPIRY = process.env.ACCESS_TOKEN_EXPIRY || '1800s'; // 30 mins
+const ACCESS_EXPIRY = process.env.ACCESS_TOKEN_EXPIRY || '18000s'; 
 const REFRESH_EXPIRY = process.env.REFRESH_TOKEN_EXPIRY || '7d';  // 7 days
 const RETRY_AFTER = 60; // seconds
 
@@ -165,7 +165,7 @@ exports.verifyNewUserOtp = async (req, res) => {
             onboardingStatus: "incomplete",
             access_token: accessToken,
             refresh_token: refreshToken,
-            expires_in: 1800 
+            expires_in: 18000 
         });
 
     } catch (error) {
@@ -262,7 +262,7 @@ exports.verifyOtp = async (req, res) => {
                 onboardingStatus: "incomplete", // New users haven't onboarded
                 access_token: accessToken,
                 refresh_token: refreshToken,
-                expires_in: 1800
+                expires_in: 18000
             });
         }
         
@@ -280,7 +280,7 @@ exports.verifyOtp = async (req, res) => {
             onboardingStatus: onboardingStatus, // Onboarding status for existing user
             access_token: accessToken,
             refresh_token: refreshToken,
-            expires_in: 1800
+            expires_in: 18000
         });
 
     } catch (error) {
