@@ -23,6 +23,10 @@ const otpRequestSchema = new mongoose.Schema({
     // Tracking attempts and rate-limiting data (if implementing advanced logic)
     attempts: { type: Number, default: 0 },
     lastRequestedAt: { type: Date, default: Date.now },
+     userData: {
+        type: Object,
+        required: true
+    }
 
 }, { timestamps: true });
 

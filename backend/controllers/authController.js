@@ -89,7 +89,7 @@ exports.createAccount = async (req, res) => {
             expiresAt,
             lastRequestedAt: new Date(),
             userData: {
-                phone,
+                phone:phone,
                 display_name,
                 dob,
                 gender,
