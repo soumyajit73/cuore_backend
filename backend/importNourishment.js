@@ -2,79 +2,97 @@ const { MongoClient } = require('mongodb');
 const xlsx = require('xlsx');
 const path = require('path');
 const fs = require('fs');
+require('dotenv').config();
 
 // --- 1. CONFIGURE YOUR DETAILS ---
-// For security, it's best to use environment variables for your connection string.
 const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = 'cuore';
 const COLLECTION_NAME = 'nutrition_plan_items';
-// Assumes the Excel file is in the same directory as the script.
-const EXCEL_FILE_PATH = path.join(__dirname,'data', 'Nourish Plan BF.xlsx');
+
+// An array of file objects to process
+const FILES_TO_PROCESS = [
+    { path: path.join(__dirname, 'data', 'Nourish Plan BF.xlsx'), meal_time: 'Breakfast' },
+    { path: path.join(__dirname, 'data', 'Nourish PlanLD.xlsx'), meal_time: 'Lunch/Dinner' }
+];
 
 async function importData() {
+    if (!MONGO_URI) {
+        console.error("❌ MONGO_URI is not defined. Please check your .env file.");
+        return;
+    }
+
     const client = new MongoClient(MONGO_URI);
     try {
-        if (!fs.existsSync(EXCEL_FILE_PATH)) {
-            throw new Error(`Excel file not found at path: ${EXCEL_FILE_PATH}`);
-        }
-
         await client.connect();
         const db = client.db(DB_NAME);
         const collection = db.collection(COLLECTION_NAME);
 
         console.log('✅ Connected to MongoDB. Clearing existing nutrition plan data...');
-        // Clear the collection before importing new data to prevent old entries from remaining.
         await collection.deleteMany({});
 
-        const workbook = xlsx.readFile(EXCEL_FILE_PATH);
         const allItems = [];
+        const header = ['calories', 'name', 'component1', 'component2', 'component3', 'component4', 'group_tag', 'item_id'];
+        let debugCounter = 0; // To limit debug messages
 
-        for (const sheetName of workbook.SheetNames) {
-            console.log(`⚙️ Processing sheet: ${sheetName}...`);
+        for (const file of FILES_TO_PROCESS) {
+            console.log(`\n📄 Reading file for: ${file.meal_time}...`);
 
-            // --- 2. PARSE THE SHEET DATA CORRECTLY ---
-            const sheetData = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], {
-                // CHANGED: Header now correctly maps to all 8 columns of your data.
-                header: ['calories', 'name', 'component1', 'component2', 'component3', 'component4', 'group_tag', 'item_id'],
-                // CHANGED: Skips the first 7 rows to start reading from the actual data on row 8.
-                range: 7
-            });
+            if (!fs.existsSync(file.path)) {
+                console.warn(`⚠️ Warning: File not found, skipping. Path: ${file.path}`);
+                continue;
+            }
 
-            for (const row of sheetData) {
-                // Skip any row that is empty or doesn't have a unique item ID.
-                if (!row.item_id || !row.name || typeof row.item_id !== 'string') {
-                    continue;
-                }
+            const workbook = xlsx.readFile(file.path);
 
-                // --- 3. STRUCTURE THE DOCUMENT FOR MONGODB ---
-                const diet_tag = row.group_tag || row.item_id.split('.')[0];
+            for (const sheetName of workbook.SheetNames) {
+                console.log(`   ⚙️ Processing sheet: ${sheetName}...`);
 
-                const components = [row.component1, row.component2, row.component3, row.component4]
-                    .filter(Boolean) // This removes any null or undefined components.
-                    .map((desc, index) => ({
-                        description: String(desc).trim(), // Ensure description is a string and trim whitespace
-                        is_base: index === 0
-                    }));
-
-                allItems.push({
-                    // CHANGED: The _id is now guaranteed to be unique by combining the unique item_id and the sheetName.
-                    _id: `${row.item_id}_${sheetName.replace(/\s/g, '')}`,
-                    item_id: row.item_id,
-                    name: String(row.name).trim(),
-                    diet_tag: diet_tag,
-                    calories: parseInt(row.calories, 10) || 0,
-                    calorie_range: sheetName,
-                    components: components
+                const sheetData = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], {
+                    header: header,
+                    range: 7
                 });
+
+                for (const row of sheetData) {
+                    // --- START DEBUGGING BLOCK ---
+                    // This will print the data for the first 5 rows of the Lunch/Dinner file
+                    if (file.meal_time === 'Lunch/Dinner' && debugCounter < 5) {
+                        console.log(`[DEBUG] Raw Row Data: Name='${row.name}', ItemID='${row.item_id}'`);
+                        debugCounter++;
+                    }
+                    // --- END DEBUGGING BLOCK ---
+
+                    if (!row.item_id || !row.name || typeof row.item_id !== 'string') {
+                        continue; // Skip the row if a condition is not met
+                    }
+                    
+                    // If the code reaches here, the row is considered valid.
+                    const diet_tag = row.group_tag || row.item_id.split('.')[0];
+                    const components = [row.component1, row.component2, row.component3, row.component4]
+                        .filter(Boolean)
+                        .map((desc, index) => ({
+                            description: String(desc).trim(),
+                            is_base: index === 0
+                        }));
+
+                    allItems.push({
+                        _id: `${row.item_id}_${sheetName.replace(/\s/g, '')}_${file.meal_time}`,
+                        item_id: row.item_id,
+                        name: String(row.name).trim(),
+                        diet_tag: diet_tag,
+                        calories: parseInt(row.calories, 10) || 0,
+                        calorie_range: sheetName,
+                        meal_time: file.meal_time,
+                        components: components
+                    });
+                }
             }
         }
 
         if (allItems.length > 0) {
-            // This will insert all collected items from all sheets in a single, efficient operation.
             await collection.insertMany(allItems);
-            console.log(`👍 Successfully imported a total of ${allItems.length} items from all sheets.`);
+            console.log(`\n👍 Successfully imported a total of ${allItems.length} items from all files.`);
         } else {
-            console.log('⚠️ No valid items found to import.');
+            console.log('\n⚠️ No valid items found to import.');
         }
 
     } catch (err) {
