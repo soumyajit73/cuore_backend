@@ -12,6 +12,7 @@ const finalSubmissionRoutes = require('./routes/finalSubmissionRoutes.js');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes'); 
 const timelineRoutes = require('./routes/timelineRoutes'); 
+const nourishmentRoutes = require('./routes/nourishmentRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,7 +28,7 @@ mongoose.connect(MONGO_URI)
 
 // Root route
 app.get("/", (req,res)=>{
-    res.send("Cuore Onboarding API is running");
+    res.send("Backend API is running");
 });
 
 // Set up the routes for the API with corrected paths
@@ -36,6 +37,7 @@ app.use('/api/v1/onboarding', finalSubmissionRoutes);
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes); 
 app.use('/api/v1/users', timelineRoutes); // This is still a conflict
+app.use('/api/nourishment', nourishmentRoutes);
 // A better fix for this conflict is to combine the routers in the route files
 // but for now, we will assume you meant to use both sets of routes at this path
 
