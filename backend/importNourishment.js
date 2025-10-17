@@ -5,7 +5,7 @@ const fs = require('fs');
 
 // --- 1. CONFIGURE YOUR DETAILS ---
 // For security, it's best to use environment variables for your connection string.
-const MONGO_URI = process.env.MONGO_URI || 'mongodb+srv://soumyajitdatta1234:AX49Q0TjYxXJ1O1J@cluster0.dnzvkff.mongodb.net/cuore?retryWrites=true&w=majority&appName=Cluster0';
+const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = 'cuore';
 const COLLECTION_NAME = 'nutrition_plan_items';
 // Assumes the Excel file is in the same directory as the script.
