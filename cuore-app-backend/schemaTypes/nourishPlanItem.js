@@ -13,8 +13,9 @@ export default {
     {
       name: 'components',
       title: 'Components',
-      type: 'string',
-      description: 'The serving size details (e.g., "1 1/2 Roti, 1/2 Katori Aloo Matar Sabzi")',
+      type: 'array', // ✅ Changed to array
+      of: [{type: 'string'}], // ✅ Array of strings
+      description: 'The serving size details from Excel (Cols C, D, E) as separate items (e.g., ["1 1/2 Roti", "1/2 Katori Aloo Matar Sabzi"])',
     },
     {
       name: 'calories',
@@ -33,7 +34,7 @@ export default {
       name: 'dietTag',
       title: 'Diet Tag',
       type: 'string',
-      description: 'The GROUP tag for randomization (e.g., V1, E2, L1, N3)',
+      description: 'The GROUP tag for randomization (e.g., V1, E2, L1, N3 derived from Excel Col H)',
     },
     {
       name: 'mealTime',
@@ -41,12 +42,18 @@ export default {
       type: 'string',
       options: { list: ['Breakfast', 'Lunch/Dinner'] },
     },
-    // This is the link to the Word doc content
     {
       name: 'recipeLink',
       title: 'Link to Full Recipe',
-      type: 'reference', // Creates a relationship
-      to: [{type: 'recipe'}], // Links to your 'recipe' model
+      type: 'reference',
+      to: [{type: 'recipe'}],
     },
   ],
+   preview: {
+    select: {
+      title: 'name',
+      subtitle: 'dietTag', // Show the dietTag in the list view
+      media: 'recipeLink.image' // Optionally show linked recipe image
+    }
+  }
 };

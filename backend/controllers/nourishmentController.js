@@ -1,9 +1,9 @@
 // controllers/nourishController.js
-const client = require('../utils/sanityClient');
-const { calculateAllMetrics } = require('../models/onboardingModel.js'); // Make sure path is correct
-const Onboarding = require('../models/onboardingModel.js').Onboarding; // Make sure path is correct
+const client = require('../utils/sanityClient'); // Ensure path is correct
+const { calculateAllMetrics } = require('../models/onboardingModel.js'); // Ensure path is correct
+const Onboarding = require('../models/onboardingModel.js').Onboarding; // Ensure path is correct
 
-// Ensure your dietTagMaps are complete and accurate here
+// Your dietTagMaps (ensure these are complete and correct)
 const dietTagMaps = {
             Breakfast: {
                 'Veg': ['V1', 'V2', 'V3', 'V4', 'V5', 'V6', 'V7', 'V8', 'V9', 'V10', 'V11', 'V12'],
@@ -26,15 +26,15 @@ exports.getNourishmentPlan = async (req, res) => {
     }
 
     // --- Get User Data ---
-    const userId = req.user.userId; // Assuming req.user comes from your auth middleware
+    const userId = req.user.userId;
     const onboardingData = await Onboarding.findOne({ userId }).lean();
     if (!onboardingData) return res.status(404).json({ message: "Onboarding data not found." });
 
     const metrics = calculateAllMetrics(onboardingData);
-    const recommendedCalories = metrics.recommendedCalories;
+    const recommendedCalories = metrics.recommendedCalories; // User's target
     const foodPreference = onboardingData.o5Data.eating_preference;
 
-    // Determine calorie range
+    // Determine calorie range for fetching items
     let calorieRange;
     if (recommendedCalories < 1300) calorieRange = "<1300";
     else if (recommendedCalories <= 1499) calorieRange = "1300-1499";
@@ -47,10 +47,10 @@ exports.getNourishmentPlan = async (req, res) => {
     let userDietKey;
     if (foodPreference === 'Vegetarian') userDietKey = 'Veg';
     else if (foodPreference === 'Eggetarian') userDietKey = 'Eggetarian';
-    else userDietKey = 'Non-Veg'; // Default or map Non-vegetarian
+    else userDietKey = 'Non-Veg';
     if (!dietTagMaps[meal_time] || !dietTagMaps[meal_time][userDietKey]) {
         console.warn(`Diet key ${userDietKey} for ${meal_time} not found, defaulting to Veg.`);
-        userDietKey = 'Veg'; // Safety default
+        userDietKey = 'Veg';
     }
     const tagsForUser = dietTagMaps[meal_time][userDietKey];
     // ----------------------
@@ -61,12 +61,30 @@ exports.getNourishmentPlan = async (req, res) => {
         mealTime == $meal_time &&
         calorieRange == $calorie_range &&
         dietTag in $tags_for_user] {
-          _id, name, calories, dietTag, components, mealTime, calorieRange,
+          _id, name, calories, dietTag,
+          components[]{ // Fetch components array
+             _key, // Include the key Sanity adds automatically
+             _type, // Should be 'string'
+             value // Assuming Sanity stores simple strings like this, adjust if needed
+          },
+          mealTime, calorieRange,
+          "recipeLink": recipeLink->{_id, name}
+      }
+    `;
+     // Refined query to directly fetch array of strings
+     const queryRefined = `
+      *[_type == "nourishPlanItem" &&
+        mealTime == $meal_time &&
+        calorieRange == $calorie_range &&
+        dietTag in $tags_for_user] {
+          _id, name, calories, dietTag,
+          components, // Directly fetch the array of strings
+          mealTime, calorieRange,
           "recipeLink": recipeLink->{_id, name}
       }
     `;
     const params = { meal_time, calorie_range: calorieRange, tags_for_user: tagsForUser };
-    const allMatchingItems = await client.fetch(query, params);
+    const allMatchingItems = await client.fetch(queryRefined, params); // Use refined query
     // -------------------------
 
     // --- Apply Randomization Logic ---
@@ -76,10 +94,8 @@ exports.getNourishmentPlan = async (req, res) => {
       if (!grouped[tag]) grouped[tag] = [];
       grouped[tag].push(item);
     });
-
     const mealPlan = [];
     const baseTags = tagsForUser.map(tag => tag.match(/^[A-Z]+\d+/)[0]).filter((v, i, a) => a.indexOf(v) === i);
-
     for (const baseTag of baseTags) {
         let possibleItems = [];
         tagsForUser.forEach(fullTag => {
@@ -98,11 +114,14 @@ exports.getNourishmentPlan = async (req, res) => {
       return res.status(404).json({ message: `No meal plan items found.` });
     }
 
+    // --- Send Response ---
     res.status(200).json({
-      calorie_range: calorieRange,
+      recommended_calories: recommendedCalories, // Include user's target
+      calorie_range: calorieRange, // The range used for fetching
       meal_time: meal_time,
       meal_plan: mealPlan,
     });
+    // ---------------------
 
   } catch (error) {
     console.error("Error fetching nourishment plan:", error);
