@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const nourishmentController = require('../controllers/nourishmentController');
-const { protect } = require('../middleware/authMiddleware');
+const { getNourishmentPlan } = require('../controllers/nourishmentController'); // Make sure path is correct
+const { protect } = require('../middleware/authMiddleware'); // Import your authentication middleware
 
-router.get('/', protect, nourishmentController.getNourishmentPlan);
+// GET /api/nourish/plan?meal_time=Breakfast
+router.get('/plan', protect, getNourishmentPlan);
 
 module.exports = router;
