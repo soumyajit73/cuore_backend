@@ -1,4 +1,4 @@
-// importAllExcel.js (Final Version with all corrections)
+// importAllExcel.js (Final Version - Corrected Parsing & Linking)
 const { createClient } = require('@sanity/client');
 const fs = require('fs');
 const path = require('path');
@@ -10,7 +10,7 @@ const client = createClient({
   dataset: 'production',
   apiVersion: '2021-10-21',
   useCdn: false,
-  token: 'ski7OSxHCDxGrcmalQJHYrGoBYj3FO2gDyKcNR8PkpKcTTlnzFyzG4gAsUKuTRdz5FIXbGcQWS4AzLeROTXh0kUXkBNa4o5uroRmCkZAXgf7gxEbe20dWsDfO45iVYSuMKdbkO9jKWzWDBgBU879Qe0QTOHwKLdknAxX7a6rCmJmFgnmDG3j', // Add your secret token
+  token: 'ski7OSxHCDxGrcmalQJHYrGoBYj3FO2gDyKcNR8PkpKcTTlnzFyzG4gAsUKuTRdz5FIXbGcQWS4AzLeROTXh0kUXkBNa4o5uroRmCkZAXgf7gxEbe20dWsDfO45iVYSuMKdbkO9jKWzWDBgBU879Qe0QTOHwKLdknAxX7a6rCmJmFgnmDG3j', // Add your secret token with Editor permissions
 });
 // ------------------------------------
 
@@ -25,49 +25,63 @@ const mealBuilderFiles = [
 ];
 // -----------------------
 
-let recipeIdMap = new Map();
-let dietMap = new Map();
-let transaction = client.transaction();
-const BATCH_SIZE = 100;
+let recipeIdMap = new Map(); // Stores { Recipe Name => Sanity ID }
+let dietMap = new Map(); // Stores { Excel Item Name => Diet Preference }
+let transaction = client.transaction(); // Holds documents for batch upload
+const BATCH_SIZE = 100; // How many documents to upload/patch at once
 
 // --- Helper Functions ---
+
+// Commits the current batch of documents to Sanity
 async function commitBatch(docCount, type = 'data') {
-    if (docCount === 0) return 0;
+    if (docCount === 0) return 0; // Nothing to commit
     console.log(`... Committing batch of ${docCount} ${type} documents ...`);
     try {
-        await transaction.commit({ autoGenerateArrayKeys: true });
+        await transaction.commit({ autoGenerateArrayKeys: true }); // autoGenerateArrayKeys helps with arrays if needed
     } catch (err) {
         console.error(`Error committing ${type} batch: ${err.message}`);
     }
-    transaction = client.transaction();
-    return 0;
+    transaction = client.transaction(); // Start a new transaction
+    return 0; // Reset counter after commit
 }
 
+// Finds the row index containing the specific header text (e.g., 'Item')
 function findHeaderRowIndex(rowsAsArrays, headerText = 'item') {
     const lowerHeaderText = headerText.toLowerCase();
     for (let i = 0; i < rowsAsArrays.length; i++) {
         const row = rowsAsArrays[i];
+        // Check if the first cell matches the header text (case insensitive)
         if (row && row[0] && String(row[0]).trim().toLowerCase() === lowerHeaderText) {
-            return i;
+            return i; // Return the index of the header row (e.g., 2 for Row 3)
         }
     }
-    return -1;
+    return -1; // Header row not found
 }
 
+// Identifies rows that are likely section headers (text in Col A only, specific exclusions)
 function isRealSectionHeader(row) {
-    if (!row || row.length === 0 || !row[0]) return false;
+    if (!row || row.length === 0 || !row[0]) return false; // Must have text in first column
     const firstColText = String(row[0]).trim();
-    if (!firstColText || firstColText.toLowerCase() === 'item' || firstColText.includes('Choose Item') || firstColText.includes('Remaining') || firstColText.includes('Used') || firstColText.match(/^\d+(\.\d+)?$/)) {
+    // IGNORE common instruction/header lines explicitly
+    if (!firstColText ||
+        firstColText.toLowerCase() === 'item' ||
+        firstColText.includes('Choose Item') ||
+        firstColText.includes('Remaining') ||
+        firstColText.includes('Used') ||
+        firstColText.match(/^\d+(\.\d+)?$/) // Ignore if it's just a number like '1' or '0.5'
+       ) {
         return false;
     }
+    // Real section headers have text ONLY in the first column and key data columns are empty
+    // Check Columns B(1), C(2), D(3) which should contain data for actual items
     return firstColText && !row[1] && !row[2] && !row[3];
 }
 // -----------------------
 
 // --- Main Import Function ---
 async function runImport() {
-  let docCount = 0;
-  let totalPatchedCount = 0;
+  let docCount = 0; // Counter for documents in the current batch
+  let totalPatchedCount = 0; // Counter for total recipes patched
 
   try {
     // --- PART 1: Build Recipe Map from Sanity ---
@@ -77,7 +91,9 @@ async function runImport() {
         console.error("No recipes found in Sanity. Please run the recipe import script first.");
         return;
     }
-    for (const recipe of recipes) { recipeIdMap.set(recipe.name, recipe._id); }
+    for (const recipe of recipes) {
+      recipeIdMap.set(recipe.name, recipe._id);
+    }
     console.log(`Loaded ${recipeIdMap.size} recipes into map.`);
 
     // --- PART 2: Import Nourish Plan files & Build Diet Map ---
@@ -95,8 +111,7 @@ async function runImport() {
              const itemId = row[7] ? String(row[7]).trim() : null; // Col H
              if (!name || !itemId) continue;
 
-             // ✅ Get Components from Cols C, D, E
-             const componentsArray = [row[2], row[3], row[4]]
+             const componentsArray = [row[2], row[3], row[4]] // Cols C, D, E
                 .filter(Boolean)
                 .map(comp => String(comp).trim());
 
@@ -104,7 +119,7 @@ async function runImport() {
              const groupTag = itemId.split('.')[0];
              let recipeId = recipeIdMap.get(name);
              if (!recipeId) { const key = Array.from(recipeIdMap.keys()).find(k => name.includes(k)); if (key) recipeId = recipeIdMap.get(key); }
-             if (!dietMap.has(name)) { if (tagPrefix === 'V') dietMap.set(name, 'Veg'); else if (tagPrefix === 'E') dietMap.set(name, 'Eggetarian'); else if (tagPrefix === 'N') dietMap.set(name, 'Non-Veg'); }
+             if (!dietMap.has(name)) { if (tagPrefix === 'V' || tagPrefix === 'L') dietMap.set(name, 'Veg'); else if (tagPrefix === 'E') dietMap.set(name, 'Eggetarian'); else if (tagPrefix === 'N') dietMap.set(name, 'Non-Veg'); }
 
              const cleanItemId = itemId.replace(/\./g, '-');
              const cleanCalorieRange = calorieRange.replace(/</g, 'less').replace(/>/g, 'greater').replace(/-/g, 'to');
@@ -113,7 +128,7 @@ async function runImport() {
 
              const doc = {
                  _type: 'nourishPlanItem', _id: docId, name: name,
-                 components: componentsArray, // ✅ Use the array
+                 components: componentsArray,
                  calories: parseInt(row[0], 10) || 0, // Col A
                  calorieRange: calorieRange, dietTag: groupTag, mealTime: file.mealTime,
                  recipeLink: recipeId ? { _type: 'reference', _ref: recipeId } : undefined,
@@ -138,69 +153,97 @@ async function runImport() {
         console.log(`    --> Processing Sheet: ${sheetName}`);
 
         const rowsAsArrays = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
-        const headerRowIndex = findHeaderRowIndex(rowsAsArrays, 'Item');
-        if (headerRowIndex === -1) { console.error(`Header row ('Item') not found in ${sheetName}. Skipping.`); continue; }
+        const headerRowIndex = findHeaderRowIndex(rowsAsArrays, 'Item'); // Should find index 2 (Row 3)
+        if (headerRowIndex === -1) {
+            console.error(`Header row ('Item') not found in sheet: ${sheetName}, file: ${file.path}. Skipping sheet.`);
+            continue;
+        }
         // console.log(`[DEBUG] Found headers ('Item', 'Quantity'...) on row ${headerRowIndex + 1}`); // Optional Debug
 
-        let currentSection = 'Uncategorized';
+        let currentSection = 'Uncategorized'; // Default section if none found above
 
+        // Iterate through rows starting AFTER the header row
         for (let i = headerRowIndex + 1; i < rowsAsArrays.length; i++) {
           const row = rowsAsArrays[i];
-          if (!row || row.length === 0) continue;
+          if (!row || row.length === 0) continue; // Skip empty rows
 
+          // --- Find the correct section header ABOVE this row ---
+          // Look backwards from the current row up to the beginning
           for (let j = i - 1; j >= 0; j--) {
-              if (isRealSectionHeader(rowsAsArrays[j])) {
+              if (isRealSectionHeader(rowsAsArrays[j])) { // Use the stricter check
                   currentSection = String(rowsAsArrays[j][0]).trim();
-                  break;
+                  // console.log(`[DEBUG] Row ${i+1}: Assigning section "${currentSection}"`); // Optional Debug
+                  break; // Found the closest valid section header above this row
               }
           }
+          // ---
 
-          const name = row[0] ? String(row[0]).trim() : null; // Col A
-          if (!name || isRealSectionHeader(row) || name.match(/^\d+(\.\d+)?$/) || name.toLowerCase() === 'item') continue;
+          // --- Process Data Row using correct indices based on Row 3 headers ---
+          const name = row[0] ? String(row[0]).trim() : null; // Col A (index 0) is ITEM
 
-          const servingQty = row[1] ? String(row[1]).trim() : ''; // Col B
-          const servingUnit = row[2] ? String(row[2]).trim() : ''; // Col C
+          // Skip if it's not a valid data row (no name, looks like a header, etc.)
+          if (!name || isRealSectionHeader(row) || name.match(/^\d+(\.\d+)?$/) || name.toLowerCase() === 'item') {
+              // console.log(`[DEBUG] Skipping invalid data row: ${row[0]}`); // Optional Debug
+              continue;
+          }
+
+          const servingQty = row[1] ? String(row[1]).trim() : ''; // Col B (index 1) is QTY
+          const servingUnit = row[2] ? String(row[2]).trim() : ''; // Col C (index 2) is UNIT
           const servingSize = `${servingQty} ${servingUnit}`.trim();
-          const calories = parseInt(row[3], 10) || 0; // Col D
+          const calories = parseInt(row[3], 10) || 0; // Col D (index 3) is CALORIE
 
+          // Find recipe link
           const recipeId = recipeIdMap.get(name);
+
+          // Clean ID components
           const cleanName = name.toLowerCase().replace(/[\s&]/g, '-').replace(/[^a-z0-9-]/g, '');
           const cleanMealTime = file.mealTime.replace('/', '-');
           const cleanCuisine = cuisine.toLowerCase().replace(/[^a-z0-9-]/g, '');
           const docId = `builder.${cleanName}.${cleanMealTime}.${cleanCuisine}`;
 
+          // Create Sanity document object
           const doc = {
-            _type: 'mealBuilderItem', _id: docId, name: name,
-            calories: calories, servingSize: servingSize, section: currentSection,
-            cuisine: cuisine, mealTime: file.mealTime,
+            _type: 'mealBuilderItem',
+            _id: docId,
+            name: name,
+            calories: calories,
+            servingSize: servingSize,
+            section: currentSection, // Assign the section found above
+            cuisine: cuisine,
+            mealTime: file.mealTime,
             recipeLink: recipeId ? { _type: 'reference', _ref: recipeId } : undefined,
           };
-          transaction.createOrReplace(doc);
+          // console.log('[DEBUG] Creating Meal Builder Doc:', doc); // Uncomment for detailed debug
+          transaction.createOrReplace(doc); // Add to batch
           docCount++;
-          if(docCount >= BATCH_SIZE) docCount = await commitBatch(docCount, 'Meal Builder');
+          if(docCount >= BATCH_SIZE) docCount = await commitBatch(docCount, 'Meal Builder'); // Commit if batch full
         }
        }
     }
-    docCount = await commitBatch(docCount, 'Meal Builder');
+    docCount = await commitBatch(docCount, 'Meal Builder'); // Commit any remaining
 
     // --- PART 4: Update Recipes with Diet Preference ---
     console.log('Step 4: Updating recipes with diet preferences...');
-    let patchCount = 0;
-     const recipeNamesFromSanity = Array.from(recipeIdMap.keys());
+    let patchCount = 0; // Counter for patches in the current batch
+     const recipeNamesFromSanity = Array.from(recipeIdMap.keys()); // Get all recipe names once
+
+     // Iterate through the diet map built from Nourish Plan data
      for (const [excelName, diet] of dietMap.entries()) {
        const lowerExcelName = excelName.toLowerCase();
+       // Find the corresponding Sanity recipe name (case-insensitive partial match)
        const matchingRecipeName = recipeNamesFromSanity.find(sanityName =>
          lowerExcelName.includes(sanityName.toLowerCase())
        );
        if (matchingRecipeName) {
-         const recipeId = recipeIdMap.get(matchingRecipeName);
-         transaction.patch(recipeId, { set: { dietPreference: diet } });
+         const recipeId = recipeIdMap.get(matchingRecipeName); // Get the Sanity ID
+         // console.log(`  -> MATCH: "${excelName}" contains "${matchingRecipeName}". Setting diet to "${diet}".`);
+         transaction.patch(recipeId, { set: { dietPreference: diet } }); // Add patch to batch
          patchCount++;
-         totalPatchedCount++;
-         if(patchCount >= BATCH_SIZE) patchCount = await commitBatch(patchCount, 'Recipe Patches');
+         totalPatchedCount++; // Increment total count
+         if(patchCount >= BATCH_SIZE) patchCount = await commitBatch(patchCount, 'Recipe Patches'); // Commit if batch full
        }
      }
-     await commitBatch(patchCount, 'Recipe Patches');
+     await commitBatch(patchCount, 'Recipe Patches'); // Commit final batch of patches
      console.log(`✅ Updated ${totalPatchedCount} recipes with diet preferences.`);
 
     console.log('--- MIGRATION 100% COMPLETE ---');
@@ -213,10 +256,3 @@ async function runImport() {
 // --- Run the Import ---
 runImport();
 // --------------------
-
-
-
-
-
-
-
