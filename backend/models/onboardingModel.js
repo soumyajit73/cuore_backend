@@ -103,7 +103,7 @@ const SMOKING_SCORES = {
   Never: 0,
   "Quit >6 months ago": 2,
   Occasionally: 6,
-  Regularly: 10,
+  Daily: 10,
 };
 const ALCOHOL_SCORES = {
   Never: 0,
