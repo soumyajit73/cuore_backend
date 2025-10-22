@@ -1,14 +1,60 @@
-// controllers/mealBuilderController.js
 const client = require('../utils/sanityClient'); // Ensure this path points to your sanityClient.js file
 const { calculateAllMetrics } = require('../models/onboardingModel.js'); // Ensure this path is correct
 const Onboarding = require('../models/onboardingModel.js').Onboarding; // Ensure this path is correct
-const { MROUND, parseServingSize } = require('../utils/mathHelpers');
-// Make sure this function is exported correctly
+
+// --- Helper Functions (Added from our last discussion) ---
+
+/**
+ * Parses a serving size string (e.g., "0.5 cup") into its parts.
+ * @param {string} servingSize - The string to parse.
+ * @returns {{originalQuantity: number, unit: string}}
+ */
+function parseServingSize(servingSize) {
+    if (typeof servingSize === 'number') {
+        // Handle if it's already a number
+        return { originalQuantity: servingSize, unit: 'unit' };
+    }
+    if (typeof servingSize !== 'string' || !servingSize) {
+        // Fallback for missing or invalid data
+        return { originalQuantity: 1, unit: 'unit' }; 
+    }
+    
+    // Regex to find the first number and the rest of the string (e.g., "0.5 cup", "1 piece")
+    const match = servingSize.match(/^([0-9.]+)\s*(.*)$/);
+    
+    if (match) {
+        return { 
+            originalQuantity: parseFloat(match[1]), 
+            unit: match[2] || 'unit' // e.g., "cup", "g", "piece"
+        };
+    }
+    
+    // Fallback if no number is found (e.g., "piece")
+    return { originalQuantity: 1, unit: servingSize };
+}
+
+/**
+ * Implements the Excel MROUND function, as seen in the doc
+ * @param {number} number - The number to round.
+ * @param {number} multiple - The multiple to round to (e.g., 0.25).
+ * @returns {number}
+ */
+function MROUND(number, multiple) {
+    if (multiple === 0) {
+        return 0;
+    }
+    // Ensure precision by rounding the result of the division
+    return Math.round(number / multiple) * multiple;
+}
+
+// ---------------------------------------------------
+
 const MEAL_CALORIE_DISTRIBUTION = {
-    Breakfast: 0.25, // 30%
-    Lunch: 0.30,     // 35%
-    Dinner: 0.30      // 35%
+    Breakfast: 0.25, 
+    Lunch: 0.30,     
+    Dinner: 0.30     
 };
+
 exports.getBuilderItems = async (req, res) => {
   try {
     const { meal_time, cuisine } = req.query;
@@ -88,8 +134,11 @@ exports.getBuilderItems = async (req, res) => {
   }
 };
 
+// --- THIS IS THE FIXED VERSION ---
+// --- (Make sure MROUND and parseServingSize are imported from your helpers) ---
+
 exports.adjustMealPortions = async (req, res) => {
-     try {
+    try {
         const { cartItems, recommendedCalories } = req.body;
 
         // --- Input Validation ---
@@ -99,68 +148,135 @@ exports.adjustMealPortions = async (req, res) => {
         if (typeof recommendedCalories !== 'number' || recommendedCalories <= 0) {
             return res.status(400).json({ message: "Valid recommendedCalories required." });
         }
-        // ...existing validation code...
-
+        
         const totalSelectedCalories = cartItems.reduce((sum, item) => sum + item.calories, 0);
-        const totalAdjustmentWeight = cartItems.reduce((sum, item) => sum + item.adjustmentWeight, 0);
+        
+        // This is the "sum of % of recommended calories"
+        const totalAdjustmentWeight = cartItems.reduce((sum, item) => sum + (item.adjustmentWeight || 0), 0);
 
-        // --- Handle Case: Below Target Calories ---
-        if (totalSelectedCalories < recommendedCalories) {
+
+        // --- CORRECTED LOGIC FOR CONDITIONS 1 & 2 ---
+        
+        // Condition 2: "If <100% add alert..." (Based on sum of %)
+        const alertMessage = (totalAdjustmentWeight < 100) ? "Balance your meal by adding more dishes." : undefined;
+        
+        // Condition 1: "if sum of ... <100%, use 100%..." (Based on sum of %)
+        const effectiveTotalAdjustmentWeight = Math.max(totalAdjustmentWeight, 100);
+
+        // --- End of Corrected Logic ---
+
+
+        // --- Case 1: AT Target Calories ---
+        if (totalSelectedCalories === recommendedCalories) {
             const originalItemsWithParsedQty = cartItems.map(item => {
-                 const { originalQuantity, unit } = parseServingSize(item.servingSize);
-                 return { ...item, adjustedQuantity: originalQuantity, unit: unit, adjustedCalories: item.calories };
+                const { originalQuantity, unit } = parseServingSize(item.servingSize);
+                return { 
+                    ...item, 
+                    originalQuantity, // Added for consistency
+                    originalCalories: item.calories, // Added for consistency
+                    unit,
+                    adjustedQuantity: originalQuantity, 
+                    adjustedCalories: item.calories 
+                };
             });
             return res.status(200).json({
-                 status: "below_target",
-                 alert: "Balance your meal by adding more dishes.",
-                 adjustedItems: originalItemsWithParsedQty,
-                 currentTotalCalories: totalSelectedCalories,
-                 targetCalories: recommendedCalories
-             });
+                status: "no_change",
+                message: "Total calories already match target.",
+                alert: alertMessage, // Correctly applies alert
+                originalTotalCalories: totalSelectedCalories,
+                newTotalCalories: totalSelectedCalories,
+                targetCalories: recommendedCalories,
+                totalPercentage: totalAdjustmentWeight,
+                adjustedItems: originalItemsWithParsedQty,
+                isBelowTarget: false
+            });
         }
-        // ----------------------------------------
 
-        // --- Handle Edge Case: Total Weight is Zero ---
-        if (totalAdjustmentWeight === 0 && totalSelectedCalories !== recommendedCalories) {
-             console.warn("Total Adjustment Weight is zero. Cannot apply weighted formula. Performing simple proportional scaling.");
-             const scalingFactor = recommendedCalories / totalSelectedCalories;
-             const adjustedItemsSimple = [];
-             for (const item of cartItems) {
-                 const { originalQuantity, unit } = parseServingSize(item.servingSize);
-                 const calculatedNewQuantity = originalQuantity * scalingFactor;
-                 const adjustedQuantity = MROUND(calculatedNewQuantity, 0.25);
-                 const finalAdjustedQuantity = (adjustedQuantity <= 0 && originalQuantity > 0) ? 0.25 : adjustedQuantity;
-                 const quantityRatio = originalQuantity > 0 ? (finalAdjustedQuantity / originalQuantity) : 0;
-                 const finalAdjustedCalories = Math.round(item.calories * quantityRatio);
-                 adjustedItemsSimple.push({
-                    ...item, originalQuantity, originalCalories: item.calories, unit,
-                    adjustedQuantity: finalAdjustedQuantity, adjustedCalories: finalAdjustedCalories,
-                 });
-             }
-             const newTotalCaloriesSimple = adjustedItemsSimple.reduce((sum, item) => sum + item.adjustedCalories, 0);
-             return res.status(200).json({
-                status: "adjusted_simple",
-                message: "Portions adjusted proportionally (weights were zero).",
+        // --- Case 2: BELOW Target Calories (Scale UP) ---
+        if (totalSelectedCalories < recommendedCalories) {
+            console.log("Total calories BELOW target. Performing simple proportional scaling UP.");
+            
+            const scalingFactor = totalSelectedCalories > 0 ? (recommendedCalories / totalSelectedCalories) : 0;
+            const adjustedItemsSimple = [];
+
+            for (const item of cartItems) {
+                const { originalQuantity, unit } = parseServingSize(item.servingSize);
+                const calculatedNewQuantity = originalQuantity * scalingFactor;
+                const adjustedQuantity = MROUND(calculatedNewQuantity, 0.25);
+                const finalAdjustedQuantity = (adjustedQuantity <= 0 && originalQuantity > 0) ? 0.25 : adjustedQuantity;
+                const quantityRatio = originalQuantity > 0 ? (finalAdjustedQuantity / originalQuantity) : 0;
+                const finalAdjustedCalories = Math.round(item.calories * quantityRatio);
+
+                adjustedItemsSimple.push({
+                    ...item, 
+                    originalQuantity, 
+                    originalCalories: item.calories, 
+                    unit,
+                    adjustedQuantity: finalAdjustedQuantity, 
+                    adjustedCalories: finalAdjustedCalories,
+                });
+            }
+            const newTotalCaloriesSimple = adjustedItemsSimple.reduce((sum, item) => sum + item.adjustedCalories, 0);
+            
+            return res.status(200).json({
+                status: "adjusted_up",
+                message: "Portions scaled up to meet calorie target.",
+                alert: alertMessage, // Correctly applies alert
                 originalTotalCalories: totalSelectedCalories,
                 newTotalCalories: newTotalCaloriesSimple,
                 targetCalories: recommendedCalories,
-                adjustedItems: adjustedItemsSimple
+                totalPercentage: totalAdjustmentWeight,
+                adjustedItems: adjustedItemsSimple,
+                isBelowTarget: true
             });
         }
-        // ---------------------------------------------
 
-        // --- Apply Weighted Formula ---
+        // --- Case 3: ABOVE Target Calories (Scale DOWN) ---
+        
+        // --- Handle Edge Case: Total Weight is Zero (for down-scaling) ---
+        if (effectiveTotalAdjustmentWeight === 0) {
+            console.warn("Total Adjustment Weight is zero. Performing simple proportional scaling DOWN.");
+            const scalingFactor = totalSelectedCalories > 0 ? (recommendedCalories / totalSelectedCalories) : 0;
+            const adjustedItemsSimple = [];
+
+            for (const item of cartItems) {
+                const { originalQuantity, unit } = parseServingSize(item.servingSize);
+                const calculatedNewQuantity = originalQuantity * scalingFactor;
+                const adjustedQuantity = MROUND(calculatedNewQuantity, 0.25);
+                const finalAdjustedQuantity = (adjustedQuantity <= 0 && originalQuantity > 0) ? 0.25 : adjustedQuantity;
+                const quantityRatio = originalQuantity > 0 ? (finalAdjustedQuantity / originalQuantity) : 0;
+                const finalAdjustedCalories = Math.round(item.calories * quantityRatio);
+
+                adjustedItemsSimple.push({
+                    ...item, originalQuantity, originalCalories: item.calories, unit,
+                    adjustedQuantity: finalAdjustedQuantity, adjustedCalories: finalAdjustedCalories,
+                });
+            }
+            const newTotalCaloriesSimple = adjustedItemsSimple.reduce((sum, item) => sum + item.adjustedCalories, 0);
+            return res.status(200).json({
+                status: "adjusted_simple_down",
+                message: "Portions adjusted proportionally (weights were zero).",
+                alert: alertMessage, // Correctly applies alert
+                originalTotalCalories: totalSelectedCalories,
+                newTotalCalories: newTotalCaloriesSimple,
+                targetCalories: recommendedCalories,
+                totalPercentage: totalAdjustmentWeight,
+                adjustedItems: adjustedItemsSimple,
+                isBelowTarget: false
+            });
+        }
+        
+        // --- Apply Weighted Formula (Only for scaling DOWN) ---
         const adjustedItemsWeighted = [];
         for (const item of cartItems) {
             const { originalQuantity, unit } = parseServingSize(item.servingSize);
             let calculatedNewQuantity;
 
-            if (item.calories === 0) {
-                calculatedNewQuantity = originalQuantity;
+            if (item.calories === 0 || (item.adjustmentWeight || 0) === 0) {
+                calculatedNewQuantity = originalQuantity; // Don't adjust
             } else {
-                // Always apply the formula
-                calculatedNewQuantity = (item.adjustmentWeight / totalAdjustmentWeight) * 
-                    (recommendedCalories / item.calories) * originalQuantity;
+                // Formula from your doc, using effectiveTotalAdjustmentWeight
+                calculatedNewQuantity = (item.adjustmentWeight / effectiveTotalAdjustmentWeight) * (recommendedCalories / item.calories) * originalQuantity;
             }
 
             const adjustedQuantity = MROUND(calculatedNewQuantity, 0.25);
@@ -179,19 +295,18 @@ exports.adjustMealPortions = async (req, res) => {
         }
 
         const newTotalCaloriesWeighted = adjustedItemsWeighted.reduce((sum, item) => sum + item.adjustedCalories, 0);
-        const totalPercentage = (totalAdjustmentWeight / 100);
 
-        // Return response with adjustments and alert if needed
+        // --- Final Response (for weighted down-scaling) ---
         res.status(200).json({
-            status: "adjusted", // Always "adjusted" since we're always calculating
-            message: "Portions calculated",
-            alert: totalSelectedCalories < recommendedCalories ? "Balance your meal by adding more dishes." : undefined,
+            status: "adjusted_down",
+            message: "Portions adjusted down to meet calorie target.",
+            alert: alertMessage, // Correctly applies alert
             originalTotalCalories: totalSelectedCalories,
             newTotalCalories: newTotalCaloriesWeighted,
             targetCalories: recommendedCalories,
-            totalPercentage: totalPercentage * 100,
+            totalPercentage: totalAdjustmentWeight, // Send the original sum
             adjustedItems: adjustedItemsWeighted,
-            isBelowTarget: totalSelectedCalories < recommendedCalories // Added flag for frontend
+            isBelowTarget: false 
         });
 
     } catch (error) {
