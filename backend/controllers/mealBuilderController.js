@@ -89,18 +89,17 @@ exports.getBuilderItems = async (req, res) => {
 };
 
 exports.adjustMealPortions = async (req, res) => {
-    try {
-        const { cartItems, recommendedCalories } = req.body; // recommendedCalories is the MEAL target
+     try {
+        const { cartItems, recommendedCalories } = req.body;
 
         // --- Input Validation ---
-        if (!Array.isArray(cartItems) || cartItems.length === 0) return res.status(400).json({ message: "cartItems array required." });
-        if (typeof recommendedCalories !== 'number' || recommendedCalories <= 0) return res.status(400).json({ message: "Valid recommendedCalories required." });
-        for (const item of cartItems) {
-            if (!item || item.calories == null || item.servingSize == null || item.adjustmentWeight == null) {
-                 return res.status(400).json({ message: "Each cart item needs calories, servingSize, and adjustmentWeight." });
-            }
+        if (!Array.isArray(cartItems) || cartItems.length === 0) {
+            return res.status(400).json({ message: "cartItems array required." });
         }
-        // -------------------------
+        if (typeof recommendedCalories !== 'number' || recommendedCalories <= 0) {
+            return res.status(400).json({ message: "Valid recommendedCalories required." });
+        }
+        // ...existing validation code...
 
         const totalSelectedCalories = cartItems.reduce((sum, item) => sum + item.calories, 0);
         const totalAdjustmentWeight = cartItems.reduce((sum, item) => sum + item.adjustmentWeight, 0);
@@ -155,33 +154,44 @@ exports.adjustMealPortions = async (req, res) => {
         for (const item of cartItems) {
             const { originalQuantity, unit } = parseServingSize(item.servingSize);
             let calculatedNewQuantity;
-            if (item.calories === 0 || totalAdjustmentWeight === 0) { // Avoid division by zero
+
+            if (item.calories === 0) {
                 calculatedNewQuantity = originalQuantity;
             } else {
-                // Formula: New Qty = (Item Weight / Total Weight) * (Target Cal / Item Cal) * Original Qty
-                calculatedNewQuantity = (item.adjustmentWeight / totalAdjustmentWeight) * (recommendedCalories / item.calories) * originalQuantity;
+                // Always apply the formula
+                calculatedNewQuantity = (item.adjustmentWeight / totalAdjustmentWeight) * 
+                    (recommendedCalories / item.calories) * originalQuantity;
             }
+
             const adjustedQuantity = MROUND(calculatedNewQuantity, 0.25);
             const finalAdjustedQuantity = (adjustedQuantity <= 0 && originalQuantity > 0) ? 0.25 : adjustedQuantity;
             const quantityRatio = originalQuantity > 0 ? (finalAdjustedQuantity / originalQuantity) : 0;
             const finalAdjustedCalories = Math.round(item.calories * quantityRatio);
+
             adjustedItemsWeighted.push({
-                ...item, originalQuantity, originalCalories: item.calories, unit,
+                ...item,
+                originalQuantity,
+                originalCalories: item.calories,
+                unit,
                 adjustedQuantity: finalAdjustedQuantity,
                 adjustedCalories: finalAdjustedCalories,
             });
         }
-        // ---------------------------
 
         const newTotalCaloriesWeighted = adjustedItemsWeighted.reduce((sum, item) => sum + item.adjustedCalories, 0);
+        const totalPercentage = (totalAdjustmentWeight / 100);
 
+        // Return response with adjustments and alert if needed
         res.status(200).json({
-            status: totalSelectedCalories > recommendedCalories ? "adjusted_down" : "no_adjustment_needed", // Status based on original total
-            message: "Portions calculated.",
+            status: "adjusted", // Always "adjusted" since we're always calculating
+            message: "Portions calculated",
+            alert: totalSelectedCalories < recommendedCalories ? "Balance your meal by adding more dishes." : undefined,
             originalTotalCalories: totalSelectedCalories,
             newTotalCalories: newTotalCaloriesWeighted,
             targetCalories: recommendedCalories,
-            adjustedItems: adjustedItemsWeighted
+            totalPercentage: totalPercentage * 100,
+            adjustedItems: adjustedItemsWeighted,
+            isBelowTarget: totalSelectedCalories < recommendedCalories // Added flag for frontend
         });
 
     } catch (error) {
