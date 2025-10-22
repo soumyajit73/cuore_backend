@@ -153,70 +153,69 @@ async function runImport() {
         console.log(`    --> Processing Sheet: ${sheetName}`);
 
         const rowsAsArrays = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
-        const headerRowIndex = findHeaderRowIndex(rowsAsArrays, 'Item'); // Should find index 2 (Row 3)
-        if (headerRowIndex === -1) {
-            console.error(`Header row ('Item') not found in sheet: ${sheetName}, file: ${file.path}. Skipping sheet.`);
-            continue;
-        }
-        // console.log(`[DEBUG] Found headers ('Item', 'Quantity'...) on row ${headerRowIndex + 1}`); // Optional Debug
+        const headerRowIndex = findHeaderRowIndex(rowsAsArrays, 'Item');
+        if (headerRowIndex === -1) { console.error(`Header row ('Item') not found in ${sheetName}. Skipping.`); continue; }
 
-        let currentSection = 'Uncategorized'; // Default section if none found above
+        let currentSection = 'Uncategorized';
+        let debugCounter = 0; // Limit debug output
 
-        // Iterate through rows starting AFTER the header row
         for (let i = headerRowIndex + 1; i < rowsAsArrays.length; i++) {
           const row = rowsAsArrays[i];
-          if (!row || row.length === 0) continue; // Skip empty rows
+          if (!row || row.length === 0) continue;
 
-          // --- Find the correct section header ABOVE this row ---
-          // Look backwards from the current row up to the beginning
-          for (let j = i - 1; j >= 0; j--) {
-              if (isRealSectionHeader(rowsAsArrays[j])) { // Use the stricter check
-                  currentSection = String(rowsAsArrays[j][0]).trim();
-                  // console.log(`[DEBUG] Row ${i+1}: Assigning section "${currentSection}"`); // Optional Debug
-                  break; // Found the closest valid section header above this row
-              }
-          }
-          // ---
+          // Find section header logic... (keep as is)
+          for (let j = i - 1; j >= 0; j--) { if (isRealSectionHeader(rowsAsArrays[j])) { currentSection = String(rowsAsArrays[j][0]).trim(); break; } }
 
-          // --- Process Data Row using correct indices based on Row 3 headers ---
-          const name = row[0] ? String(row[0]).trim() : null; // Col A (index 0) is ITEM
+          const name = row[0] ? String(row[0]).trim() : null; // Col A
+          if (!name || isRealSectionHeader(row) || name.match(/^\d+(\.\d+)?$/) || name.toLowerCase() === 'item') { continue; } // Skip invalid rows
 
-          // Skip if it's not a valid data row (no name, looks like a header, etc.)
-          if (!name || isRealSectionHeader(row) || name.match(/^\d+(\.\d+)?$/) || name.toLowerCase() === 'item') {
-              // console.log(`[DEBUG] Skipping invalid data row: ${row[0]}`); // Optional Debug
-              continue;
-          }
-
-          const servingQty = row[1] ? String(row[1]).trim() : ''; // Col B (index 1) is QTY
-          const servingUnit = row[2] ? String(row[2]).trim() : ''; // Col C (index 2) is UNIT
+          const servingQty = row[1] ? String(row[1]).trim() : ''; // Col B
+          const servingUnit = row[2] ? String(row[2]).trim() : ''; // Col C
           const servingSize = `${servingQty} ${servingUnit}`.trim();
-          const calories = parseInt(row[3], 10) || 0; // Col D (index 3) is CALORIE
+          const calories = parseInt(row[3], 10) || 0; // Col D
 
-          // Find recipe link
+          // ✅ --- DETAILED DEBUGGING FOR COLUMN I ---
+          const rawColIValue = row[8]; // Get the raw value from index 8
+          let weightString = '0';
+          let parsedWeight = 0;
+
+          if (rawColIValue != null) { // Check if it's not null or undefined
+              try {
+                  weightString = String(rawColIValue).replace('%', '').trim(); // Convert to string, remove %, trim whitespace
+                  parsedWeight = parseFloat(weightString); // Attempt to parse
+                  if (isNaN(parsedWeight)) { // Check if parsing failed
+                      parsedWeight = 0; // Default to 0 if NaN
+                      if (debugCounter < 10) console.log(`[DEBUG Col I] Row ${i+1}: Raw='${rawColIValue}', Cleaned='${weightString}', PARSE FAILED -> using 0`);
+                  } else {
+                       if (debugCounter < 10) console.log(`[DEBUG Col I] Row ${i+1}: Raw='${rawColIValue}', Cleaned='${weightString}', Parsed OK -> ${parsedWeight}`);
+                  }
+              } catch (e) {
+                  parsedWeight = 0; // Default to 0 on any error
+                  if (debugCounter < 10) console.log(`[DEBUG Col I] Row ${i+1}: Raw='${rawColIValue}', Error during processing: ${e.message} -> using 0`);
+              }
+          } else {
+               if (debugCounter < 10) console.log(`[DEBUG Col I] Row ${i+1}: Raw value is null/undefined -> using 0`);
+          }
+          const adjustmentWeight = parsedWeight;
+          debugCounter++;
+          // ------------------------------------------
+
           const recipeId = recipeIdMap.get(name);
-
-          // Clean ID components
           const cleanName = name.toLowerCase().replace(/[\s&]/g, '-').replace(/[^a-z0-9-]/g, '');
           const cleanMealTime = file.mealTime.replace('/', '-');
           const cleanCuisine = cuisine.toLowerCase().replace(/[^a-z0-9-]/g, '');
           const docId = `builder.${cleanName}.${cleanMealTime}.${cleanCuisine}`;
 
-          // Create Sanity document object
           const doc = {
-            _type: 'mealBuilderItem',
-            _id: docId,
-            name: name,
-            calories: calories,
-            servingSize: servingSize,
-            section: currentSection, // Assign the section found above
-            cuisine: cuisine,
-            mealTime: file.mealTime,
+            _type: 'mealBuilderItem', _id: docId, name: name,
+            calories: calories, servingSize: servingSize, section: currentSection,
+            adjustmentWeight: adjustmentWeight, // Use the parsed value
+            cuisine: cuisine, mealTime: file.mealTime,
             recipeLink: recipeId ? { _type: 'reference', _ref: recipeId } : undefined,
           };
-          // console.log('[DEBUG] Creating Meal Builder Doc:', doc); // Uncomment for detailed debug
-          transaction.createOrReplace(doc); // Add to batch
+          transaction.createOrReplace(doc);
           docCount++;
-          if(docCount >= BATCH_SIZE) docCount = await commitBatch(docCount, 'Meal Builder'); // Commit if batch full
+          if(docCount >= BATCH_SIZE) docCount = await commitBatch(docCount, 'Meal Builder');
         }
        }
     }

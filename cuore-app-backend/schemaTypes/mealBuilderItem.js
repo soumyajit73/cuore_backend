@@ -43,6 +43,12 @@ export default {
       type: 'reference',
       to: [{type: 'recipe'}],
     },
+    {
+  name: 'adjustmentWeight',
+  title: '% Recommended Calorie (Weight)', // Or a clearer title
+  type: 'number',
+  description: 'Value from Excel Col I, used for portion adjustment formula',
+},
   
   ],
     preview: {
