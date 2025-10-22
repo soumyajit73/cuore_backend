@@ -2,7 +2,12 @@
 const client = require('../utils/sanityClient'); // Ensure path is correct
 const { calculateAllMetrics } = require('../models/onboardingModel.js'); // Ensure path is correct
 const Onboarding = require('../models/onboardingModel.js').Onboarding; // Ensure path is correct
-
+const MEAL_CALORIE_DISTRIBUTION = {
+    Breakfast: 0.25, 
+    Lunch: 0.30,     
+    Dinner: 0.30     
+    // Add Lunch/Dinner mapping if needed, or handle it below
+};
 // Your dietTagMaps (ensure these are complete and correct)
 const dietTagMaps = {
             Breakfast: {
@@ -31,9 +36,37 @@ exports.getNourishmentPlan = async (req, res) => {
     if (!onboardingData) return res.status(404).json({ message: "Onboarding data not found." });
 
     const metrics = calculateAllMetrics(onboardingData);
+    const dailyRecommendedCalories = metrics.recommendedCalories;
     const recommendedCalories = metrics.recommendedCalories; // User's target
     const foodPreference = onboardingData.o5Data.eating_preference;
 
+    let distributionKey = meal_time;
+    if (meal_time === 'Lunch/Dinner') {
+        // Decide how to handle Lunch/Dinner for this specific plan.
+        // Option 1: Use an average (e.g., 35%)
+        distributionKey = 'Lunch'; // Or 'Dinner', assuming they have the same %
+        // Option 2: Calculate based on time of day (more complex)
+        // Option 3: Return daily goal if meal target isn't applicable here?
+        // Let's assume Lunch/Dinner maps to 35% for now
+        if (!MEAL_CALORIE_DISTRIBUTION[distributionKey]) distributionKey = 'Lunch'; // Default if Lunch/Dinner key missing
+    }
+
+    const mealPercentage = MEAL_CALORIE_DISTRIBUTION[distributionKey];
+     if (typeof mealPercentage !== 'number') {
+        console.error(`Invalid distributionKey "${distributionKey}" derived from meal_time "${meal_time}"`);
+        // Fallback: use daily calories or a default meal calorie value? Let's use daily for now.
+        // It might be better to return an error if the key is invalid.
+        // For simplicity, let's calculate based on a default if key is bad, but log error.
+         console.warn(`Using default meal percentage as key "${distributionKey}" was invalid.`);
+         // Assign a default percentage or handle error appropriately
+         // For now, let's proceed but this might need refinement based on business logic.
+         // Perhaps return the daily target? Or a fixed default like 500?
+         // Let's return the calculated meal target for 'Lunch' as a fallback
+          mealSpecificRecommendedCalories = Math.round(dailyRecommendedCalories * (MEAL_CALORIE_DISTRIBUTION['Lunch'] || 0.35));
+
+    } else {
+         mealSpecificRecommendedCalories = Math.round(dailyRecommendedCalories * mealPercentage);
+    }
     // Determine calorie range for fetching items
     let calorieRange;
     if (recommendedCalories < 1300) calorieRange = "<1300";
@@ -120,6 +153,7 @@ exports.getNourishmentPlan = async (req, res) => {
       calorie_range: calorieRange, // The range used for fetching
       meal_time: meal_time,
       meal_plan: mealPlan,
+      "custom_plate": mealSpecificRecommendedCalories
     });
     // ---------------------
 
