@@ -127,7 +127,7 @@ exports.getNourishmentPlan = async (req, res) => {
       if (!grouped[tag]) grouped[tag] = [];
       grouped[tag].push(item);
     });
-    const mealPlan = [];
+    const mealPlan = [{"custom_plate": mealSpecificRecommendedCalories}];
     const baseTags = tagsForUser.map(tag => tag.match(/^[A-Z]+\d+/)[0]).filter((v, i, a) => a.indexOf(v) === i);
     for (const baseTag of baseTags) {
         let possibleItems = [];
