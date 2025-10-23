@@ -1,4 +1,4 @@
-// importAllExcel.js (Fixed for Column I + Row Offset + _id bug)
+// importAllExcel.js (Final: dynamic start rows + robust Column I reading + conversion)
 const { createClient } = require('@sanity/client');
 const fs = require('fs');
 const path = require('path');
@@ -68,6 +68,15 @@ function isRealSectionHeader(row) {
   return firstColText && !row[1] && !row[2] && !row[3];
 }
 
+// Read raw cell from sheet safely
+function readSheetCellValue(sheet, colLetter, rowNumber) {
+  const ref = `${colLetter}${rowNumber}`;
+  const cell = sheet[ref];
+  if (!cell) return null;
+  // If the cell has a `.v` value, return it. If rich text, `.w` or `.v` may exist.
+  return cell.v !== undefined ? cell.v : (cell.w !== undefined ? cell.w : null);
+}
+
 // --- Main Import Function ---
 async function runImport() {
   let docCount = 0;
@@ -93,7 +102,7 @@ async function runImport() {
       for (const sheetName of workbook.SheetNames) {
         const calorieRange = sheetName;
         // Keep existing range usage (range: 7) as earlier — adjust only if needed per file
-        const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, range: 7 });
+        const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, range: 7, raw: false, defval: '' });
         for (const row of rows) {
           if (!row || row.length < 8) continue;
           const name = row[1] ? String(row[1]).trim() : null; // Col B
@@ -146,7 +155,7 @@ async function runImport() {
     docCount = await commitBatch(docCount, 'Nourish Plan');
     console.log(`✅ Built Diet Map with ${dietMap.size} entries.`);
 
-    // --- FIXED PART: Meal Builder import ---
+    // --- Step 3: Meal Builder files (with dynamic start row + robust Column I reading) ---
     console.log('Step 3: Processing Meal Builder files...');
     for (const file of mealBuilderFiles) {
       if (!fs.existsSync(file.path)) {
@@ -159,11 +168,28 @@ async function runImport() {
         const cuisine = sheetName;
         console.log(`  --> Processing Sheet: ${sheetName}`);
 
-        // Read starting at Row 11 (0-based range: 10)
+        // Choose start row based on sheet: Indian -> start at row 10, Global -> row 11
+        // Default to 11 if not recognized
+        const lower = sheetName.toLowerCase();
+        const startRowExcel = lower.includes('indian') ? 10 : (lower.includes('global') ? 11 : 11);
+        const rangeStartZeroBased = startRowExcel - 1;
+
+        // read rows as arrays starting from rangeStartZeroBased
         const rowsAsArrays = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], {
           header: 1,
-          range: 10,
+          range: rangeStartZeroBased,
+          raw: true,
+          defval: null,
         });
+
+        // debug: show first 20 rows' Column I by reading raw cells directly
+        const sheet = workbook.Sheets[sheetName];
+        console.log(`\n[DEBUG] First 20 rows for sheet "${sheetName}" (showing Column I values by cell):`);
+        for (let r = startRowExcel; r < startRowExcel + Math.min(20, rowsAsArrays.length); r++) {
+          const cellVal = readSheetCellValue(sheet, 'I', r);
+          const rowIndexForLog = r - startRowExcel; // index in rowsAsArrays
+          console.log(`Row ${r}:`, cellVal, '(', typeof cellVal, ')', 'rowArrayI=', rowsAsArrays[rowIndexForLog] ? rowsAsArrays[rowIndexForLog][8] : undefined);
+        }
 
         let currentSection = 'Uncategorized';
         let debugCounter = 0;
@@ -188,23 +214,43 @@ async function runImport() {
           const servingSize = `${servingQty} ${servingUnit}`.trim();
           const calories = parseInt(row[3], 10) || 0;
 
-          // Robust Column I handling (index 8)
-          const rawColIValue = row[8];
-          let parsedWeight = 0;
+          // --- Robust Column I handling using direct cell read, with fallback to row[8] ---
+          const excelRowNumber = startRowExcel + i; // actual excel row number for this row
+          let rawColIValue = readSheetCellValue(sheet, 'I', excelRowNumber);
 
-          if (rawColIValue != null && rawColIValue !== '') {
-            const cleanValue = String(rawColIValue).replace('%', '').trim();
-            const temp = parseFloat(cleanValue);
-            parsedWeight = isNaN(temp) ? 0 : temp; // keep numeric % (100 => 100)
-            if (debugCounter < 10)
-              console.log(
-                `[DEBUG Col I] Row ${i + 11}: Raw='${rawColIValue}', Clean='${cleanValue}', Parsed=${parsedWeight}`
-              );
-          } else {
-            if (debugCounter < 10)
-              console.log(`[DEBUG Col I] Row ${i + 11}: Raw value is null/undefined -> using 0`);
+          // fallback to row[8] if direct cell read is null/undefined
+          if ((rawColIValue === null || rawColIValue === undefined) && row && row.length > 8) {
+            rawColIValue = row[8];
           }
-          const adjustmentWeight = parsedWeight;
+
+          let parsedWeight = 0;
+          if (rawColIValue !== null && rawColIValue !== undefined && rawColIValue !== '') {
+            // convert values like "1", 1, "0.4", "40%" -> numeric
+            // remove percent sign and stray characters, but keep . and digits
+            // If the value is numeric type, handle directly
+            if (typeof rawColIValue === 'number') {
+              // numeric: if <=1 treat as fraction (0.4 -> 40) else raw numeric (40 stays 40)
+              parsedWeight = rawColIValue <= 1 ? rawColIValue * 100 : rawColIValue;
+            } else {
+              // string: remove commas, spaces, percent signs and non-digit except dot
+              const cleaned = String(rawColIValue).replace(/[, ]+/g, '').replace(/%/g, '').replace(/[^0-9.]/g, '').trim();
+              const temp = parseFloat(cleaned);
+              if (!isNaN(temp)) {
+                parsedWeight = temp <= 1 ? temp * 100 : temp;
+              } else {
+                // can't parse numeric - keep 0 and log warning
+                console.log(`[WARN] Row ${excelRowNumber}: Column I value "${rawColIValue}" could not be parsed. Using 0.`);
+              }
+            }
+
+            if (debugCounter < 10) {
+              console.log(`[DEBUG Col I] Row ${excelRowNumber}: Raw='${rawColIValue}', Parsed=${parsedWeight}`);
+            }
+          } else {
+            if (debugCounter < 10) {
+              console.log(`[INFO] Row ${excelRowNumber}: Column I is empty/null. Using 0.`);
+            }
+          }
           debugCounter++;
 
           const recipeId = recipeIdMap.get(name);
@@ -220,7 +266,7 @@ async function runImport() {
             calories,
             servingSize,
             section: currentSection,
-            adjustmentWeight,
+            adjustmentWeight: parsedWeight,
             cuisine,
             mealTime: file.mealTime,
             recipeLink: recipeId ? { _type: 'reference', _ref: recipeId } : undefined,
