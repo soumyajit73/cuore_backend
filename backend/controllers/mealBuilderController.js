@@ -1,50 +1,113 @@
-const client = require('../utils/sanityClient'); // Ensure this path points to your sanityClient.js file
-const { calculateAllMetrics } = require('../models/onboardingModel.js'); // Ensure this path is correct
-const Onboarding = require('../models/onboardingModel.js').Onboarding; // Ensure this path is correct
+const client = require('../utils/sanityClient'); 
+const { calculateAllMetrics } = require('../models/onboardingModel.js'); 
+const Onboarding = require('../models/onboardingModel.js').Onboarding; 
+// Import MROUND if it's in a separate helper file
+// const { MROUND } = require('../utils/mathHelpers'); 
 
-// --- Helper Functions (Added from our last discussion) ---
+// --- Helper Functions (Include or import these) ---
 
 /**
- * Parses a serving size string (e.g., "0.5 cup") into its parts.
- * @param {string} servingSize - The string to parse.
- * @returns {{originalQuantity: number, unit: string}}
+ * Parses a serving size string (e.g., "0.5 cup") into its parts. More robust.
+ * Handles numbers, decimals, fractions like "1/2".
+ * @param {string | number} servingSizeString - The string or number to parse.
+ * @returns {{baseQuantity: number, unit: string}}
  */
-function parseServingSize(servingSize) {
-    if (typeof servingSize === 'number') {
-        // Handle if it's already a number
-        return { originalQuantity: servingSize, unit: 'unit' };
-    }
-    if (typeof servingSize !== 'string' || !servingSize) {
-        // Fallback for missing or invalid data
-        return { originalQuantity: 1, unit: 'unit' }; 
-    }
+function parseServingSize(servingSizeString) {
+    const defaults = { baseQuantity: 1, unit: 'unit(s)' };
     
-    // Regex to find the first number and the rest of the string (e.g., "0.5 cup", "1 piece")
-    const match = servingSize.match(/^([0-9.]+)\s*(.*)$/);
-    
-    if (match) {
-        return { 
-            originalQuantity: parseFloat(match[1]), 
-            unit: match[2] || 'unit' // e.g., "cup", "g", "piece"
-        };
+    // Handle if input is already a number
+    if (typeof servingSizeString === 'number' && !isNaN(servingSizeString)) {
+        return { baseQuantity: servingSizeString, unit: defaults.unit };
     }
+
+    if (!servingSizeString || typeof servingSizeString !== 'string') {
+        console.warn(`Invalid serving size input type: ${typeof servingSizeString}. Using defaults.`);
+        return defaults;
+    }
+
+    const cleanedString = servingSizeString.trim();
+    // Regex to capture optional quantity (number, decimal, fraction like x/y) and the rest as unit
+    const match = cleanedString.match(/^([\d.\/]+)?\s*(.*)?$/);
     
-    // Fallback if no number is found (e.g., "piece")
-    return { originalQuantity: 1, unit: servingSize };
+    let quantity = defaults.baseQuantity; // Default quantity
+    let unit = cleanedString; // Default unit is the whole string if no quantity found
+
+    if (match && match[1]) { // If a numeric-like part was found at the beginning
+        const quantityPart = match[1];
+        unit = match[2] ? match[2].trim() : defaults.unit; // The rest is the unit, or default
+
+        // Handle fractions like "1/2"
+        if (quantityPart.includes('/') && !quantityPart.startsWith('/')) { // Ensure it's not just "/unit"
+            const fractionParts = quantityPart.split('/');
+            if (fractionParts.length === 2 && fractionParts[0] && fractionParts[1]) {
+                const num = parseFloat(fractionParts[0]);
+                const den = parseFloat(fractionParts[1]);
+                if (!isNaN(num) && !isNaN(den) && den !== 0) {
+                    quantity = num / den;
+                } else {
+                    console.warn(`Invalid fraction format in serving size: "${servingSizeString}". Using default quantity.`);
+                    quantity = defaults.baseQuantity; // Invalid fraction
+                }
+            } else {
+                 console.warn(`Invalid fraction format in serving size: "${servingSizeString}". Using default quantity.`);
+                quantity = defaults.baseQuantity; // Invalid fraction format
+            }
+        }
+        // Handle decimals or whole numbers
+        else {
+            const parsedQty = parseFloat(quantityPart);
+            if (!isNaN(parsedQty)) {
+                quantity = parsedQty;
+            } else {
+                 console.warn(`Invalid quantity format in serving size: "${servingSizeString}". Using default quantity.`);
+                quantity = defaults.baseQuantity; // Invalid number
+            }
+        }
+        // If unit was empty but quantity existed, use default unit
+        if (!unit) unit = defaults.unit;
+
+    } else {
+        // If no numeric part found at the beginning, assume quantity is 1
+        quantity = defaults.baseQuantity;
+        unit = cleanedString || defaults.unit; // Use the whole string as unit or default
+    }
+
+    // Ensure unit is never empty if quantity is valid
+    if (!unit) {
+        unit = defaults.unit;
+    }
+
+    return { baseQuantity: quantity, unit: unit };
+}
+
+
+/**
+ * Calculates the total quantity based on base serving size and number of servings.
+ * @param {string | number} servingSizeInput - e.g., "0.5 Cup" or 0.5
+ * @param {number} numOfServings - e.g., 2
+ * @returns {{totalQuantity: number, unit: string}} - e.g., { totalQuantity: 1, unit: "Cup" }
+ */
+function calculateTotalQuantity(servingSizeInput, numOfServings = 1) {
+    const { baseQuantity, unit } = parseServingSize(servingSizeInput);
+    const servings = typeof numOfServings === 'number' && numOfServings > 0 ? numOfServings : 1;
+    // Round total quantity slightly to avoid floating point issues
+    const totalQuantity = parseFloat((baseQuantity * servings).toFixed(4)); 
+    return { totalQuantity, unit };
 }
 
 /**
- * Implements the Excel MROUND function, as seen in the doc
+ * Implements the Excel MROUND function.
  * @param {number} number - The number to round.
  * @param {number} multiple - The multiple to round to (e.g., 0.25).
  * @returns {number}
  */
 function MROUND(number, multiple) {
-    if (multiple === 0) {
-        return 0;
-    }
-    // Ensure precision by rounding the result of the division
-    return Math.round(number / multiple) * multiple;
+    if (multiple === 0) return 0;
+    if (isNaN(number) || isNaN(multiple)) return 0; // Handle NaN inputs
+    const rounded = Math.round(number / multiple) * multiple;
+    // Use parseFloat and toFixed to handle potential floating point inaccuracies 
+    // Adjust decimal places if needed (e.g., toFixed(2) for 2 decimal places)
+    return parseFloat(rounded.toFixed(4)); 
 }
 
 // ---------------------------------------------------
@@ -55,262 +118,300 @@ const MEAL_CALORIE_DISTRIBUTION = {
     Dinner: 0.30     
 };
 
+// --- Your getBuilderItems function (No changes needed here) ---
 exports.getBuilderItems = async (req, res) => {
-  try {
-    const { meal_time, cuisine } = req.query;
-
-    // --- Input Validation (Now expects Breakfast, Lunch, or Dinner) ---
-    if (!meal_time || !cuisine) {
-      return res.status(400).json({ message: "meal_time and cuisine query parameters are required." });
-    }
-    // ✅ Updated validation for specific meal times
-    if (!['Breakfast', 'Lunch', 'Dinner'].includes(meal_time)) {
-       return res.status(400).json({ message: "Invalid meal_time parameter (Use 'Breakfast', 'Lunch', or 'Dinner')." });
-    }
-     if (!['Indian', 'Global'].includes(cuisine)) {
-       return res.status(400).json({ message: "Invalid cuisine parameter." });
-    }
-    // -----------------------------------------------------------------
-
-    // --- Get User Data & Calculate DAILY Recommended Calories ---
-    const userId = req.user.userId;
-    const onboardingData = await Onboarding.findOne({ userId }).lean();
-    if (!onboardingData) {
-      return res.status(404).json({ message: "Onboarding data not found to calculate recommended calories." });
-    }
-    const metrics = calculateAllMetrics(onboardingData);
-    const dailyRecommendedCalories = metrics.recommendedCalories; // User's DAILY target
-    // ----------------------------------------------------------
-
-    // --- Calculate MEAL-SPECIFIC Recommended Calories ---
-    const mealPercentage = MEAL_CALORIE_DISTRIBUTION[meal_time];
-    if (typeof mealPercentage !== 'number') {
-        // Fallback or error if meal_time isn't in our distribution map
-        console.error(`Invalid meal_time "${meal_time}" for calorie distribution.`);
-        return res.status(400).json({ message: "Invalid meal_time provided for calorie calculation." });
-    }
-    const mealSpecificRecommendedCalories = Math.round(dailyRecommendedCalories * mealPercentage);
-    // --------------------------------------------------
-
-    // --- Determine mealTime filter for Sanity ---
-    // Sanity uses "Breakfast" or "Lunch/Dinner". Map Lunch/Dinner requests accordingly.
-    const sanityMealTimeFilter = (meal_time === 'Lunch' || meal_time === 'Dinner') ? 'Lunch/Dinner' : 'Breakfast';
-    // --------------------------------------------
-
-
-    // --- Fetch Builder Items from Sanity ---
-    const query = `
-      *[_type == "mealBuilderItem" &&
-        mealTime == $sanityMealTimeFilter && // Use the mapped value
-        cuisine == $cuisine] {
-          _id, name, calories, servingSize, section, mealTime, cuisine,
-          adjustmentWeight, // Fetch the Column I value needed for the formula
-          "recipeLink": recipeLink->{_id, name}
-      } | order(section asc, name asc)
-    `;
-    const params = { sanityMealTimeFilter, cuisine }; // Pass correct parameters
-    const items = await client.fetch(query, params);
-    // ------------------------------------
-
-    // --- Group items by section ---
-    const groupedItems = items.reduce((acc, item) => {
-      const section = item.section || 'Uncategorized';
-      if (!acc[section]) acc[section] = [];
-      acc[section].push(item);
-      return acc;
-    }, {});
-    // ----------------------------
-
-    // --- Send Response ---
-    res.status(200).json({
-      recommended_calories: mealSpecificRecommendedCalories, // ✅ Return MEAL target
-      grouped_items: groupedItems
-    });
-    // ---------------------
-
-  } catch (error) {
-    console.error("Error fetching meal builder items:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-};
-
-// --- THIS IS THE FIXED VERSION ---
-// --- (Make sure MROUND and parseServingSize are imported from your helpers) ---
-
-exports.adjustMealPortions = async (req, res) => {
     try {
-        const { cartItems, recommendedCalories } = req.body;
+        const { meal_time, cuisine } = req.query;
 
         // --- Input Validation ---
-        if (!Array.isArray(cartItems) || cartItems.length === 0) {
+        if (!meal_time || !cuisine) {
+            return res.status(400).json({ message: "meal_time and cuisine query parameters are required." });
+        }
+        if (!['Breakfast', 'Lunch', 'Dinner'].includes(meal_time)) {
+            return res.status(400).json({ message: "Invalid meal_time parameter (Use 'Breakfast', 'Lunch', or 'Dinner')." });
+        }
+        if (!['Indian', 'Global'].includes(cuisine)) {
+            return res.status(400).json({ message: "Invalid cuisine parameter." });
+        }
+
+        // --- Get User Data & Calculate DAILY Recommended Calories ---
+        const userId = req.user.userId; // Make sure req.user is populated by auth middleware
+        const onboardingData = await Onboarding.findOne({ userId }).lean();
+        if (!onboardingData) {
+            return res.status(404).json({ message: "Onboarding data not found for user." });
+        }
+        const metrics = calculateAllMetrics(onboardingData);
+        const dailyRecommendedCalories = metrics.recommendedCalories; 
+        if (!dailyRecommendedCalories || dailyRecommendedCalories <= 0) {
+             console.warn(`Calculated dailyRecommendedCalories is invalid (${dailyRecommendedCalories}) for userId: ${userId}`);
+             // Depending on requirements, you might return an error or a default value
+             // return res.status(500).json({ message: "Could not calculate valid daily recommended calories." });
+        }
+
+
+        // --- Calculate MEAL-SPECIFIC Recommended Calories ---
+        const mealPercentage = MEAL_CALORIE_DISTRIBUTION[meal_time];
+        if (typeof mealPercentage !== 'number') {
+            console.error(`Invalid meal_time "${meal_time}" for calorie distribution.`);
+            return res.status(400).json({ message: "Invalid meal_time provided for calorie calculation." });
+        }
+        // Ensure daily calories is a positive number before calculation
+        const validDailyCalories = dailyRecommendedCalories > 0 ? dailyRecommendedCalories : 0;
+        const mealSpecificRecommendedCalories = Math.round(validDailyCalories * mealPercentage);
+
+        // --- Determine mealTime filter for Sanity ---
+        const sanityMealTimeFilter = (meal_time === 'Lunch' || meal_time === 'Dinner') ? 'Lunch/Dinner' : 'Breakfast';
+
+        // --- Fetch Builder Items from Sanity ---
+        const query = `
+          *[_type == "mealBuilderItem" &&
+            mealTime == $sanityMealTimeFilter && 
+            cuisine == $cuisine] {
+              _id, name, calories, servingSize, section, mealTime, cuisine,
+              adjustmentWeight, // This should be the 'name' of your schema field
+              "recipeLink": recipeLink->{_id, name}
+          } | order(section asc, name asc)
+        `;
+        const params = { sanityMealTimeFilter, cuisine };
+        const items = await client.fetch(query, params);
+       
+        // --- Group items by section ---
+        const groupedItems = items.reduce((acc, item) => {
+            const section = item.section || 'Uncategorized';
+            if (!acc[section]) acc[section] = [];
+            acc[section].push(item);
+            return acc;
+        }, {});
+        
+        // --- Send Response ---
+        res.status(200).json({
+            recommended_calories: mealSpecificRecommendedCalories, 
+            grouped_items: groupedItems
+        });
+
+    } catch (error) {
+        console.error("Error fetching meal builder items:", error);
+        // Provide more context in error logging if possible
+        res.status(500).json({ error: "Internal Server Error fetching items." });
+    }
+};
+
+
+// --- UPDATED adjustMealPortions FUNCTION (Handles numOfServings) ---
+exports.adjustMealPortions = async (req, res) => {
+    try {
+        const { cartItems: inputCartItems, recommendedCalories } = req.body;
+
+        // --- Input Validation ---
+        if (!Array.isArray(inputCartItems) || inputCartItems.length === 0) {
             return res.status(400).json({ message: "cartItems array required." });
         }
         if (typeof recommendedCalories !== 'number' || recommendedCalories <= 0) {
-            return res.status(400).json({ message: "Valid recommendedCalories required." });
+            // It might be valid to have a target of 0 if calculated that way, adjust if needed
+            return res.status(400).json({ message: "Valid positive recommendedCalories required." });
         }
         
-        const totalSelectedCalories = cartItems.reduce((sum, item) => sum + item.calories, 0);
+        // --- Process Input Cart Items to Calculate Totals ---
+        const processedCartItems = inputCartItems.map(item => {
+            // Validate and sanitize numOfServings
+            const servings = (typeof item.numOfServings === 'number' && item.numOfServings > 0) ? item.numOfServings : 1;
+            // Validate and sanitize base calories
+            const baseCalories = (typeof item.calories === 'number' && item.calories >= 0) ? item.calories : 0;
+            // Calculate total quantity and get unit
+            const { totalQuantity, unit } = calculateTotalQuantity(item.servingSize, servings);
+            // Validate and sanitize adjustmentWeight
+            const weight = (typeof item.adjustmentWeight === 'number' && item.adjustmentWeight >= 0) ? item.adjustmentWeight : 0;
+            
+            return {
+                // Keep original input fields for reference in response
+                _id: item._id, 
+                name: item.name, 
+                originalServingSize: item.servingSize, // Base serving size string
+                baseCalories: baseCalories, // Base calories per serving
+                numOfServings: servings, // Validated number of servings
+                recipeLink: item.recipeLink, 
+                section: item.section,
+                cuisine: item.cuisine,
+                mealTime: item.mealTime,
+
+                // Calculated total values used for adjustments
+                totalCalories: baseCalories * servings, 
+                totalQuantity: totalQuantity, 
+                unit: unit, 
+                adjustmentWeight: weight // Use validated weight
+            };
+        });
+        // --------------------------------------------------
+
+        // --- Calculate Totals using Processed Data ---
+        const totalSelectedCalories = processedCartItems.reduce((sum, item) => sum + item.totalCalories, 0);
+        // Use the base adjustmentWeight from the items for the sum
+        const totalAdjustmentWeight = processedCartItems.reduce((sum, item) => sum + item.adjustmentWeight, 0); 
         
-        // This is the "sum of % of recommended calories"
-        const totalAdjustmentWeight = cartItems.reduce((sum, item) => sum + (item.adjustmentWeight || 0), 0);
-
-
-        // --- CORRECTED LOGIC FOR CONDITIONS 1 & 2 ---
+        // --- Apply Rules ---
+        const alertMessage = (totalAdjustmentWeight < 100 && totalAdjustmentWeight > 0) ? "Balance your meal by adding more dishes." : undefined; // Only alert if > 0 and < 100
+        // Use 100 if sum is less than 100, but allow 0 if all items have 0 weight
+        const effectiveTotalAdjustmentWeight = (totalAdjustmentWeight < 100 && totalAdjustmentWeight > 0) ? 100 : totalAdjustmentWeight; 
         
-        // Condition 2: "If <100% add alert..." (Based on sum of %)
-        const alertMessage = (totalAdjustmentWeight < 100) ? "Balance your meal by adding more dishes." : undefined;
-        
-        // Condition 1: "if sum of ... <100%, use 100%..." (Based on sum of %)
-        const effectiveTotalAdjustmentWeight = Math.max(totalAdjustmentWeight, 100);
-
-        // --- End of Corrected Logic ---
-
-
         // --- Case 1: AT Target Calories ---
         if (totalSelectedCalories === recommendedCalories) {
-            const originalItemsWithParsedQty = cartItems.map(item => {
-                const { originalQuantity, unit } = parseServingSize(item.servingSize);
-                return { 
-                    ...item, 
-                    originalQuantity, // Added for consistency
-                    originalCalories: item.calories, // Added for consistency
-                    unit,
-                    adjustedQuantity: originalQuantity, 
-                    adjustedCalories: item.calories 
-                };
-            });
-            return res.status(200).json({
-                status: "no_change",
-                message: "Total calories already match target.",
-                alert: alertMessage, // Correctly applies alert
-                originalTotalCalories: totalSelectedCalories,
-                newTotalCalories: totalSelectedCalories,
-                targetCalories: recommendedCalories,
-                totalPercentage: totalAdjustmentWeight,
-                adjustedItems: originalItemsWithParsedQty,
-                isBelowTarget: false
+            const adjustedItemsNoChange = processedCartItems.map(item => ({ 
+                _id: item._id, name: item.name, 
+                originalCalories: item.totalCalories, // Reflects total selected
+                originalQuantity: item.totalQuantity, // Reflects total selected
+                originalServingSize: item.originalServingSize, // Base serving size
+                numOfServings: item.numOfServings, // Number selected
+                unit: item.unit,
+                adjustedQuantity: item.totalQuantity, // No change
+                adjustedCalories: item.totalCalories, // No change
+                servingSizeChange: 0,
+                newServingSizeString: `${item.totalQuantity} ${item.unit}`,
+                recipeLink: item.recipeLink, section: item.section,
+                cuisine: item.cuisine, mealTime: item.mealTime,
+            }));
+             return res.status(200).json({
+                status: "no_change", message: "Total calories already match target.", alert: alertMessage, 
+                originalTotalCalories: totalSelectedCalories, newTotalCalories: totalSelectedCalories,
+                targetCalories: recommendedCalories, totalPercentage: totalAdjustmentWeight,
+                adjustedItems: adjustedItemsNoChange, isBelowTarget: false
             });
         }
 
         // --- Case 2: BELOW Target Calories (Scale UP) ---
         if (totalSelectedCalories < recommendedCalories) {
             console.log("Total calories BELOW target. Performing simple proportional scaling UP.");
-            
+            // Avoid division by zero
             const scalingFactor = totalSelectedCalories > 0 ? (recommendedCalories / totalSelectedCalories) : 0;
             const adjustedItemsSimple = [];
 
-            for (const item of cartItems) {
-                const { originalQuantity, unit } = parseServingSize(item.servingSize);
+            for (const item of processedCartItems) { 
+                const originalQuantity = item.totalQuantity; 
+                const originalCalories = item.totalCalories; 
+                const unit = item.unit;
+
                 const calculatedNewQuantity = originalQuantity * scalingFactor;
                 const adjustedQuantity = MROUND(calculatedNewQuantity, 0.25);
-                const finalAdjustedQuantity = (adjustedQuantity <= 0 && originalQuantity > 0) ? 0.25 : adjustedQuantity;
+                // Ensure minimum is based on base quantity, not just 0.25 absolute
+                const baseParsed = parseServingSize(item.originalServingSize);
+                const minQuantity = baseParsed.baseQuantity > 0 ? 0.25 : 0; // Min is 0.25 only if base > 0
+                const finalAdjustedQuantity = (adjustedQuantity <= 0 && originalQuantity > 0) ? minQuantity : adjustedQuantity;
+                
                 const quantityRatio = originalQuantity > 0 ? (finalAdjustedQuantity / originalQuantity) : 0;
-                const finalAdjustedCalories = Math.round(item.calories * quantityRatio);
+                const finalAdjustedCalories = Math.round(originalCalories * quantityRatio); 
+                const servingSizeChange = finalAdjustedQuantity - originalQuantity;
 
                 adjustedItemsSimple.push({
-                    ...item, 
-                    originalQuantity, 
-                    originalCalories: item.calories, 
-                    unit,
-                    adjustedQuantity: finalAdjustedQuantity, 
-                    adjustedCalories: finalAdjustedCalories,
+                    _id: item._id, name: item.name, 
+                    originalCalories: originalCalories, originalQuantity: originalQuantity, 
+                    originalServingSize: item.originalServingSize, numOfServings: item.numOfServings, 
+                    unit: unit, adjustedQuantity: finalAdjustedQuantity, 
+                    adjustedCalories: finalAdjustedCalories, servingSizeChange: parseFloat(servingSizeChange.toFixed(2)), 
+                    newServingSizeString: `${finalAdjustedQuantity} ${unit}`,
+                    recipeLink: item.recipeLink, section: item.section,
+                    cuisine: item.cuisine, mealTime: item.mealTime,
                 });
             }
             const newTotalCaloriesSimple = adjustedItemsSimple.reduce((sum, item) => sum + item.adjustedCalories, 0);
-            
             return res.status(200).json({
-                status: "adjusted_up",
-                message: "Portions scaled up to meet calorie target.",
-                alert: alertMessage, // Correctly applies alert
-                originalTotalCalories: totalSelectedCalories,
-                newTotalCalories: newTotalCaloriesSimple,
-                targetCalories: recommendedCalories,
-                totalPercentage: totalAdjustmentWeight,
-                adjustedItems: adjustedItemsSimple,
-                isBelowTarget: true
+                status: "adjusted_up", message: "Portions scaled up to meet calorie target.", alert: alertMessage,
+                originalTotalCalories: totalSelectedCalories, newTotalCalories: newTotalCaloriesSimple,
+                targetCalories: recommendedCalories, totalPercentage: totalAdjustmentWeight,
+                adjustedItems: adjustedItemsSimple, isBelowTarget: true
             });
         }
 
         // --- Case 3: ABOVE Target Calories (Scale DOWN) ---
         
-        // --- Handle Edge Case: Total Weight is Zero (for down-scaling) ---
-        if (effectiveTotalAdjustmentWeight === 0) {
-            console.warn("Total Adjustment Weight is zero. Performing simple proportional scaling DOWN.");
+        // Edge Case: Total Weight is Zero or less (Should use simple scaling down)
+        if (effectiveTotalAdjustmentWeight <= 0) {
+             console.warn(`Total Adjustment Weight is ${totalAdjustmentWeight}. Performing simple proportional scaling DOWN.`);
+            // Avoid division by zero
             const scalingFactor = totalSelectedCalories > 0 ? (recommendedCalories / totalSelectedCalories) : 0;
             const adjustedItemsSimple = [];
+             for (const item of processedCartItems) { 
+                 const originalQuantity = item.totalQuantity;
+                 const originalCalories = item.totalCalories;
+                 const unit = item.unit;
+                 
+                 const calculatedNewQuantity = originalQuantity * scalingFactor;
+                 const adjustedQuantity = MROUND(calculatedNewQuantity, 0.25);
+                 const baseParsed = parseServingSize(item.originalServingSize);
+                 const minQuantity = baseParsed.baseQuantity > 0 ? 0.25 : 0; 
+                 const finalAdjustedQuantity = (adjustedQuantity <= 0 && originalQuantity > 0) ? minQuantity : adjustedQuantity;
+                 
+                 const quantityRatio = originalQuantity > 0 ? (finalAdjustedQuantity / originalQuantity) : 0;
+                 const finalAdjustedCalories = Math.round(originalCalories * quantityRatio);
+                 const servingSizeChange = finalAdjustedQuantity - originalQuantity;
 
-            for (const item of cartItems) {
-                const { originalQuantity, unit } = parseServingSize(item.servingSize);
-                const calculatedNewQuantity = originalQuantity * scalingFactor;
-                const adjustedQuantity = MROUND(calculatedNewQuantity, 0.25);
-                const finalAdjustedQuantity = (adjustedQuantity <= 0 && originalQuantity > 0) ? 0.25 : adjustedQuantity;
-                const quantityRatio = originalQuantity > 0 ? (finalAdjustedQuantity / originalQuantity) : 0;
-                const finalAdjustedCalories = Math.round(item.calories * quantityRatio);
-
-                adjustedItemsSimple.push({
-                    ...item, originalQuantity, originalCalories: item.calories, unit,
-                    adjustedQuantity: finalAdjustedQuantity, adjustedCalories: finalAdjustedCalories,
-                });
+                 adjustedItemsSimple.push({
+                     _id: item._id, name: item.name, 
+                     originalCalories: originalCalories, originalQuantity: originalQuantity, 
+                     originalServingSize: item.originalServingSize, numOfServings: item.numOfServings, 
+                     unit: unit, adjustedQuantity: finalAdjustedQuantity, 
+                     adjustedCalories: finalAdjustedCalories, servingSizeChange: parseFloat(servingSizeChange.toFixed(2)), 
+                     newServingSizeString: `${finalAdjustedQuantity} ${unit}`,
+                     recipeLink: item.recipeLink, section: item.section,
+                     cuisine: item.cuisine, mealTime: item.mealTime,
+                 });
             }
-            const newTotalCaloriesSimple = adjustedItemsSimple.reduce((sum, item) => sum + item.adjustedCalories, 0);
-            return res.status(200).json({
-                status: "adjusted_simple_down",
-                message: "Portions adjusted proportionally (weights were zero).",
-                alert: alertMessage, // Correctly applies alert
-                originalTotalCalories: totalSelectedCalories,
-                newTotalCalories: newTotalCaloriesSimple,
-                targetCalories: recommendedCalories,
-                totalPercentage: totalAdjustmentWeight,
-                adjustedItems: adjustedItemsSimple,
-                isBelowTarget: false
+             const newTotalCaloriesSimple = adjustedItemsSimple.reduce((sum, item) => sum + item.adjustedCalories, 0);
+             return res.status(200).json({
+                 status: "adjusted_simple_down", message: "Portions adjusted proportionally (weights were zero or invalid).", alert: alertMessage,
+                 originalTotalCalories: totalSelectedCalories, newTotalCalories: newTotalCaloriesSimple,
+                 targetCalories: recommendedCalories, totalPercentage: totalAdjustmentWeight,
+                 adjustedItems: adjustedItemsSimple, isBelowTarget: false
             });
         }
         
-        // --- Apply Weighted Formula (Only for scaling DOWN) ---
+        // Apply Weighted Formula (Only for scaling DOWN and when weight > 0)
         const adjustedItemsWeighted = [];
-        for (const item of cartItems) {
-            const { originalQuantity, unit } = parseServingSize(item.servingSize);
+        for (const item of processedCartItems) { 
+            const originalQuantity = item.totalQuantity;
+            const originalCalories = item.totalCalories; 
+            const unit = item.unit;
             let calculatedNewQuantity;
 
-            if (item.calories === 0 || (item.adjustmentWeight || 0) === 0) {
-                calculatedNewQuantity = originalQuantity; // Don't adjust
+            // Use item.adjustmentWeight (base weight) and originalCalories (total calories)
+            // Skip adjustment if base weight is 0 or calories are 0
+            if (originalCalories === 0 || item.adjustmentWeight <= 0) {
+                calculatedNewQuantity = originalQuantity; 
             } else {
-                // Formula from your doc, using effectiveTotalAdjustmentWeight
-                calculatedNewQuantity = (item.adjustmentWeight / effectiveTotalAdjustmentWeight) * (recommendedCalories / item.calories) * originalQuantity;
+                // Formula uses base adjustmentWeight, target calories, total calories, total quantity
+                calculatedNewQuantity = (item.adjustmentWeight / effectiveTotalAdjustmentWeight) * (recommendedCalories / originalCalories) * originalQuantity;
             }
 
             const adjustedQuantity = MROUND(calculatedNewQuantity, 0.25);
-            const finalAdjustedQuantity = (adjustedQuantity <= 0 && originalQuantity > 0) ? 0.25 : adjustedQuantity;
+            const baseParsed = parseServingSize(item.originalServingSize);
+            const minQuantity = baseParsed.baseQuantity > 0 ? 0.25 : 0; 
+            const finalAdjustedQuantity = (adjustedQuantity <= 0 && originalQuantity > 0) ? minQuantity : adjustedQuantity;
+            
             const quantityRatio = originalQuantity > 0 ? (finalAdjustedQuantity / originalQuantity) : 0;
-            const finalAdjustedCalories = Math.round(item.calories * quantityRatio);
+            const finalAdjustedCalories = Math.round(originalCalories * quantityRatio); 
+            const servingSizeChange = finalAdjustedQuantity - originalQuantity;
 
             adjustedItemsWeighted.push({
-                ...item,
-                originalQuantity,
-                originalCalories: item.calories,
-                unit,
-                adjustedQuantity: finalAdjustedQuantity,
-                adjustedCalories: finalAdjustedCalories,
+                  _id: item._id, name: item.name, 
+                  originalCalories: originalCalories, originalQuantity: originalQuantity, 
+                  originalServingSize: item.originalServingSize, numOfServings: item.numOfServings, 
+                  unit: unit, adjustedQuantity: finalAdjustedQuantity, 
+                  adjustedCalories: finalAdjustedCalories, servingSizeChange: parseFloat(servingSizeChange.toFixed(2)), 
+                  newServingSizeString: `${finalAdjustedQuantity} ${unit}`,
+                  recipeLink: item.recipeLink, section: item.section,
+                  cuisine: item.cuisine, mealTime: item.mealTime,
             });
         }
-
+        
         const newTotalCaloriesWeighted = adjustedItemsWeighted.reduce((sum, item) => sum + item.adjustedCalories, 0);
-
-        // --- Final Response (for weighted down-scaling) ---
-        res.status(200).json({
-            status: "adjusted_down",
-            message: "Portions adjusted down to meet calorie target.",
-            alert: alertMessage, // Correctly applies alert
-            originalTotalCalories: totalSelectedCalories,
-            newTotalCalories: newTotalCaloriesWeighted,
-            targetCalories: recommendedCalories,
-            totalPercentage: totalAdjustmentWeight, // Send the original sum
-            adjustedItems: adjustedItemsWeighted,
-            isBelowTarget: false 
+        return res.status(200).json({
+            status: "adjusted_down", message: "Portions adjusted down to meet calorie target.", alert: alertMessage, 
+            originalTotalCalories: totalSelectedCalories, newTotalCalories: newTotalCaloriesWeighted,
+            targetCalories: recommendedCalories, totalPercentage: totalAdjustmentWeight, 
+            adjustedItems: adjustedItemsWeighted, isBelowTarget: false 
         });
 
     } catch (error) {
         console.error("Error adjusting meal portions:", error);
-        res.status(500).json({ error: "Internal Server Error" });
+        res.status(500).json({ error: "Internal Server Error during adjustment." });
     }
 };
+
