@@ -1,128 +1,114 @@
-const client = require('../utils/sanityClient'); // Your Sanity client
-const { calculateAllMetrics } = require('../models/onboardingModel.js'); // User metrics calculation
-const Onboarding = require('../models/onboardingModel.js').Onboarding; // User onboarding data model
+// controllers/fitnessController.js
+const client = require('../utils/sanityClient'); 
+const { calculateAllMetrics } = require('../models/onboardingModel.js'); 
+const Onboarding = require('../models/onboardingModel.js').Onboarding;
 
-// Helper function to determine Age Group
+// Helper: Determine Age Group prefix
 function getAgeGroup(age) {
     if (age < 40) return 'YA';
     if (age >= 40 && age < 60) return 'MA';
     if (age >= 60 && age < 70) return 'SA';
     if (age >= 70) return 'OA';
-    return null; // Should not happen with valid age
+    return null;
 }
 
-// Helper function to determine Duration Category
-function getDurationMinutes(minutesPerWeek) {
-    if (minutesPerWeek < 75) return 15;
-    if (minutesPerWeek >= 75 && minutesPerWeek <= 150) return 30;
-    if (minutesPerWeek > 150) return 45;
-    return 15; // Default to 15 if invalid
+// Helper: Map min_exercise_per_week string to duration
+function calculateRecommendedExercise(o5Data) {
+    const minExercise = o5Data.min_exercise_per_week;
+    if (minExercise === "Less than 75 min") return 15;
+    if (minExercise === "75 to 150 min") return 30;
+    return 45; // "More than 150 min" or fallback
+}
+
+// Helper: Generate next N days after rest day
+function generateWeekDays(restDay, numDays = 6) {
+    const daysOfWeek = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const restIndex = daysOfWeek.indexOf(restDay);
+    if (restIndex === -1) return daysOfWeek.slice(0, numDays); // fallback
+    const result = [];
+    for (let i = 1; i <= numDays; i++) {
+        result.push(daysOfWeek[(restIndex + i) % 7]);
+    }
+    return result;
+}
+
+// Helper: Assign color based on exercise type
+function getColorForType(type) {
+    const colors = {
+        "Cardio": "#FF6B81",
+        "Strength": "#FFB86C",
+        "Flexibility": "#6699FF",
+        "Lung Expansion": "#A68DFF",
+        "Yoga": "#66CC99",
+        "Balance": "#FFDE59",
+    };
+    return colors[type] || "#CCCCCC";
 }
 
 exports.getUserFitnessPlan = async (req, res) => {
     try {
         const userId = req.user?.userId;
-        if (!userId) {
-            return res.status(401).json({ message: "User not authenticated." });
-        }
+        if (!userId) return res.status(401).json({ message: "User not authenticated." });
 
-        // 1. Fetch User Onboarding Data
+        // 1️⃣ Fetch onboarding data
         const onboardingData = await Onboarding.findOne({ userId }).lean();
-        if (!onboardingData) {
-            return res.status(404).json({ message: "Onboarding data not found for user." });
+        if (!onboardingData) return res.status(404).json({ message: "Onboarding data not found." });
+
+        const metrics = calculateAllMetrics(onboardingData);
+        const age = metrics.age;
+        const recommendedMinutes = calculateRecommendedExercise(onboardingData);
+        const ageGroupPrefix = getAgeGroup(age);
+
+        if (!ageGroupPrefix) return res.status(400).json({ message: "Could not determine age group." });
+
+        const restDay = onboardingData.o5Data?.rest_day;
+        if (!restDay) return res.status(400).json({ message: "Rest day not set in onboarding." });
+
+        const scheduleDays = generateWeekDays(restDay, 6);
+        const ageGroupForQuery = `${ageGroupPrefix}-${recommendedMinutes}`; // e.g., "YA-30"
+
+        // 2️⃣ Fetch all exercises for this age group
+        const exercises = await client.fetch(
+            `*[_type=="exercise" && ageGroup == $ageGroup]{
+                name, exerciseType, repsDuration, sets, _id
+            }`,
+            { ageGroup: ageGroupForQuery }
+        );
+
+        if (!exercises || exercises.length === 0) {
+            return res.status(404).json({ message: "No exercises found for your age group." });
         }
 
-        // 2. Determine User's Age Group and Duration
-        const metrics = calculateAllMetrics(onboardingData); // Assuming this calculates age correctly
-        const age = metrics.age; // Make sure 'age' is available in metrics
-        const minutesOfExercise = onboardingData.minutesOfExercise; // Get exercise minutes
+        // 3️⃣ Generate schedule in frontend-friendly format
+        const tempSchedule = {};
+        let exIndex = 0;
 
-        if (typeof age !== 'number' || age <= 0) {
-             return res.status(400).json({ message: "Invalid age found in user data." });
-        }
-         if (typeof minutesOfExercise !== 'number' || minutesOfExercise < 0) {
-             console.warn(`Invalid minutesOfExercise (${minutesOfExercise}) for user ${userId}. Defaulting duration.`);
-             // Use a default or handle as error depending on requirements
-        }
-
-        const ageGroup = getAgeGroup(age);
-        const durationMinutes = getDurationMinutes(minutesOfExercise ?? 0); // Use 0 if undefined
-
-        if (!ageGroup) {
-             return res.status(400).json({ message: "Could not determine age group." });
-        }
-
-
-        // 3. Construct the Plan Identifier
-        const planIdentifier = `${ageGroup.toLowerCase()}-${durationMinutes}`;
-        console.log(`Fetching fitness plan for user ${userId}: Identifier = ${planIdentifier}`);
-
-        // 4. Fetch the Plan from Sanity using GROQ
-        const query = `
-            *[_type == "fitnessPlan" && planIdentifier.current == $planId][0] {
-                planIdentifier,
-                ageGroup,
-                durationMinutes,
-                // Fetch details for each exercise in the schedule
-                // Use select() to rename fields for frontend payload
-                "Mon": [], // Explicitly return empty array for Monday (Rest)
-                "Tue": weeklySchedule.tuesdayPlan[]->{
-                    "title": name,
-                    "reps": repsDuration,
-                    "sets": sets,
-                    "videoUrl": videoUrl, // Include video URL
-                    "instructions": instructions, // Include instructions
-                     // Add _id if frontend needs it for keys
-                     _id
-                },
-                "Wed": weeklySchedule.wednesdayPlan[]->{
-                    "title": name, "reps": repsDuration, "sets": sets, "videoUrl": videoUrl, "instructions": instructions, _id
-                },
-                "Thu": weeklySchedule.thursdayPlan[]->{
-                    "title": name, "reps": repsDuration, "sets": sets, "videoUrl": videoUrl, "instructions": instructions, _id
-                },
-                "Fri": weeklySchedule.fridayPlan[]->{
-                    "title": name, "reps": repsDuration, "sets": sets, "videoUrl": videoUrl, "instructions": instructions, _id
-                },
-                "Sat": weeklySchedule.saturdayPlan[]->{
-                    "title": name, "reps": repsDuration, "sets": sets, "videoUrl": videoUrl, "instructions": instructions, _id
-                },
-                "Sun": weeklySchedule.sundayPlan[]->{
-                    "title": name, "reps": repsDuration, "sets": sets, "videoUrl": videoUrl, "instructions": instructions, _id
-                }
+        for (const day of scheduleDays) {
+            const dayExercises = [];
+            const numExercises = Math.min(3, exercises.length);
+            for (let i = 0; i < numExercises; i++) {
+                const ex = exercises[exIndex % exercises.length];
+                dayExercises.push({
+                    title: ex.name,
+                    reps: ex.repsDuration,
+                    sets: ex.sets.toString(),
+                    color: getColorForType(ex.exerciseType)
+                });
+                exIndex++;
             }
-        `;
-        const params = { planId: planIdentifier };
-        const planData = await client.fetch(query, params);
-
-        if (!planData) {
-            console.error(`Fitness plan not found for identifier: ${planIdentifier}`);
-            // Return empty schedule or default plan?
-            return res.status(404).json({ message: `Fitness plan not found for your profile (${planIdentifier}).` });
+            tempSchedule[day] = dayExercises;
         }
 
-        // 5. Ensure all days exist in the response, even if empty
-        const finalResponse = {
-            Mon: planData.Mon || [],
-            Tue: planData.Tue || [],
-            Wed: planData.Wed || [],
-            Thu: planData.Thu || [],
-            Fri: planData.Fri || [],
-            Sat: planData.Sat || [],
-            Sun: planData.Sun || [],
-        };
+        // Build final schedule with rest day on top
+        const finalSchedule = { [restDay]: [] };
+        for (const day of scheduleDays) {
+            finalSchedule[day] = tempSchedule[day];
+        }
 
-        // You could add color dynamically here if needed, but it's not in the Sanity data
-        // Object.values(finalResponse).forEach(dayPlan => {
-        //     dayPlan.forEach(ex => ex.color = '#SomeDefaultColor');
-        // });
-
-
-        // 6. Return the formatted plan
-        res.status(200).json(finalResponse);
+        return res.status(200).json(finalSchedule);
 
     } catch (error) {
         console.error("Error fetching user fitness plan:", error);
-        res.status(500).json({ error: "Internal Server Error fetching fitness plan." });
+        return res.status(500).json({ error: "Internal Server Error fetching fitness plan." });
     }
 };

@@ -782,10 +782,21 @@ const calculateRecommendedCalories = (userData) => {
 };
 
 const calculateRecommendedExercise = (o5Data) => {
-  const minExercise = o5Data.min_exercise_per_week;
-  if (minExercise === "Less than 75 min") return 15;
-  if (minExercise === "75 to 150 min") return 30;
-  return 45; // for "More than 150 min"
+    // Log the incoming value for debugging
+    console.log('Exercise Input:', o5Data.min_exercise_per_week);
+
+    // Match the exact strings from EXERCISE_SCORE_MAP
+    switch(o5Data.min_exercise_per_week) {
+        case "Less than 75 min":
+            return 15;
+        case "75 to 150 min":
+            return 30;
+        case "More than 150 min":
+            return 45;
+        default:
+            console.warn('Unmatched exercise value:', o5Data.min_exercise_per_week);
+            return 15; // Default fallback
+    }
 };
 
 const calculateBPStatus = (userData) => {
@@ -926,20 +937,27 @@ const calculateMainFocus = (userData) => {
 };
 // const metrics = calculateAllMetrics(userData);
 // Update your existing exports to include these new calculations
-const calculateAllMetrics = (userData) => ({
-  timeToTarget: calculateTimeToTarget(userData),
-  metabolicAge: calculateMetabolicAge(userData),
-  weight: calculateWeightMetrics(userData),
-  bmi: calculateBMIMetrics(userData),
-  lifestyle: calculateLifestyleScore(userData),
-  recommendedCalories: calculateRecommendedCalories(userData),
-  recommendedExercise: calculateRecommendedExercise(userData.o5Data),
-  bloodPressure: calculateBPStatus(userData),
-  bloodSugar: calculateBloodSugar(userData),
-  trigHDLRatio: calculateTrigHDLRatio(userData),
-  bodyFat: calculateBodyFat(userData),
-  mainFocus: calculateMainFocus(userData),
-});
+const calculateAllMetrics = (userData) => {
+  const { o2Data } = userData;
+  const { age } = o2Data;
+
+  return {
+    age,
+    timeToTarget: calculateTimeToTarget(userData),
+    metabolicAge: calculateMetabolicAge(userData),
+    weight: calculateWeightMetrics(userData),
+    bmi: calculateBMIMetrics(userData),
+    lifestyle: calculateLifestyleScore(userData),
+    recommendedCalories: calculateRecommendedCalories(userData),
+    recommendedExercise: calculateRecommendedExercise(userData.o5Data),
+    bpStatus: calculateBPStatus(userData),
+    bloodSugar: calculateBloodSugar(userData),
+    trigHDLRatio: calculateTrigHDLRatio(userData),
+    bodyFat: calculateBodyFat(userData),
+    mainFocus: calculateMainFocus(userData),
+  };
+};
+
 
 module.exports = {
   Onboarding: OnboardingModel,
