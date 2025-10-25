@@ -85,9 +85,12 @@ const getKnowledgeByUser = async (req, res) => {
       hypertension: onboardingData.o3Data?.hasHypertension || false,
     };
 
+const smokingStatus = onboardingData.o4Data?.smoking?.trim();
     const o4Data = {
-      smoking: onboardingData.o4Data?.smoking?.toLowerCase() === 'yes',
-    };
+  smoking:
+    smokingStatus === 'Daily' ||
+    smokingStatus === 'Occasionally',
+};
 
     // Debug log
     console.log('Conditions:', {
