@@ -16,10 +16,11 @@ const userRoutes = require('./routes/userRoutes');
 const timelineRoutes = require('./routes/timelineRoutes');
 
 // --- NEW/UPDATED IMPORTS ---
-const nourishmentRoutes = require('./routes/nourishmentRoutes'); // Assuming this now uses the Sanity controller
-const mealBuilderRoutes = require('./routes/mealBuilderRoutes'); // You'll need to create this file
+const nourishmentRoutes = require('./routes/nourishmentRoutes'); 
+const mealBuilderRoutes = require('./routes/mealBuilderRoutes'); 
 const recipeRoutes = require('./routes/recipeRoutes');  
-const fitnessRoutes= require('./routes/fitnessRoutes');     // You'll need to create this file
+const fitnessRoutes= require('./routes/fitnessRoutes');
+const knowledgeRoutes=require('./routes/knowledgeRoutes');     
 // ----------------------------
 
 const app = express();
@@ -61,7 +62,8 @@ app.use('/api/v1/timeline', timelineRoutes); // Changed base path for clarity
 app.use('/api/nourish', nourishmentRoutes);     // Handles GET /api/nourish/plan?meal_time=...
 app.use('/api/builder', mealBuilderRoutes);     // Handles GET /api/builder/items?meal_time=...&cuisine=...
 app.use('/api/recipes', recipeRoutes);        // Handles GET /api/recipes/:recipeId
-app.use('/api/fitness', fitnessRoutes);        
+app.use('/api/fitness', fitnessRoutes); 
+app.use('/api/knowledge', knowledgeRoutes);   
 // -------------------------
 
 // --- Start Server ---

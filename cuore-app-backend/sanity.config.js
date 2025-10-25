@@ -10,6 +10,7 @@ import mealBuilderItem from './schemaTypes/mealBuilderItem'
 // 👇 Import your new ones
 import fitnessPlan from './schemaTypes/fitnessPlan'
 import exercise from './schemaTypes/exercise'
+import knowledgeCard from './schemaTypes/knowledgecard'
 
 export default defineConfig({
   name: 'default',
@@ -27,7 +28,8 @@ export default defineConfig({
       nourishPlanItem,
       mealBuilderItem,
       fitnessPlan,
-      exercise, // 👈 new schemas added
+      exercise, 
+      knowledgeCard
     ],
   },
 })
