@@ -3,7 +3,7 @@ const Medication = require('../models/Medication');
 const Reminder = require('../models/Reminder');
 const TimelineCard = require('../models/TimelineCard');
 const User = require('../models/User');
-const { Onboarding } = require('../models/onboardingModel.js');
+const { Onboarding,calculateRecommendedExercise,calculateAllMetrics } = require('../models/onboardingModel.js');
 const NudgeHistory = require('../models/NudgeHistory');
 
 const dayjs = require('dayjs');
@@ -929,14 +929,99 @@ exports.getCuoreScoreDetails = async (req, res) => {
     const userId = req.user.userId;
 
     try {
+        // Fetch onboarding document
         const onboardingDoc = await Onboarding.findOne({ userId }).lean();
         if (!onboardingDoc) {
             return res.status(404).json({ message: "Onboarding data not found for this user." });
         }
-        
-        const healthMetrics = calculateHealthMetrics(onboardingDoc);
-        
-        res.status(200).json({ health_metrics: healthMetrics });
+
+        // Calculate all metrics
+        const metrics = calculateAllMetrics(onboardingDoc);
+
+        // Get recommended exercise dynamically from o5Data
+        const recommendedExercise = calculateRecommendedExercise(onboardingDoc.o5Data);
+
+        // Build the response
+        const responseBody = {
+            health_metrics: {
+                health_score: metrics.cuoreScore,
+                estimated_time_to_target: {
+                    value: metrics.timeToTarget,
+                    unit: "months"
+                },
+                metabolic_age: {
+                    value: metrics.metabolicAge.metabolicAge,
+                    unit: "years",
+                    gap: metrics.metabolicAge.gap
+                },
+                weight: {
+                    current: metrics.weight.current,
+                    target: metrics.weight.target,
+                    unit: "kg",
+                    status: metrics.weight.status
+                },
+                bmi: {
+                    value: metrics.bmi.current,
+                    target: metrics.bmi.target,
+                    status: metrics.bmi.status
+                },
+                lifestyle_score: {
+                    value: metrics.lifestyle.score,
+                    target: 75,
+                    unit: "%",
+                    status: metrics.lifestyle.status
+                },
+                recommended: {
+                    calories: {
+                        value: metrics.recommendedCalories,
+                        unit: "kcal"
+                    },
+                    exercise: {
+                        value: recommendedExercise, // dynamic value
+                        unit: "min"
+                    }
+                },
+                vitals: {
+                    blood_pressure: {
+                        current: metrics.bloodPressure?.upper?.current && metrics.bloodPressure?.lower?.current ? 
+                            `${metrics.bloodPressure.upper.current}/${metrics.bloodPressure.lower.current}` : "0/0",
+                        target: "120/80",
+                        status: {
+                            upper: metrics.bloodPressure?.upper?.status || "normal",
+                            lower: metrics.bloodPressure?.lower?.status || "normal"
+                        }
+                    },
+                    blood_sugar: {
+                        fasting: {
+                            value: metrics.bloodSugar.fasting.current,
+                            target: metrics.bloodSugar.fasting.target,
+                            status: metrics.bloodSugar.fasting.status
+                        },
+                        after_meal: {
+                            value: metrics.bloodSugar.afterMeal.current,
+                            target: metrics.bloodSugar.afterMeal.target,
+                            status: metrics.bloodSugar.afterMeal.status
+                        }
+                    },
+                    cholesterol: {
+                        tg_hdl_ratio: {
+                            value: metrics.trigHDLRatio.current,
+                            target: metrics.trigHDLRatio.target,
+                            status: metrics.trigHDLRatio.status
+                        }
+                    },
+                    body_fat: {
+                        value: metrics.bodyFat.current,
+                        target: metrics.bodyFat.target,
+                        unit: "%",
+                        status: metrics.bodyFat.status
+                    }
+                },
+                main_focus: metrics.mainFocus
+            }
+        };
+
+        res.status(200).json(responseBody);
 
     } catch (error) {
         console.error("Error fetching Cuore Score details:", error);

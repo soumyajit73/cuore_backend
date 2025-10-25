@@ -959,5 +959,6 @@ module.exports = {
         }
     },
     calculateAllMetrics,
+     calculateRecommendedExercise,
     calculateMetrics: calculateAllMetrics
 };
