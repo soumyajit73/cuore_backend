@@ -152,3 +152,81 @@ exports.getUserFitnessPlan = async (req, res) => {
         return res.status(500).json({ error: "Internal Server Error fetching fitness plan." });
     }
 };
+
+
+exports.updateUserPreferredExerciseTime = async (req, res) => {
+    try {
+        const userId = req.user?.userId;
+        if (!userId) {
+            return res.status(401).json({ 
+                status: 'error',
+                message: "User not authenticated." 
+            });
+        }
+
+        const { preferred_ex_time } = req.body;
+        
+        // Validate time format (hh:mm AM/PM)
+        const timeRegex = /^(0?[1-9]|1[0-2]):[0-5][0-9]\s?(AM|PM|am|pm)$/;
+        if (!preferred_ex_time || !timeRegex.test(preferred_ex_time)) {
+            return res.status(400).json({ 
+                status: 'error',
+                message: "Invalid time format. Please use hh:mm AM/PM format (e.g., 09:30 AM)." 
+            });
+        }
+
+        // Convert 12-hour format to 24-hour format for storage
+        const [time, meridiem] = preferred_ex_time.toUpperCase().split(/\s+/);
+        const [hours, minutes] = time.split(':');
+        let hour24 = parseInt(hours);
+
+        // Convert to 24-hour format
+        if (meridiem === 'PM' && hour24 !== 12) {
+            hour24 += 12;
+        } else if (meridiem === 'AM' && hour24 === 12) {
+            hour24 = 0;
+        }
+
+        // Format time in 24-hour format
+        const formattedTime = `${hour24.toString().padStart(2, '0')}:${minutes}`;
+
+        // Update onboarding document
+        const updatedOnboarding = await Onboarding.findOneAndUpdate(
+            { userId },
+            { 
+                'o5Data.preferred_ex_time': preferred_ex_time, // Store original format
+                'o5Data.preferred_ex_time_24': formattedTime,  // Store 24-hour format
+                lastUpdated: Date.now()
+            },
+            { 
+                new: true,
+                runValidators: true
+            }
+        );
+
+        if (!updatedOnboarding) {
+            return res.status(404).json({ 
+                status: 'error',
+                message: "Onboarding data not found for user." 
+            });
+        }
+
+        return res.status(200).json({ 
+            status: 'success',
+            message: "Preferred exercise time updated successfully.",
+            data: {
+                preferred_ex_time: updatedOnboarding.o5Data.preferred_ex_time,
+                preferred_ex_time_24: updatedOnboarding.o5Data.preferred_ex_time_24,
+                lastUpdated: updatedOnboarding.lastUpdated
+            }
+        });
+
+    } catch (error) {
+        console.error("Error updating preferred exercise time:", error);
+        return res.status(500).json({ 
+            status: 'error',
+            message: "Internal Server Error updating preferred exercise time.",
+            error: error.message 
+        });
+    }
+};
