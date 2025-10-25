@@ -489,72 +489,54 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     // ============================================================================
     // ## NEW LOGIC: Consistent Handling of O7 Data ##
     // ============================================================================
-    let processedO7Data;
-    const o7Payload = mergedData.o7Data || {};
-    const requiredO7Fields = [
-      "o2_sat",
-      "pulse",
-      "bp_upper",
-      "bp_lower",
-      "bs_f",
-      "bs_am",
-      "HDL",
-      "LDL",
-      "Trig",
-      "HsCRP",
-    ];
-    const hasAllRequiredFields = requiredO7Fields.every(
-      (field) => o7Payload[field] != null
-    );
+   // Start replacing from this line (around line 492)
+let processedO7Data;
+const o7Payload = mergedData.o7Data || {};
 
-    if (hasAllRequiredFields) {
-      // **PATH 1: MANUAL ENTRY** - All fields were provided. Use this data.
-      const {
-        o2_sat,
-        pulse,
-        bp_upper,
-        bp_lower,
-        bs_f,
-        bs_am,
-        A1C,
-        HDL,
-        LDL,
-        Trig,
-        HsCRP,
-      } = o7Payload;
-      const normalizedHsCRP =
-        o7Payload.hscrp_unit && o7Payload.hscrp_unit.toLowerCase() === "mg/l"
-          ? HsCRP
-          : HsCRP / 10;
-      const calculatedA1C =
-        A1C || roundTo(((bs_f + bs_am) / 2 + 46.7) / 28.7, 2);
-      const trig_hdl_ratio = roundTo(Trig / HDL, 2);
-      processedO7Data = {
-        ...o7Payload,
-        HsCRP: normalizedHsCRP,
-        A1C: calculatedA1C,
-        trig_hdl_ratio,
-        auto_filled: false,
-      };
-    } else {
-      // **PATH 2: AUTO-CALCULATION FALLBACK** - Triggered if O7 data is partial, empty, or missing.
-      if (Object.keys(o7Payload).length > 0) {
-        console.warn(
-          `User ${userId} submitted partial O7 data. Falling back to full auto-calculation.`
-        );
-      }
-      const tempScores = {
+// Store which fields were manually entered
+const manuallyEnteredFields = Object.keys(o7Payload).filter(key => 
+    o7Payload[key] !== null && o7Payload[key] !== undefined && key !== 'auto_filled'
+);
+
+if (manuallyEnteredFields.length > 0) {
+    // Keep only manually entered values
+    processedO7Data = {
+        ...getAutofillData(0), // Initialize with default values
+        ...Object.fromEntries(
+            manuallyEnteredFields.map(field => [field, o7Payload[field]])
+        ),
+        manual_fields: manuallyEnteredFields,
+        auto_filled: false
+    };
+
+    // Recalculate dependent fields only if necessary
+    if (processedO7Data.bs_f && processedO7Data.bs_am && !processedO7Data.A1C) {
+        processedO7Data.A1C = roundTo(((processedO7Data.bs_f + processedO7Data.bs_am) / 2 + 46.7) / 28.7, 2);
+    }
+    if (processedO7Data.Trig && processedO7Data.HDL && !processedO7Data.trig_hdl_ratio) {
+        processedO7Data.trig_hdl_ratio = roundTo(processedO7Data.Trig / processedO7Data.HDL, 2);
+    }
+} else {
+    // If no manual entries, use auto-calculated values
+    const tempScores = {
         ...o2Metrics.scores,
         o3Score: o3Metrics.o3Score,
         o4Score: o4Metrics.o4Score,
         o5Score: o5Metrics.o5Score,
-        o6Score: o6Metrics.o6Score,
-      };
-      const totalScoreBeforeO7 = Object.values(tempScores)
-        .filter((s) => typeof s === "number")
+        o6Score: o6Metrics.o6Score
+    };
+
+    const totalScoreBeforeO7 = Object.values(tempScores)
+        .filter(s => typeof s === 'number')
         .reduce((a, b) => a + b, 0);
-      processedO7Data = getAutofillData(totalScoreBeforeO7);
-    }
+
+    processedO7Data = {
+        ...getAutofillData(totalScoreBeforeO7),
+        manual_fields: [],
+        auto_filled: true
+    };
+}
+// End replacement around line 553 (before o7Score calculation)
 
     // --- The rest of the function proceeds as before ---
     const o7Score =
@@ -960,10 +942,22 @@ const calculateAllMetrics = (userData) => {
 
 
 module.exports = {
-  Onboarding: OnboardingModel,
-  ValidationError,
-  processAndSaveFinalSubmission: exports.processAndSaveFinalSubmission,
-  getOnboardingDataByUserId: exports.getOnboardingDataByUserId,
-  calculateAllMetrics,
-  calculateMetrics: calculateAllMetrics,
+    Onboarding: OnboardingModel,
+    ValidationError,
+    processAndSaveFinalSubmission: async (userId, payload) => {
+        try {
+            return await exports.processAndSaveFinalSubmission(userId, payload);
+        } catch (error) {
+            throw error;
+        }
+    },
+    getOnboardingDataByUserId: async (userId) => {
+        try {
+            return await exports.getOnboardingDataByUserId(userId);
+        } catch (error) {
+            throw error;
+        }
+    },
+    calculateAllMetrics,
+    calculateMetrics: calculateAllMetrics
 };

@@ -61,14 +61,15 @@ exports.submitFinalOnboarding = async (req, res) => {
                 }
             },
             vitals: {
-                blood_pressure: {
-                    current: `${metrics.bloodPressure.upper.current}/${metrics.bloodPressure.lower.current}`,
-                    target: "120/80",
-                    status: {
-                        upper: metrics.bloodPressure.upper.status,
-                        lower: metrics.bloodPressure.lower.status
-                    }
-                },
+                 blood_pressure: {
+        current: metrics.bloodPressure?.upper?.current && metrics.bloodPressure?.lower?.current ? 
+            `${metrics.bloodPressure.upper.current}/${metrics.bloodPressure.lower.current}` : "0/0",
+        target: "120/80",
+        status: {
+            upper: metrics.bloodPressure?.upper?.status || "normal",
+            lower: metrics.bloodPressure?.lower?.status || "normal"
+        }
+    },
                 blood_sugar: {
                     fasting: {
                         value: metrics.bloodSugar.fasting.current,
