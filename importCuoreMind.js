@@ -1,4 +1,3 @@
-// --- importCuoreMind.js (HTML Version) ---
 import fs from "fs";
 import path from "path";
 import mammoth from "mammoth";
@@ -24,19 +23,44 @@ async function extractText(filePath) {
 
 // --- Utility: Read docx as HTML (for instructions) ---
 async function extractHtml(filePath) {
+  // 1. Convert to HTML
   const result = await mammoth.convertToHtml({ path: filePath });
-  return result.value.trim();
+  let html = result.value.trim();
+
+  // 2. --- NEW FIX FOR BROKEN LISTS ---
+  // This regex finds an ordered list closing tag </ol>,
+  // followed by an empty paragraph <p></p> (with optional whitespace \s*),
+  // followed by another ordered list opening tag <ol>.
+  // It replaces this with </ol><ol>, effectively joining the two lists.
+  // This fixes the "1, 1, 1" numbering problem.
+  const listFixRegex = /<\/ol>\s*<p><\/p>\s*<ol>/gi;
+  html = html.replace(listFixRegex, '</ol><ol>');
+
+  // Also do it for bullet lists, just in case
+  const bulletListFixRegex = /<\/ul>\s*<p><\/p>\s*<ul>/gi;
+  html = html.replace(bulletListFixRegex, '</ul><ul>');
+  
+  // Also fix breaks *inside* a list (between <li> items)
+  const listItemFixRegex = /<\/li>\s*<p><\/p>\s*<li>/gi;
+  html = html.replace(listItemFixRegex, '</li><li>');
+
+  return html;
 }
+
 
 // --- Utility: Parse filename for Order & Title ---
 function parseFilename(filename) {
+  // Expects "1 - Body Scan.docx" or "1. Body Scan.docx"
   const match = filename.match(/^(\d+)[ .-]+(.+)\.docx$/i);
+  
   if (match) {
     return {
       orderRank: parseInt(match[1], 10),
       title: match[2].trim(),
     };
   }
+  
+  // Fallback for non-numbered files
   console.warn(`   ⚠️ No order number found in "${filename}". Defaulting to rank 99.`);
   return {
     orderRank: 99,
@@ -46,7 +70,7 @@ function parseFilename(filename) {
 
 // --- Main Import Function ---
 async function importMeditations() {
-  console.log("Starting Cuore Mind meditation import (HTML Mode)...");
+  console.log("Starting Cuore Mind meditation import...");
 
   const categories = [
     { name: "morning", folder: "MorningHarmony" },
@@ -54,6 +78,7 @@ async function importMeditations() {
   ];
 
   for (const category of categories) {
+source_id: "doc:Cuore Mind template.docx"
     const folderPath = path.join(BASE_DIR, category.folder);
     if (!fs.existsSync(folderPath)) {
       console.log(`\n⏭️ Skipping category ${category.name} (folder not found)`);
@@ -68,35 +93,38 @@ async function importMeditations() {
       const { orderRank, title } = parseFilename(file);
 
       try {
-        // 1. Get plain text to extract the subtitle
+        // 1. Get all raw text
         const rawText = await extractText(filePath);
-        const subtitle = rawText.split('\n').filter(l => l.trim() !== '')[0] || "";
         
-        // 2. Get the full document as HTML
-        const instructionsHtml = await extractHtml(filePath);
+        // 2. Get Subtitle (first line of text)
+        const firstLine = rawText.split('\n').filter(l => l.trim() !== '')[0] || "";
+        
+        // 3. Get the "instructions" as HTML (now with list fix)
+        const htmlInstructions = await extractHtml(filePath);
 
-        // 3. Prepare Sanity Document
+        // 4. Prepare Sanity Document
         const doc = {
           _type: "cuoreMindMeditation",
+source_id: "doc:Cuore Mind template.docx",
           title: title,
-          subtitle: subtitle,
+          subtitle: firstLine,
           category: category.name,
           orderRank: orderRank,
-          instructions: instructionsHtml, // <-- SAVING THE HTML STRING
+          instructions: htmlInstructions, // <-- SAVING THE FIXED HTML
         };
 
-        // 4. Create ID and Upload
+        // 5. Create ID and Upload
         const docId = `meditation_${category.name}_${title
-        .toLowerCase()
+            .toLowerCase()
             .replace(/[^a-z0-9]+/g, "_")
             .replace(/^_|_$/g, "")
             .substring(0, 100)}`;
-            
+           
         await client.createOrReplace({
           ...doc,
           _id: docId,
         });
-        console.log(`✅ Uploaded HTML for: ${title} (Rank: ${orderRank})`);
+        console.log(`✅ Uploaded: ${title} (Rank: ${orderRank})`);
 
       } catch (err) {
         console.error(`❌ Error uploading ${title}:`, err.message);
@@ -104,7 +132,7 @@ async function importMeditations() {
     }
   }
 
-  console.log("\n🎉 All Cuore Mind data imported successfully!");
+  console.log("\n🎉 All Cuore Mind data re-imported successfully with list fix!");
 }
 
 // --- Run Import ---
