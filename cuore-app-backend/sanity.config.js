@@ -11,6 +11,8 @@ import mealBuilderItem from './schemaTypes/mealBuilderItem'
 import fitnessPlan from './schemaTypes/fitnessPlan'
 import exercise from './schemaTypes/exercise'
 import knowledgeCard from './schemaTypes/knowledgecard'
+import cuoreMindMeditation from './schemaTypes/cuoreMindMeditation'
+
 
 export default defineConfig({
   name: 'default',
@@ -29,7 +31,8 @@ export default defineConfig({
       mealBuilderItem,
       fitnessPlan,
       exercise, 
-      knowledgeCard
+      knowledgeCard,
+      cuoreMindMeditation
     ],
   },
 })

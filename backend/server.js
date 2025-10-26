@@ -20,7 +20,8 @@ const nourishmentRoutes = require('./routes/nourishmentRoutes');
 const mealBuilderRoutes = require('./routes/mealBuilderRoutes'); 
 const recipeRoutes = require('./routes/recipeRoutes');  
 const fitnessRoutes= require('./routes/fitnessRoutes');
-const knowledgeRoutes=require('./routes/knowledgeRoutes');     
+const knowledgeRoutes=require('./routes/knowledgeRoutes');  
+const cuoreMindRoutes = require('./routes/cuoreMindRoutes.js');   
 // ----------------------------
 
 const app = express();
@@ -64,6 +65,7 @@ app.use('/api/builder', mealBuilderRoutes);     // Handles GET /api/builder/item
 app.use('/api/recipes', recipeRoutes);        // Handles GET /api/recipes/:recipeId
 app.use('/api/fitness', fitnessRoutes); 
 app.use('/api/knowledge', knowledgeRoutes);   
+app.use('/api/cuoremind', cuoreMindRoutes);
 // -------------------------
 
 // --- Start Server ---
