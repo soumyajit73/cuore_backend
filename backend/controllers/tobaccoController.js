@@ -91,7 +91,7 @@ async function getConditionalMessage(category, seenIds) {
     messageDoc = await client.fetch(query, { category });
 
     // 2b. Clear all seen IDs *from this specific category*
-    const categoryIds = (await client.fetch(`*[_type == "tobaccoEncouragement" && category == $category]{_id}`)).map(d => d._id);
+    const categoryIds = (await client.fetch(`*[_type == "tobaccoEncouragement" && category == $category]{_id}`, { category })).map(d => d._id); // <--- FIX IS HERE
     newSeenIds = seenIds.filter(id => !categoryIds.includes(id));
   }
   
