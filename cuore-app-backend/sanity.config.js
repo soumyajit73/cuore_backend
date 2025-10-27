@@ -12,6 +12,8 @@ import fitnessPlan from './schemaTypes/fitnessPlan'
 import exercise from './schemaTypes/exercise'
 import knowledgeCard from './schemaTypes/knowledgecard'
 import cuoreMindMeditation from './schemaTypes/cuoreMindMeditation'
+import  tobaccoChallenge from './schemaTypes/tobaccoChallenge'
+import tobaccoEncouragement from './schemaTypes/tobaccoEncouragement'
 
 
 export default defineConfig({
@@ -32,7 +34,9 @@ export default defineConfig({
       fitnessPlan,
       exercise, 
       knowledgeCard,
-      cuoreMindMeditation
+      cuoreMindMeditation,
+      tobaccoChallenge,
+      tobaccoEncouragement
     ],
   },
 })

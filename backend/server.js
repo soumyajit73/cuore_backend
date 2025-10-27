@@ -22,6 +22,7 @@ const recipeRoutes = require('./routes/recipeRoutes');
 const fitnessRoutes= require('./routes/fitnessRoutes');
 const knowledgeRoutes=require('./routes/knowledgeRoutes');  
 const cuoreMindRoutes = require('./routes/cuoreMindRoutes.js');   
+const tobaccoRoutes = require('./routes/tobaccoRoutes.js');
 // ----------------------------
 
 const app = express();
@@ -66,6 +67,7 @@ app.use('/api/recipes', recipeRoutes);        // Handles GET /api/recipes/:recip
 app.use('/api/fitness', fitnessRoutes); 
 app.use('/api/knowledge', knowledgeRoutes);   
 app.use('/api/cuoremind', cuoreMindRoutes);
+app.use('/api/tobacco', tobaccoRoutes);
 // -------------------------
 
 // --- Start Server ---
