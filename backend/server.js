@@ -14,6 +14,7 @@ const finalSubmissionRoutes = require('./routes/finalSubmissionRoutes');
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const timelineRoutes = require('./routes/timelineRoutes');
+const predictRoutes = require('./routes/predictRoutes');
 
 // --- NEW/UPDATED IMPORTS ---
 const nourishmentRoutes = require('./routes/nourishmentRoutes'); 
@@ -54,7 +55,8 @@ app.use('/api/v1/auth', authRoutes);
 
 // Onboarding (Uses two separate routers on the same base path, which is okay)
 app.use('/api/v1/onboarding', onboardingRoutes);
-app.use('/api/v1/onboarding', finalSubmissionRoutes); // Keep if distinct routes exist
+app.use('/api/v1/onboarding', finalSubmissionRoutes);
+app.use('/api/v1/predict', predictRoutes); 
 
 // User & Timeline (Mounted separately to avoid conflict)
 app.use('/api/v1/users', userRoutes);
