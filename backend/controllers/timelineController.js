@@ -661,8 +661,13 @@ const getTimelineData = async (userId, dateString) => {
 
             // Add the original ID for user-generated cards to make editing easy
             if (card.type === 'USER_REMINDER' || card.type === 'USER_MEDICATION') {
-                cardObject.id = card.sourceId.toString();
-            }
+    // Use the timeline card's _id as the unique frontend identifier
+    cardObject.id = card._id.toString();
+
+    // Keep the original reminder/medication ID separately for API actions
+    cardObject.sourceId = card.sourceId?.toString();
+}
+
 
             return cardObject;
             // =====================================================
@@ -838,47 +843,56 @@ exports.updateWakeUpTime = async (req, res) => {
 // -----------------------------------------------------
 
 // delete reminder API
+// -----------------------------------------------------
+// DELETE REMINDER (Final Fixed Version)
+// -----------------------------------------------------
 exports.deleteReminder = async (req, res) => {
-    const userId = req.user?.userId;
-   const { reminderId } = req.params;
+  const userId = req.user?.userId;
+  const { reminderId } = req.params;
 
-    if (!userId) {
-        return res.status(401).json({ error: "Unauthorized. User ID not found." });
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized. User ID not found." });
+  }
+  if (!reminderId) {
+    return res.status(400).json({ error: "Reminder ID is required in the URL." });
+  }
+
+  try {
+    // 1️⃣ Delete the reminder from Reminder collection
+    const deletedReminder = await Reminder.findOneAndDelete({
+      _id: reminderId,
+      userId: userId,
+    });
+
+    if (!deletedReminder) {
+      return res.status(404).json({ error: "Reminder not found or access denied." });
     }
-    if (!reminderId) {
-        return res.status(400).json({ error: "Reminder ID is required in the URL." });
+
+    // 2️⃣ Delete all linked timeline cards that were created from this reminder
+    await TimelineCard.deleteMany({
+      userId: userId,
+      sourceId: reminderId,
+      type: "USER_REMINDER",
+    });
+
+    console.log(`✅ Reminder ${reminderId} and its timeline cards deleted for user ${userId}.`);
+
+    // 3️⃣ (Optional but safe) Regenerate timeline for the current day
+    await generateTimelineCardsForDay(userId, dayjs().tz(TZ).toDate());
+
+    return res.status(200).json({
+      message: "Reminder deleted successfully from both Reminder and TimelineCard collections.",
+      data: { id: reminderId },
+    });
+  } catch (error) {
+    console.error(`❌ Error deleting Reminder ${reminderId} for user ${userId}:`, error);
+    if (error.name === "CastError") {
+      return res.status(400).json({ error: "Invalid Reminder ID format." });
     }
-
-    try {
-        const deletedReminder = await Reminder.findOneAndDelete({
-             _id: reminderId,
-             userId: userId
-        });
-
-        if (!deletedReminder) {
-            return res.status(404).json({ error: `Reminder not found or access denied.` });
-        }
-
-        // Regenerate timeline after deletion
-        console.log(`Reminder ${reminderId} deleted. Regenerating timeline for user ${userId}...`);
-        await generateTimelineCardsForDay(userId, dayjs().toDate());
-        console.log(`Timeline regenerated for user ${userId}.`);
-
-        return res.status(200).json({
-            message: `Reminder deleted successfully.`,
-            data: {
-                id: reminderId
-            }
-        });
-
-    } catch (error) {
-        console.error(`Error deleting Reminder ${reminderId} for user ${userId}:`, error);
-        if (error.name === 'CastError') {
-             return res.status(400).json({ error: "Invalid Reminder ID format." });
-        }
-        return res.status(500).json({ error: "Internal server error during deletion." });
-    }
+    return res.status(500).json({ error: "Internal server error during deletion." });
+  }
 };
+
 
 
 
