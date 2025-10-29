@@ -13,7 +13,7 @@ const reminderSchema = new mongoose.Schema({
     startDate: { type: Date, required: true },
     endDate: { type: Date, default: null },
     time: { type: String, required: true }, // HH:MM string
-    repeatFrequency: { type: String, enum: ['Daily', 'Weekly', 'Monthly'], default: 'Daily' },
+    repeatFrequency: { type: String, enum: ['Never', 'Every Day', 'Every Week', 'Every 2 Week', 'Every Month', 'Every Year'], default: 'Every Day' },
     
     // Tracking
     isMedication: { type: Boolean, default: false }, // Should be handled by the Medication model, but included for flexibility
