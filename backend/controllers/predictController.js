@@ -7,19 +7,13 @@ const METRIC_LIMITS = {
   triglyceride: 150, nutrition: 90, fitness: 90, sleep: 90, stress: 90, heartRate: 80,
 };
 
-// --- PREDICTION LOGIC (FIXED) ---
+// --- PREDICTION LOGIC (Unchanged) ---
 const momentumPredict = (B, A, direction) => {
   A = A || 0;
   B = B || 0;
-
-  // --- THIS IS THE FIX ---
-  // If the last two points are the same, continue the flat trend
   if (A === B) {
-    return B; // The prediction is the same as the last point
+    return B; // Continue flat trend if no change
   }
-  // --- END FIX ---
-
-  // Otherwise, calculate using 80% momentum
   if (direction === 'increase') {
     return B + ((B - A) * 0.8);
   } else {
@@ -27,12 +21,11 @@ const momentumPredict = (B, A, direction) => {
   }
 };
 
-// generatePredictionSeries (Unchanged from previous version)
 const generatePredictionSeries = (history, X, initialBFormula, direction) => {
   const points = new Array(6).fill(0);
   const validHistory = history.filter(val => typeof val === 'number' && !isNaN(val));
   const n = validHistory.length;
-  const predictNext = (B, A) => momentumPredict(B, A, direction); // Uses the fixed function
+  const predictNext = (B, A) => momentumPredict(B, A, direction);
 
   if (n === 0) {
     return { series: points, historyCount: 0 };
@@ -63,37 +56,35 @@ const generatePredictionSeries = (history, X, initialBFormula, direction) => {
   }
 };
 
-// fetchHistory (Unchanged)
+// --- DATA FETCHING (Unchanged) ---
 const fetchHistory = (onboarding, metricKey) => {
-  let historyArray = [];
-  switch (metricKey) {
-    case 'cuoreScore':
-      historyArray = onboarding.scoreHistory || [];
-      return historyArray.map(h => h.data?.cuoreScore);
-    case 'weight_kg':
-      historyArray = onboarding.o2History || [];
-      return historyArray.map(h => h.data?.weight_kg);
-    case 'bmi':
-      historyArray = onboarding.o2History || [];
-      return historyArray.map(h => h.data?.bmi);
-    case 'o5Score':
-      historyArray = onboarding.o5History || [];
-      return historyArray.map(h => h.data?.o5Score);
-    case 'o6Score':
-      historyArray = onboarding.o6History || [];
-      return historyArray.map(h => h.data?.o6Score);
-    default:
-      historyArray = onboarding.o7History || [];
-      // Ensure data exists before accessing the key
-      return historyArray.map(h => h.data ? h.data[metricKey] : undefined);
-  }
+    let historyArray = [];
+    switch (metricKey) {
+        case 'cuoreScore':
+            historyArray = onboarding.scoreHistory || [];
+            return historyArray.map(h => h.data?.cuoreScore);
+        case 'weight_kg':
+            historyArray = onboarding.o2History || [];
+            return historyArray.map(h => h.data?.weight_kg);
+        case 'bmi':
+            historyArray = onboarding.o2History || [];
+            return historyArray.map(h => h.data?.bmi);
+        case 'o5Score':
+            historyArray = onboarding.o5History || [];
+            return historyArray.map(h => h.data?.o5Score);
+        case 'o6Score':
+            historyArray = onboarding.o6History || [];
+            return historyArray.map(h => h.data?.o6Score);
+        default: // o7 keys
+            historyArray = onboarding.o7History || [];
+            return historyArray.map(h => h.data ? h.data[metricKey] : undefined);
+    }
 };
 
-// getLabels, splitData, formatGraphData (Unchanged)
+// --- RESPONSE FORMATTING (Unchanged helpers) ---
 const getLabels = () => ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
 const splitData = (series, historyCount) => {
-    let actualData = [];
-    let predictedData = [];
+    let actualData = [], predictedData = [];
     if (historyCount === 0) { predictedData = series; }
     else if (historyCount === 1) { actualData = [series[0]]; predictedData = series.slice(1); }
     else if (historyCount === 2) { actualData = [series[0], series[1]]; predictedData = series.slice(2); }
@@ -135,7 +126,7 @@ const getPredictionData = async (req, res) => {
       stress:     { initialB: (A, X) => A + (5 * X),  direction: 'increase' },
     };
 
-    // Generate series (Calls the fixed generatePredictionSeries which uses the fixed momentumPredict)
+    // --- Generate 6-point series for all metrics (Unchanged) ---
     const { series: csSeries, historyCount: csHist } = generatePredictionSeries(fetchHistory(onboarding, 'cuoreScore'), X, formulas.cuoreScore.initialB, formulas.cuoreScore.direction);
     const { series: bpUpperSeries, historyCount: bpUpperHist } = generatePredictionSeries(fetchHistory(onboarding, 'bp_upper'), X, formulas.bpUpper.initialB, formulas.bpUpper.direction);
     const { series: bpLowerSeries, historyCount: bpLowerHist } = generatePredictionSeries(fetchHistory(onboarding, 'bp_lower'), X, formulas.bpLower.initialB, formulas.bpLower.direction);
@@ -160,36 +151,43 @@ const getPredictionData = async (req, res) => {
     const { series: sleepSeries, historyCount: sleepHist } = generatePredictionSeries(fetchHistory(onboarding, 'o6Score'), X, formulas.sleep.initialB, formulas.sleep.direction);
     const { series: stressSeries, historyCount: stressHist } = generatePredictionSeries(fetchHistory(onboarding, 'o6Score'), X, formulas.stress.initialB, formulas.stress.direction);
 
-    // Assemble response (Unchanged)
+    // --- NEW: Assemble the final response with LABELS ---
     const healthGraphs = [
-      formatGraphData('Cuore Score', [{ ...splitData(csSeries, csHist), color: '#1E64AC', limit: METRIC_LIMITS.cuoreScore }]),
+      formatGraphData('Cuore Score', [
+        { label: 'Cuore Score', ...splitData(csSeries, csHist), color: '#1E64AC', limit: METRIC_LIMITS.cuoreScore }
+      ]),
       formatGraphData('Blood Pressure & Heart Rate', [
-        { ...splitData(bpUpperSeries, bpUpperHist), color: '#ff4d4d', limit: METRIC_LIMITS.bpUpper },
-        { ...splitData(bpLowerSeries, bpLowerHist), color: '#00b8a9', limit: METRIC_LIMITS.bpLower },
-        { ...splitData(hrSeries, hrHist), color: '#40c4ff', limit: METRIC_LIMITS.heartRate }
+        { label: 'BP Upper', ...splitData(bpUpperSeries, bpUpperHist), color: '#ff4d4d', limit: METRIC_LIMITS.bpUpper },
+        { label: 'BP Lower', ...splitData(bpLowerSeries, bpLowerHist), color: '#00b8a9', limit: METRIC_LIMITS.bpLower },
+        { label: 'Heart Rate', ...splitData(hrSeries, hrHist), color: '#40c4ff', limit: METRIC_LIMITS.heartRate }
       ]),
       formatGraphData('Blood Sugar', [
-        { ...splitData(bsFastingSeries, bsFastingHist), color: '#f39c12', limit: METRIC_LIMITS.bsFasting },
-        { ...splitData(bsAfterMealsSeries, bsAfterMealsHist), color: '#d35400', limit: METRIC_LIMITS.bsAfterMeals }
+        { label: 'Fasting', ...splitData(bsFastingSeries, bsFastingHist), color: '#f39c12', limit: METRIC_LIMITS.bsFasting },
+        { label: 'After Meal', ...splitData(bsAfterMealsSeries, bsAfterMealsHist), color: '#d35400', limit: METRIC_LIMITS.bsAfterMeals }
       ]),
-      formatGraphData('A1C', [{ ...splitData(a1cSeries, a1cHist), color: '#9b59b6', limit: METRIC_LIMITS.a1c }]),
-      formatGraphData('Weight', [{ ...splitData(weightSeries, weightHist), color: '#34495e', limit: METRIC_LIMITS.weight }]),
+      formatGraphData('A1C', [
+        { label: 'A1C', ...splitData(a1cSeries, a1cHist), color: '#9b59b6', limit: METRIC_LIMITS.a1c }
+      ]),
+      formatGraphData('Weight', [
+        { label: 'Weight (kg)', ...splitData(weightSeries, weightHist), color: '#34495e', limit: METRIC_LIMITS.weight }
+      ]),
       formatGraphData('BMI & Body Fat', [
-        { ...splitData(bmiSeries, bmiHist), color: '#2ecc71', limit: METRIC_LIMITS.bmi },
-        { ...splitData(bodyFatSeries, bodyFatHist), color: '#1abc9c', limit: METRIC_LIMITS.bodyFat }
+        { label: 'BMI', ...splitData(bmiSeries, bmiHist), color: '#2ecc71', limit: METRIC_LIMITS.bmi },
+        { label: 'Body Fat (%)', ...splitData(bodyFatSeries, bodyFatHist), color: '#1abc9c', limit: METRIC_LIMITS.bodyFat } // Using placeholder data
       ]),
       formatGraphData('Cholesterol', [
-        { ...splitData(hdlSeries, hdlHist), color: '#3498db', limit: METRIC_LIMITS.hdl },
-        { ...splitData(ldlSeries, ldlHist), color: '#e74c3c', limit: METRIC_LIMITS.ldl },
-        { ...splitData(trigSeries, trigHist), color: '#e67e22', limit: METRIC_LIMITS.triglyceride }
+        { label: 'HDL', ...splitData(hdlSeries, hdlHist), color: '#3498db', limit: METRIC_LIMITS.hdl },
+        { label: 'LDL', ...splitData(ldlSeries, ldlHist), color: '#e74c3c', limit: METRIC_LIMITS.ldl },
+        { label: 'Triglycerides', ...splitData(trigSeries, trigHist), color: '#e67e22', limit: METRIC_LIMITS.triglyceride }
       ]),
       formatGraphData('Lifestyle Metrics', [
-        { ...splitData(nutritionSeries, nutritionHist), color: '#f1c40f', limit: METRIC_LIMITS.nutrition },
-        { ...splitData(fitnessSeries, fitnessHist), color: '#2ecc71', limit: METRIC_LIMITS.fitness },
-        { ...splitData(sleepSeries, sleepHist), color: '#e74c3c', limit: METRIC_LIMITS.sleep },
-        { ...splitData(stressSeries, stressHist), color: '#2980b9', limit: METRIC_LIMITS.stress }
+        { label: 'Nutrition', ...splitData(nutritionSeries, nutritionHist), color: '#f1c40f', limit: METRIC_LIMITS.nutrition },
+        { label: 'Fitness', ...splitData(fitnessSeries, fitnessHist), color: '#2ecc71', limit: METRIC_LIMITS.fitness },
+        { label: 'Sleep', ...splitData(sleepSeries, sleepHist), color: '#e74c3c', limit: METRIC_LIMITS.sleep }, // Note: Color reused
+        { label: 'Stress', ...splitData(stressSeries, stressHist), color: '#2980b9', limit: METRIC_LIMITS.stress } // Note: Color reused
       ])
     ];
+    // --- END NEW SECTION ---
 
     res.status(200).json({ status: 'success', data: healthGraphs });
   } catch (err) {
