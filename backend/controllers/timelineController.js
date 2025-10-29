@@ -443,6 +443,13 @@ const getAlerts = async (userId) => {
         (o7Data.bs_am >= 220 && o7Data.bs_am <= 260) || (o7Data.bs_am >= 120 && o7Data.bs_am <= 160)) {
         alerts.push({ type: 'yellow', text: 'Monitor sugar.', action: 'Monitor' });
     }
+
+    if (!onboarding.doctor_code) {
+        alerts.push({ type: 'yellow', text: 'Connect to a doctor for alert monitoring.', action: 'Connect' });
+    }
+
+
+    
     // Rule 237, 247: BP spike (Requires previous readings)
     // if (o7Data.bp_upper - previous_bp_upper > 20 || o7Data.bp_lower - previous_bp_lower > 10) {
     //     alerts.push({ type: 'yellow', text: 'BP spike! Try deep breathing.', action: 'Breathing' });
@@ -460,12 +467,10 @@ const getAlerts = async (userId) => {
     //     alerts.push({ type: 'pale_yellow', text: 'Update blood reports.', action: 'Update' });
     // }
     // Rule 294: Connect to a doctor
-    if (!onboarding.doctor_code) {
-        alerts.push({ type: 'pale_yellow', text: 'Connect to a doctor for alert monitoring.', action: 'Connect' });
-    }
+    
 
     // Sort alerts by severity (Red > Orange > Yellow > Pale Yellow)
-    const severityOrder = { 'red': 1, 'orange': 2, 'yellow': 3, 'pale_yellow': 4 };
+    const severityOrder = { 'red': 1, 'orange': 2, 'yellow': 3,  };
     if (alerts.length > 0) {
         alerts.sort((a, b) => severityOrder[a.type] - severityOrder[b.type]);
         // Return only the most critical alert
@@ -655,7 +660,7 @@ const getTimelineData = async (userId, dateString) => {
                 description: card.description,
                 completed: card.isCompleted,
                 reminder: true,
-                editable: card.type !== 'USER_MEDICATION',
+                editable: false,
                 type: card.type
             };
 
