@@ -13,13 +13,13 @@ router.post('/:userId/reminders', protect, timelineController.addEntry);
 router.get('/:userId/reminders', protect, timelineController.getEntries);
 
 // Get all Medications
-router.get('/:userId/medications', protect, timelineController.getEntries);
+// router.get('/:userId/medications', protect, timelineController.getEntries);
 
 // PUT /api/v1/users/:userId/reminders/:reminderId - Update a Reminder
 router.put('/:userId/reminders/:reminderId', protect, timelineController.updateEntry);
 
 // PUT /api/v1/users/:userId/medications/:medId - Update a Medication
-router.put('/:userId/medications/:medId', protect, timelineController.updateEntry);
+// router.put('/:userId/medications/:medId', protect, timelineController.updateEntry);
 
 // get cuore score
 router.get('/:userId/cuore-score', protect, timelineController.getCuoreScore);
@@ -33,5 +33,7 @@ router.get('/:userId/timeline', protect, timelineController.getTimeline);
 router.put('/:userId/timeline/wakeup', protect, timelineController.updateWakeUpTime);
 
 router.get('/:userId/cuore-score-details' , protect, timelineController.getCuoreScoreDetails);
+
+router.delete('/:userId/reminders/:reminderId', protect, timelineController.deleteReminder);
 
 module.exports = router;

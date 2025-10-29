@@ -837,6 +837,51 @@ exports.updateWakeUpTime = async (req, res) => {
 // Existing APIs (kept as-is)
 // -----------------------------------------------------
 
+// delete reminder API
+exports.deleteReminder = async (req, res) => {
+    const userId = req.user?.userId;
+   const { reminderId } = req.params;
+
+    if (!userId) {
+        return res.status(401).json({ error: "Unauthorized. User ID not found." });
+    }
+    if (!reminderId) {
+        return res.status(400).json({ error: "Reminder ID is required in the URL." });
+    }
+
+    try {
+        const deletedReminder = await Reminder.findOneAndDelete({
+             _id: reminderId,
+             userId: userId
+        });
+
+        if (!deletedReminder) {
+            return res.status(404).json({ error: `Reminder not found or access denied.` });
+        }
+
+        // Regenerate timeline after deletion
+        console.log(`Reminder ${reminderId} deleted. Regenerating timeline for user ${userId}...`);
+        await generateTimelineCardsForDay(userId, dayjs().toDate());
+        console.log(`Timeline regenerated for user ${userId}.`);
+
+        return res.status(200).json({
+            message: `Reminder deleted successfully.`,
+            data: {
+                id: reminderId
+            }
+        });
+
+    } catch (error) {
+        console.error(`Error deleting Reminder ${reminderId} for user ${userId}:`, error);
+        if (error.name === 'CastError') {
+             return res.status(400).json({ error: "Invalid Reminder ID format." });
+        }
+        return res.status(500).json({ error: "Internal server error during deletion." });
+    }
+};
+
+
+
 exports.getEntries = async (req, res) => {
     const userId = req.user.userId;
     const isMedicationPath = req.originalUrl.includes('/medications');
