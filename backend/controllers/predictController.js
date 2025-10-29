@@ -1,22 +1,14 @@
 const { Onboarding } = require('../models/onboardingModel.js');
 
-// --- METRIC LIMITS (Now used in calculation) ---
+// --- METRIC LIMITS (Unchanged) ---
 const METRIC_LIMITS = {
   cuoreScore: 90, bpUpper: 122, bpLower: 80, bsFasting: 100, bsAfterMeals: 140,
   a1c: 5.7, weight: 70, bmi: 22.9, bodyFat: 20, hdl: 60, ldl: 100,
   triglyceride: 150, nutrition: 90, fitness: 90, sleep: 90, stress: 90, heartRate: 80,
 };
 
-// --- PREDICTION LOGIC (Limit Capping Added) ---
-/**
- * Applies 80% momentum, capped by lower (0) and upper/goal limits.
- * @param {number} B - Latest point
- * @param {number} A - Previous point
- * @param {string} direction - 'increase' (goal is higher) or 'decrease' (goal is lower)
- * @param {number} limit - The target goal for this metric
- * @returns {number} The next predicted point, capped by limits
- */
-const momentumPredict = (B, A, direction, limit) => {
+// --- PREDICTION LOGIC (Rule 1 Added) ---
+const momentumPredict = (B, A, direction, limit) => { // Limit added here as well for capping
   A = A || 0;
   B = B || 0;
 
@@ -29,72 +21,79 @@ const momentumPredict = (B, A, direction, limit) => {
   let prediction;
   if (direction === 'increase') {
     prediction = B + ((B - A) * 0.8);
-    // --- NEW: Cap prediction at the upper limit ---
+    // Cap prediction at the upper limit
     prediction = Math.min(prediction, limit);
   } else {
     prediction = B - ((A - B) * 0.8);
-    // --- NEW: Cap prediction at the lower limit ---
+    // Cap prediction at the lower limit (goal)
     prediction = Math.max(prediction, limit);
   }
 
-  // Ensure prediction is never below 0 (absolute floor)
+  // --- Rule 1: Ensure prediction is never below 0 (absolute floor) ---
   return Math.max(0, prediction);
 };
 
-// generatePredictionSeries (Passes Limit, Applies Limit to Initial B)
+// --- generatePredictionSeries (Rule 2 Added) ---
 const generatePredictionSeries = (history, X, initialBFormula, direction, limit, isO7Metric = false) => {
   const points = new Array(6).fill(0);
+  // Filter out any null/undefined/non-numeric values from history FOR CALCULATION
   const validHistory = history.filter(val => typeof val === 'number' && !isNaN(val));
   const n = validHistory.length;
-  // --- MODIFIED: Pass limit to predictNext ---
+  // Pass limit to predictNext
   const predictNext = (B, A) => momentumPredict(B, A, direction, limit);
 
-  // Rule 2: Check for skipped O7 input (Unchanged)
+  // --- Rule 2: Check for skipped O7 input ---
+  // If it's an O7 metric AND the latest historical value (from original history) is missing/null/undefined, return all zeros.
   const latestRawValue = history.length > 0 ? history[history.length - 1] : undefined;
   if (isO7Metric && (latestRawValue === null || latestRawValue === undefined)) {
-      return { series: points, historyCount: 0 };
+      console.log(`Skipped O7 metric detected (latestRawValue: ${latestRawValue}). Returning zeros.`); // Optional log
+      return { series: points, historyCount: 0 }; // Treat as no history
   }
+  // --- END NEW RULE 2 ---
 
   // Apply the 3 Scenarios
   if (n === 0) {
+    // Scenario 0: No valid data.
     return { series: points, historyCount: 0 };
   } else if (n === 1) {
+    // Scenario 1: "latest + 5 predicted"
     points[0] = validHistory[0];
-    // --- MODIFIED: Apply limit capping to initial B calculation ---
+    // Apply limit capping to initial B calculation
     let initialB = initialBFormula(points[0], X);
     if (direction === 'increase') initialB = Math.min(initialB, limit);
     else initialB = Math.max(initialB, limit);
     points[1] = Math.max(0, initialB); // Ensure >= 0
-    // --- END MODIFIED ---
+
     points[2] = predictNext(points[1], points[0]);
     points[3] = predictNext(points[2], points[1]);
     points[4] = predictNext(points[3], points[2]);
     points[5] = predictNext(points[4], points[3]);
-    // Final check for >= 0 (already handled in momentumPredict now)
-    return { series: points.map(p => Math.round(p * 100) / 100), historyCount: 1 };
+    // Apply Math.max(0, p) just in case, though momentumPredict should handle it
+    return { series: points.map(p => Math.round(Math.max(0, p) * 100) / 100), historyCount: 1 };
   } else if (n === 2) {
+    // Scenario 2: "1 previous + 1 latest + 4 predicted"
     points[0] = validHistory[0];
     points[1] = validHistory[1];
     points[2] = predictNext(points[1], points[0]);
     points[3] = predictNext(points[2], points[1]);
     points[4] = predictNext(points[3], points[2]);
     points[5] = predictNext(points[4], points[3]);
-    return { series: points.map(p => Math.round(p * 100) / 100), historyCount: 2 };
+    return { series: points.map(p => Math.round(Math.max(0, p) * 100) / 100), historyCount: 2 };
   } else {
+    // Scenario 3 (n >= 3): "2 previous + 1 latest + 3 predicted"
     points[0] = validHistory[n - 3];
     points[1] = validHistory[n - 2];
     points[2] = validHistory[n - 1];
     points[3] = predictNext(points[2], points[1]);
     points[4] = predictNext(points[3], points[2]);
     points[5] = predictNext(points[4], points[3]);
-    return { series: points.map(p => Math.round(p * 100) / 100), historyCount: 3 };
+    return { series: points.map(p => Math.round(Math.max(0, p) * 100) / 100), historyCount: 3 };
   }
 };
 
 
 // --- DATA FETCHING (Unchanged) ---
 const fetchHistory = (onboarding, metricKey) => {
-    // ... (same as before)
     let historyArray = [];
     switch (metricKey) {
         case 'cuoreScore': historyArray = onboarding.scoreHistory || []; return historyArray.map(h => h.data?.cuoreScore);
@@ -102,13 +101,16 @@ const fetchHistory = (onboarding, metricKey) => {
         case 'bmi': historyArray = onboarding.o2History || []; return historyArray.map(h => h.data?.bmi);
         case 'o5Score': historyArray = onboarding.o5History || []; return historyArray.map(h => h.data?.o5Score);
         case 'o6Score': historyArray = onboarding.o6History || []; return historyArray.map(h => h.data?.o6Score);
-        default: historyArray = onboarding.o7History || []; return historyArray.map(h => h.data ? h.data[metricKey] : undefined);
+        default: // o7 keys
+            historyArray = onboarding.o7History || [];
+            // Return raw values including null/undefined for skipped inputs
+            return historyArray.map(h => h.data ? h.data[metricKey] : undefined);
     }
 };
 
 // --- RESPONSE FORMATTING (Unchanged) ---
 const getLabels = () => ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
-const splitData = (series, historyCount) => { /* ... same ... */
+const splitData = (series, historyCount) => {
     let actualData = [], predictedData = [];
     if (historyCount === 0) { predictedData = series; }
     else if (historyCount === 1) { actualData = [series[0]]; predictedData = series.slice(1); }
@@ -133,7 +135,7 @@ const getPredictionData = async (req, res) => {
     if (cuoreScore < 50) X = 0.9; else if (cuoreScore > 70) X = 0.3; else X = 0.6;
 
     // Formulas (Unchanged)
-    const formulas = { /* ... same ... */
+    const formulas = {
         cuoreScore: { initialB: (A, X) => A + (10 * X), direction: 'increase' },
         bpUpper:    { initialB: (A, X) => A - (4 * X),  direction: 'decrease' },
         bpLower:    { initialB: (A, X) => A - (2 * X),  direction: 'decrease' },
@@ -151,41 +153,44 @@ const getPredictionData = async (req, res) => {
         stress:     { initialB: (A, X) => A + (5 * X),  direction: 'increase' },
     };
 
-    // --- Generate series (Pass Limit from METRIC_LIMITS) ---
-    const generateArgs = (key, isO7 = false) => [
-        fetchHistory(onboarding, key === 'heartRate' ? 'pulse' : key === 'triglyceride' ? 'Trig' : key), // Use correct DB keys
+    // --- Generate series (Pass isO7Metric flag and Limit) ---
+    // Helper to avoid repetition
+    const generateArgs = (key, dbKey, isO7 = false) => [
+        fetchHistory(onboarding, dbKey || key), // Use specific DB key if provided
         X, formulas[key].initialB, formulas[key].direction, METRIC_LIMITS[key], isO7
     ];
 
-    const { series: csSeries, historyCount: csHist } = generatePredictionSeries(...generateArgs('cuoreScore'));
-    const { series: bpUpperSeries, historyCount: bpUpperHist } = generatePredictionSeries(...generateArgs('bpUpper', true));
-    const { series: bpLowerSeries, historyCount: bpLowerHist } = generatePredictionSeries(...generateArgs('bpLower', true));
-    const { series: hrSeries, historyCount: hrHist } = generatePredictionSeries(...generateArgs('heartRate', true)); // 'pulse' handled in generateArgs
-    const { series: bsFastingSeries, historyCount: bsFastingHist } = generatePredictionSeries(...generateArgs('bsFasting', true)); // DB key is 'bs_f'
-    const { series: bsAfterMealsSeries, historyCount: bsAfterMealsHist } = generatePredictionSeries(...generateArgs('bsAfterMeals', true)); // DB key is 'bs_am'
+    const { series: csSeries, historyCount: csHist } = generatePredictionSeries(...generateArgs('cuoreScore', 'cuoreScore')); // dbKey matches key
+    const { series: bpUpperSeries, historyCount: bpUpperHist } = generatePredictionSeries(...generateArgs('bpUpper', 'bp_upper', true));
+    const { series: bpLowerSeries, historyCount: bpLowerHist } = generatePredictionSeries(...generateArgs('bpLower', 'bp_lower', true));
+    const { series: hrSeries, historyCount: hrHist } = generatePredictionSeries(...generateArgs('heartRate', 'pulse', true));
+    const { series: bsFastingSeries, historyCount: bsFastingHist } = generatePredictionSeries(...generateArgs('bsFasting', 'bs_f', true));
+    const { series: bsAfterMealsSeries, historyCount: bsAfterMealsHist } = generatePredictionSeries(...generateArgs('bsAfterMeals', 'bs_am', true));
 
-    // A1C derived (Apply limit capping here too)
+    // A1C derived
     const a1cFormula = (sugar) => sugar > 0 ? (sugar + 46.7) / 28.7 : 0;
-    const a1cSeries = bsFastingSeries.map(sugarVal => Math.round(Math.min(Math.max(0, a1cFormula(sugarVal)), METRIC_LIMITS.a1c * 1.5) * 100) / 100); // Allow slight overshoot for A1C calc? Cap at limit or slightly above
+    // Apply limit to derived A1C values too
+    const a1cSeries = bsFastingSeries.map(sugarVal => Math.round(Math.min(Math.max(0, a1cFormula(sugarVal)), METRIC_LIMITS.a1c) * 100) / 100);
     const a1cHist = bsFastingHist;
 
-    const { series: weightSeries, historyCount: weightHist } = generatePredictionSeries(...generateArgs('weight', false)); // DB key 'weight_kg'
+    const { series: weightSeries, historyCount: weightHist } = generatePredictionSeries(...generateArgs('weight', 'weight_kg'));
     const heightM = (onboarding.o2Data?.height_cm || 1) / 100;
     const bmiFormula = (weight) => heightM > 0 ? weight / (heightM * heightM) : 0;
-    const bmiSeries = weightSeries.map(weightVal => Math.round(Math.max(0, bmiFormula(weightVal)) * 100) / 100);
+    // Apply limit to derived BMI values
+    const bmiSeries = weightSeries.map(weightVal => Math.round(Math.min(Math.max(0, bmiFormula(weightVal)), METRIC_LIMITS.bmi) * 100) / 100);
     const bmiHist = weightHist;
-    const bodyFatSeries = bmiSeries.map(b => Math.round(Math.max(0, b * 0.8) * 100) / 100); // Placeholder
+    // Apply limit to derived BodyFat values
+    const bodyFatSeries = bmiSeries.map(b => Math.round(Math.min(Math.max(0, b * 0.8), METRIC_LIMITS.bodyFat) * 100) / 100); // Placeholder
     const bodyFatHist = bmiHist;
 
-    const { series: hdlSeries, historyCount: hdlHist } = generatePredictionSeries(...generateArgs('hdl', true)); // DB key 'HDL'
-    const { series: ldlSeries, historyCount: ldlHist } = generatePredictionSeries(...generateArgs('ldl', true)); // DB key 'LDL'
-    const { series: trigSeries, historyCount: trigHist } = generatePredictionSeries(...generateArgs('triglyceride', true)); // DB key 'Trig'
+    const { series: hdlSeries, historyCount: hdlHist } = generatePredictionSeries(...generateArgs('hdl', 'HDL', true));
+    const { series: ldlSeries, historyCount: ldlHist } = generatePredictionSeries(...generateArgs('ldl', 'LDL', true));
+    const { series: trigSeries, historyCount: trigHist } = generatePredictionSeries(...generateArgs('triglyceride', 'Trig', true));
 
-    const { series: nutritionSeries, historyCount: nutritionHist } = generatePredictionSeries(...generateArgs('nutrition', false)); // Uses 'o5Score'
-    const { series: fitnessSeries, historyCount: fitnessHist } = generatePredictionSeries(...generateArgs('fitness', false)); // Uses 'o5Score'
-    const { series: sleepSeries, historyCount: sleepHist } = generatePredictionSeries(...generateArgs('sleep', false)); // Uses 'o6Score'
-    const { series: stressSeries, historyCount: stressHist } = generatePredictionSeries(...generateArgs('stress', false)); // Uses 'o6Score'
-
+    const { series: nutritionSeries, historyCount: nutritionHist } = generatePredictionSeries(...generateArgs('nutrition', 'o5Score'));
+    const { series: fitnessSeries, historyCount: fitnessHist } = generatePredictionSeries(...generateArgs('fitness', 'o5Score'));
+    const { series: sleepSeries, historyCount: sleepHist } = generatePredictionSeries(...generateArgs('sleep', 'o6Score'));
+    const { series: stressSeries, historyCount: stressHist } = generatePredictionSeries(...generateArgs('stress', 'o6Score'));
 
     // --- Assemble final response (Added labels) ---
     const healthGraphs = [
@@ -226,4 +231,3 @@ const getPredictionData = async (req, res) => {
 };
 
 module.exports = { getPredictionData };
-
