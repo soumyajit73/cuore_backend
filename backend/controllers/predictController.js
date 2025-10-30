@@ -208,12 +208,12 @@ const getPredictionData = async (req, res) => {
         formatGraphData('Weight', [{ label: 'Weight (kg)', ...splitData(weightSeries, weightHist), color: '#34495e', limit: METRIC_LIMITS.weight }]),
         formatGraphData('BMI & Body Fat', [
             { label: 'BMI', ...splitData(bmiSeries, bmiHist), color: '#2ecc71', limit: METRIC_LIMITS.bmi },
-            { label: 'Body Fat (%)', ...splitData(bodyFatSeries, bodyFatHist), color: '#1abc9c', limit: METRIC_LIMITS.bodyFat }
+            { label: 'Body Fat (%)', ...splitData(bodyFatSeries, bodyFatHist), color: '#dc1717ff', limit: METRIC_LIMITS.bodyFat }
         ]),
         formatGraphData('Cholesterol', [
             { label: 'HDL', ...splitData(hdlSeries, hdlHist), color: '#3498db', limit: METRIC_LIMITS.hdl },
             { label: 'LDL', ...splitData(ldlSeries, ldlHist), color: '#e74c3c', limit: METRIC_LIMITS.ldl },
-            { label: 'Triglycerides', ...splitData(trigSeries, trigHist), color: '#e67e22', limit: METRIC_LIMITS.triglyceride }
+            { label: 'Triglycerides', ...splitData(trigSeries, trigHist), color: '#d6e622ff', limit: METRIC_LIMITS.triglyceride }
         ]),
         formatGraphData('Lifestyle Metrics', [
             { label: 'Nutrition', ...splitData(nutritionSeries, nutritionHist), color: '#f1c40f', limit: METRIC_LIMITS.nutrition },

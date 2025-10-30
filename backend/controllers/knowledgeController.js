@@ -19,11 +19,11 @@ function determineConditionTypes(o3Data, o4Data) {
   if (diabetes && !hypertension && !smoking) return ['diabetes'];
   if (!diabetes && hypertension && !smoking) return ['hypertension'];
   if (diabetes && hypertension && !smoking) return ['diabetes_hypertension'];
-  if (!diabetes && !hypertension && smoking) return ['smoking'];
+  if (!diabetes && !hypertension && smoking) return ['general','smoking'];
   if (diabetes && smoking && !hypertension) return ['diabetes', 'smoking'];
   if (hypertension && smoking && !diabetes) return ['hypertension', 'smoking'];
   if (diabetes && hypertension && smoking)
-    return ['diabetes', 'hypertension', 'diabetes_hypertension', 'smoking'];
+    return ['diabetes_hypertension', 'smoking'];
   return ['general']; // none selected
 }
 
