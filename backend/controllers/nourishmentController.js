@@ -127,7 +127,7 @@ exports.getNourishmentPlan = async (req, res) => {
       if (!grouped[tag]) grouped[tag] = [];
       grouped[tag].push(item);
     });
-    const mealPlan = [{"custom_plate": mealSpecificRecommendedCalories}];
+    const mealPlan = [];
     const baseTags = tagsForUser.map(tag => tag.match(/^[A-Z]+\d+/)[0]).filter((v, i, a) => a.indexOf(v) === i);
     for (const baseTag of baseTags) {
         let possibleItems = [];
@@ -141,6 +141,8 @@ exports.getNourishmentPlan = async (req, res) => {
             mealPlan.push(randomItem);
         }
     }
+    mealPlan.push({ "custom_plate": mealSpecificRecommendedCalories });
+
     // ------------------------------------
 
     if (mealPlan.length === 0) {
@@ -153,7 +155,7 @@ exports.getNourishmentPlan = async (req, res) => {
       calorie_range: calorieRange, // The range used for fetching
       meal_time: meal_time,
       meal_plan: mealPlan,
-      "custom_plate": mealSpecificRecommendedCalories
+      // "custom_plate": mealSpecificRecommendedCalories
     });
     // ---------------------
 
