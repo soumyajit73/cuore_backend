@@ -141,7 +141,12 @@ exports.getNourishmentPlan = async (req, res) => {
             mealPlan.push(randomItem);
         }
     }
-    mealPlan.push({ "custom_plate": mealSpecificRecommendedCalories });
+   mealPlan.push({
+  title: "Custom Plate (Choose Your Own Meal)",
+  calories: mealSpecificRecommendedCalories,
+  icon: "🍽️", 
+  type: "custom_plate"
+});
 
     // ------------------------------------
 
