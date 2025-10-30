@@ -43,6 +43,21 @@ export default {
       type: 'reference',
       to: [{type: 'recipe'}],
     },
+     
+     {
+      name: 'healthColor',
+      title: 'Health Color',
+      type: 'string',
+      description: 'The health category (green, yellow, or red) from the "Health" column',
+      options: {
+        list: [
+          {title: 'Green (Everyday)', value: 'green'},
+          {title: 'Yellow (Once/week)', value: 'yellow'},
+          {title: 'Red (Once/month)', value: 'red'}
+        ],
+        layout: 'radio'
+      }
+    },
     {
   name: 'adjustmentWeight',
   title: '% Recommended Calorie (Weight)', // Or a clearer title

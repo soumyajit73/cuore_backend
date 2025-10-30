@@ -125,6 +125,7 @@ exports.getBuilderItems = async (req, res) => {
             mealTime == $sanityMealTimeFilter &&
             cuisine == $cuisine] {
               _id, name, calories, servingSize, section, mealTime, cuisine,
+              healthColor,
               adjustmentWeight,
               "recipeLink": recipeLink->{_id, name}
           } | order(section asc, name asc)
@@ -178,6 +179,7 @@ exports.adjustMealPortions = async (req, res) => {
                 section: item.section,
                 cuisine: item.cuisine,
                 mealTime: item.mealTime,
+                healthColor: item.healthColor,
                 totalCalories: baseCalories * servings,
                 totalQuantity,
                 unit,
@@ -208,6 +210,7 @@ exports.adjustMealPortions = async (req, res) => {
                 adjustedCalories: item.totalCalories,
                 servingSizeChange: 0,
                 newServingSizeString: formatServingString(item.totalQuantity, item.unit, item.name),
+                healthColor: item.healthColor,
                 recipeLink: item.recipeLink,
                 section: item.section,
                 cuisine: item.cuisine,
@@ -255,6 +258,7 @@ exports.adjustMealPortions = async (req, res) => {
                     adjustedCalories: finalAdjustedCalories,
                     servingSizeChange: parseFloat(servingSizeChange.toFixed(2)),
                     newServingSizeString: formatServingString(finalAdjustedQuantity, unit, item.name),
+                    healthColor: item.healthColor,
                     recipeLink: item.recipeLink,
                     section: item.section,
                     cuisine: item.cuisine,
@@ -309,6 +313,7 @@ exports.adjustMealPortions = async (req, res) => {
                 adjustedCalories: finalAdjustedCalories,
                 servingSizeChange: parseFloat(servingSizeChange.toFixed(2)),
                 newServingSizeString: formatServingString(finalAdjustedQuantity, unit, item.name),
+                healthColor: item.healthColor,
                 recipeLink: item.recipeLink,
                 section: item.section,
                 cuisine: item.cuisine,
