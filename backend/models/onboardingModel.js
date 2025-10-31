@@ -518,7 +518,7 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       );
     }
 
-    // --- 1. MERGE PAYLOAD WITH EXISTING DATA ---
+    // --- 1️⃣ MERGE PAYLOAD WITH EXISTING DATA ---
     const mergedData = {
       ...(existingDoc ? existingDoc.toObject() : {}),
       ...payload,
@@ -527,13 +527,10 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       o4Data: { ...(existingDoc ? existingDoc.o4Data : {}), ...payload.o4Data },
       o5Data: { ...(existingDoc ? existingDoc.o5Data : {}), ...payload.o5Data },
       o6Data: { ...(existingDoc ? existingDoc.o6Data : {}), ...payload.o6Data },
-
-      // 🩺 FIXED MERGE LOGIC for O7 (remove previous auto-filled values)
       o7Data: Object.entries({
         ...(existingDoc ? existingDoc.o7Data : {}),
         ...payload.o7Data
       }).reduce((acc, [key, value]) => {
-        // If the new payload includes this key (even as null), override it
         if (payload.o7Data && Object.prototype.hasOwnProperty.call(payload.o7Data, key)) {
           acc[key] = value === null || value === undefined ? null : value;
         } else {
@@ -543,7 +540,7 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       }, {}),
     };
 
-    // --- 2. CALCULATE METRICS & SCORES ---
+    // --- 2️⃣ CALCULATE METRICS & SCORES ---
     const o2Metrics = validateAndCalculateScores(mergedData.o2Data);
     const o3Metrics = processO3Data(mergedData.o3Data);
     const o4Metrics = processO4Data(mergedData.o4Data);
@@ -551,7 +548,6 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     const o6Metrics = processO6Data(mergedData.o6Data);
     let processedO7Data;
 
-    // --- O7 Data Processing ---
     const o7Payload = mergedData.o7Data || {};
     const manuallyEnteredFields = Object.keys(o7Payload).filter(key =>
       o7Payload[key] !== null && o7Payload[key] !== undefined && key !== 'auto_filled'
@@ -559,15 +555,12 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
 
     if (manuallyEnteredFields.length > 0) {
       processedO7Data = {
-        ...getAutofillData(0), // base template
-        ...Object.fromEntries(
-          manuallyEnteredFields.map(field => [field, o7Payload[field]])
-        ),
+        ...getAutofillData(0),
+        ...Object.fromEntries(manuallyEnteredFields.map(field => [field, o7Payload[field]])),
         manual_fields: manuallyEnteredFields,
         auto_filled: false
       };
 
-      // Calculate dependent values if partially filled
       if (processedO7Data.bs_f && processedO7Data.bs_am && !processedO7Data.A1C) {
         processedO7Data.A1C = roundTo(
           ((processedO7Data.bs_f + processedO7Data.bs_am) / 2 + 46.7) / 28.7,
@@ -581,7 +574,6 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
         );
       }
     } else {
-      // Auto-fill only if no manual fields
       const tempScores = {
         ...o2Metrics.scores,
         o3Score: o3Metrics.o3Score,
@@ -590,7 +582,7 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
         o6Score: o6Metrics.o6Score,
       };
       const totalScoreBeforeO7 = Object.values(tempScores)
-        .filter(s => typeof s === 'number')
+        .filter(s => typeof s === "number")
         .reduce((a, b) => a + b, 0);
       processedO7Data = {
         ...getAutofillData(totalScoreBeforeO7),
@@ -599,7 +591,7 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       };
     }
 
-    // --- O7 SCORE CALCULATION ---
+    // --- 3️⃣ O7 SCORE CALCULATION ---
     const o7Score =
       score_o2_sat(processedO7Data.o2_sat) +
       score_hr(processedO7Data.pulse) +
@@ -620,77 +612,66 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       o7Score,
     };
 
-    // --- 3. FINAL DATA TO SAVE ---
-  // ⚙️ Preserve structure but only fill manually entered values
-const allO7Keys = [
-  'o2_sat', 'pulse', 'bp_upper', 'bp_lower', 'bs_f', 'bs_am',
-  'A1C', 'HDL', 'LDL', 'Trig', 'HsCRP', 'trig_hdl_ratio'
-];
+    // --- 4️⃣ BUILD FINAL DATA TO SAVE ---
+    const finalDataToSave = {
+      userId,
+      onboardingVersion: "7",
+      o2Data: o2Metrics.o2Data,
+      derivedMetrics: o2Metrics.derivedMetrics,
+      o3Data: o3Metrics.o3Data,
+      o4Data: o4Metrics.o4Data,
+      o5Data: o5Metrics.o5Data,
+      o6Data: o6Metrics.o6Data,
+      timestamp: new Date(),
+    };
 
-const { manual_fields } = processedO7Data;
+    // ⚙️ Preserve structure but only fill manually entered O7 values
+    const allO7Keys = [
+      'o2_sat', 'pulse', 'bp_upper', 'bp_lower', 'bs_f', 'bs_am',
+      'A1C', 'HDL', 'LDL', 'Trig', 'HsCRP', 'trig_hdl_ratio'
+    ];
 
-// Build full o7Data structure
-finalDataToSave.o7Data = {};
-for (const key of allO7Keys) {
-  finalDataToSave.o7Data[key] = manual_fields.includes(key)
-    ? processedO7Data[key] ?? null
-    : null;
-}
+    const { manual_fields } = processedO7Data;
+    finalDataToSave.o7Data = {};
+    for (const key of allO7Keys) {
+      finalDataToSave.o7Data[key] = manual_fields.includes(key)
+        ? processedO7Data[key] ?? null
+        : null;
+    }
+    finalDataToSave.o7Data.manual_fields = manual_fields;
+    finalDataToSave.o7Data.auto_filled = false;
 
-// Keep tracking flags
-finalDataToSave.o7Data.manual_fields = manual_fields;
-finalDataToSave.o7Data.auto_filled = false;
+    // --- 5️⃣ CUORE SCORE ---
+    allScores.cuoreScore = calculateCuoreScore(finalDataToSave, allScores);
+    finalDataToSave.scores = allScores;
 
-
-    // --- 4. HISTORY SNAPSHOTS ---
+    // --- 6️⃣ HISTORY SNAPSHOTS ---
     const submissionTimestamp = finalDataToSave.timestamp;
 
     const o2Snapshot = {
       data: {
         weight_kg: finalDataToSave.o2Data.weight_kg,
-        bmi: finalDataToSave.derivedMetrics.bmi
+        bmi: finalDataToSave.derivedMetrics.bmi,
       },
-      timestamp: submissionTimestamp
+      timestamp: submissionTimestamp,
     };
+    const o5Snapshot = { data: { o5Score: finalDataToSave.scores.o5Score }, timestamp: submissionTimestamp };
+    const o6Snapshot = { data: { o6Score: finalDataToSave.scores.o6Score }, timestamp: submissionTimestamp };
+    const o7Snapshot = { data: { ...finalDataToSave.o7Data }, timestamp: submissionTimestamp };
+    const scoreSnapshot = { data: { cuoreScore: finalDataToSave.scores.cuoreScore }, timestamp: submissionTimestamp };
 
-    const o5Snapshot = {
-      data: { o5Score: finalDataToSave.scores.o5Score },
-      timestamp: submissionTimestamp
-    };
-
-    const o6Snapshot = {
-      data: { o6Score: finalDataToSave.scores.o6Score },
-      timestamp: submissionTimestamp
-    };
-
-    const o7Snapshot = {
-      data: { ...finalDataToSave.o7Data },
-      timestamp: submissionTimestamp
-    };
-
-    const scoreSnapshot = {
-      data: { cuoreScore: finalDataToSave.scores.cuoreScore },
-      timestamp: submissionTimestamp
-    };
-
-    // --- 5. BUILD UPDATE OPERATION ---
+    // --- 7️⃣ UPDATE DB ---
     const updateOperation = { $set: finalDataToSave };
     const pushOperations = {};
 
-    if (payload.o2Data && Object.keys(payload.o2Data).length > 0)
-      pushOperations.o2History = o2Snapshot;
-    if (payload.o5Data && Object.keys(payload.o5Data).length > 0)
-      pushOperations.o5History = o5Snapshot;
-    if (payload.o6Data && Object.keys(payload.o6Data).length > 0)
-      pushOperations.o6History = o6Snapshot;
-    if (payload.o7Data && Object.keys(payload.o7Data).length > 0)
-      pushOperations.o7History = o7Snapshot;
+    if (payload.o2Data && Object.keys(payload.o2Data).length > 0) pushOperations.o2History = o2Snapshot;
+    if (payload.o5Data && Object.keys(payload.o5Data).length > 0) pushOperations.o5History = o5Snapshot;
+    if (payload.o6Data && Object.keys(payload.o6Data).length > 0) pushOperations.o6History = o6Snapshot;
+    if (payload.o7Data && Object.keys(payload.o7Data).length > 0) pushOperations.o7History = o7Snapshot;
 
     pushOperations.scoreHistory = scoreSnapshot;
-    if (Object.keys(pushOperations).length > 0)
-      updateOperation.$push = pushOperations;
+    if (Object.keys(pushOperations).length > 0) updateOperation.$push = pushOperations;
 
-    // --- 6. EXECUTE UPDATE ---
     const finalOnboardingDoc = await OnboardingModel.findOneAndUpdate(
       { userId },
       updateOperation,
