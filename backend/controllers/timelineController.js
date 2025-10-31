@@ -614,103 +614,108 @@ exports.getHomeScreenData = async (req, res) => {
 // Timeline Helper
 // -----------------------------------------------------
 const getTimelineData = async (userId, dateString) => {
-    let localDay = dayjs.tz(dateString, TZ);
-    if (!localDay.isValid()) {
-        console.warn(`Invalid dateString received in getTimelineData: "${dateString}". Falling back to today.`);
-        localDay = dayjs().tz(TZ);
-    }
-    localDay = localDay.startOf('day');
+  let localDay = dayjs.tz(dateString, TZ);
+  if (!localDay.isValid()) {
+    console.warn(`Invalid dateString received in getTimelineData: "${dateString}". Falling back to today.`);
+    localDay = dayjs().tz(TZ);
+  }
+  localDay = localDay.startOf('day');
 
-    const utcStart = localDay.utc().toDate();
-    const utcEnd = localDay.endOf('day').utc().toDate();
+  const utcStart = localDay.utc().toDate();
+  const utcEnd = localDay.endOf('day').utc().toDate();
 
-    const onboarding = await Onboarding.findOne({ userId })
-        .select('o6Data.sleep_hours o6Data.wake_time')
-        .lean();
+  // Fetch onboarding data
+  const onboarding = await Onboarding.findOne({ userId })
+    .select('o5Data.preferred_ex_time o6Data.sleep_hours o6Data.wake_time')
+    .lean();
 
-    const preferredWake = convertTo24Hour(onboarding?.o6Data?.wake_time) || '07:00';
-    const [wakeHour, wakeMinute] = preferredWake.split(':').map(Number);
-    let wakeUpAnchor = localDay.hour(wakeHour).minute(wakeMinute);
+  const preferredWake = convertTo24Hour(onboarding?.o6Data?.wake_time) || '07:00';
+  const [wakeHour, wakeMinute] = preferredWake.split(':').map(Number);
+  let wakeUpAnchor = localDay.hour(wakeHour).minute(wakeMinute);
+  if (!wakeUpAnchor.isValid()) wakeUpAnchor = localDay.hour(7).minute(0);
 
-    if (!wakeUpAnchor.isValid()) wakeUpAnchor = localDay.hour(7).minute(0);
+  // 🏃 Fetch Fitness time (priority: o5Data.preferred_ex_time → fallback)
+  let fitnessTime = null;
+  if (onboarding?.o5Data?.preferred_ex_time) {
+    const fitnessTimeStr = convertTo24Hour(onboarding.o5Data.preferred_ex_time);
+    fitnessTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${fitnessTimeStr}`, 'YYYY-MM-DD HH:mm', TZ);
+  } else {
+    fitnessTime = calculateScheduledTime(wakeUpAnchor, 360);
+  }
 
-    const systemCards = [
-        { time: wakeUpAnchor, icon: '🌞', title: 'Wake Up', description: 'Start your day with Morning Harmony', type: 'SYSTEM_WAKEUP' },
-        { time: calculateScheduledTime(wakeUpAnchor, 105), icon: '🍳', title: 'Breakfast', description: 'Healthy smoothie with oats and banana', type: 'SYSTEM_NUTRITION' },
-        { time: calculateScheduledTime(wakeUpAnchor, 360), icon: '🏃', title: 'Fitness', description: 'Cardio & strength training', type: 'SYSTEM_FITNESS' },
-        { time: calculateScheduledTime(wakeUpAnchor, 480), icon: '🍽️', title: 'Lunch', description: 'Re-energize yourself', type: 'SYSTEM_NUTRITION' },
-        { time: calculateScheduledTime(wakeUpAnchor, 720), icon: '😴', title: 'Short Nap or Walk', description: 'Defeat the midday slump', type: 'SYSTEM_REST' },
-        { time: calculateScheduledTime(wakeUpAnchor, 960), icon: '🌙', title: 'Dinner', description: 'Balanced and light', type: 'SYSTEM_NUTRITION' },
-        { time: calculateScheduledTime(wakeUpAnchor, 1200), icon: '🛌', title: 'Sleep', description: 'Restore & repair', type: 'SYSTEM_REST' },
-    ].map(card => ({
-        ...card,
-        completed: dayjs().tz(TZ).isAfter(card.time),
+  // System Cards
+  const systemCards = [
+    { time: wakeUpAnchor, icon: '🌞', title: 'Wake Up', description: 'Start your day with Morning Harmony', type: 'SYSTEM_WAKEUP' },
+    { time: calculateScheduledTime(wakeUpAnchor, 105), icon: '🍳', title: 'Breakfast', description: 'Healthy smoothie with oats and banana', type: 'SYSTEM_NUTRITION' },
+    { time: fitnessTime, icon: '🏃', title: 'Fitness', description: 'Cardio & strength training', type: 'SYSTEM_FITNESS' },
+    { time: calculateScheduledTime(wakeUpAnchor, 480), icon: '🍽️', title: 'Lunch', description: 'Re-energize yourself', type: 'SYSTEM_NUTRITION' },
+    { time: calculateScheduledTime(wakeUpAnchor, 720), icon: '😴', title: 'Short Nap or Walk', description: 'Defeat the midday slump', type: 'SYSTEM_REST' },
+    { time: calculateScheduledTime(wakeUpAnchor, 960), icon: '🌙', title: 'Dinner', description: 'Balanced and light', type: 'SYSTEM_NUTRITION' },
+    { time: calculateScheduledTime(wakeUpAnchor, 1200), icon: '🛌', title: 'Sleep', description: 'Restore & repair', type: 'SYSTEM_REST' },
+  ].map(card => ({
+    ...card,
+    completed: dayjs().tz(TZ).isAfter(card.time),
+    reminder: true,
+    editable: card.type === 'SYSTEM_WAKEUP'
+  }));
+
+  // Fetch user cards
+  const rawCards = await TimelineCard.find({
+    userId,
+    scheduleDate: { $gte: utcStart, $lte: utcEnd }
+  });
+
+  const userCards = rawCards
+    .map(card => {
+      if (!card.scheduledTime) return null;
+
+      let parsedTime;
+      if (card.scheduledTime.includes('AM') || card.scheduledTime.includes('PM')) {
+        parsedTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD hh:mm A', TZ);
+      } else {
+        parsedTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD HH:mm', TZ);
+      }
+      if (!parsedTime.isValid()) return null;
+
+      const cardObject = {
+        time: parsedTime,
+        icon: card.type === 'USER_MEDICATION' ? '💊' : '🔔',
+        title: card.title,
+        description: card.description,
+        completed: card.isCompleted,
         reminder: true,
-        editable: card.type === 'SYSTEM_WAKEUP'
-    }));
+        editable: card.type !== 'USER_MEDICATION',
+        type: card.type
+      };
 
-    const rawCards = await TimelineCard.find({
-        userId,
-        scheduleDate: { $gte: utcStart, $lte: utcEnd }
-    });
+      if (card.type === 'USER_REMINDER' || card.type === 'USER_MEDICATION') {
+        cardObject.id = card._id.toString();
+        cardObject.sourceId = card.sourceId?.toString();
+      }
 
-    const userCards = rawCards
-        .map(card => {
-            if (!card.scheduledTime) return null;
+      return cardObject;
+    })
+    .filter(Boolean);
 
-            let parsedTime;
-            if (card.scheduledTime.includes('AM') || card.scheduledTime.includes('PM')) {
-                parsedTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD hh:mm A', TZ);
-            } else {
-                parsedTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD HH:mm', TZ);
-            }
-            if (!parsedTime.isValid()) return null;
+  // Combine system + user cards
+  const allCards = [...systemCards, ...userCards]
+    .sort((a, b) => a.time.valueOf() - b.time.valueOf())
+    .map(card => ({ ...card, time: dayjs(card.time).tz(TZ).format('h:mm A') }));
 
-            // =====================================================
-            // ## THIS IS THE CHANGE YOU REQUESTED ##
-            // =====================================================
-            const cardObject = {
-                time: parsedTime,
-                icon: card.type === 'USER_MEDICATION' ? '💊' : '🔔',
-                title: card.title,
-                description: card.description,
-                completed: card.isCompleted,
-                reminder: true,
-                editable: card.type !== 'USER_MEDICATION',
-                type: card.type
-            };
+  // Missed tasks check
+  const missedTasks = allCards.filter(task =>
+    !task.completed && dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${task.time}`, 'YYYY-MM-DD h:mm A', TZ).isBefore(dayjs().tz(TZ))
+  ).length;
 
-            // Add the original ID for user-generated cards to make editing easy
-            if (card.type === 'USER_REMINDER' || card.type === 'USER_MEDICATION') {
-    // Use the timeline card's _id as the unique frontend identifier
-    cardObject.id = card._id.toString();
+  const alerts = missedTasks > 0 ? [{
+    type: 'warning',
+    text: 'Reassess to keep your plan aligned',
+    action: 'Check Plan'
+  }] : [];
 
-    // Keep the original reminder/medication ID separately for API actions
-    cardObject.sourceId = card.sourceId?.toString();
-}
-
-
-            return cardObject;
-            // =====================================================
-        })
-        .filter(Boolean);
-
-    const allCards = [...systemCards, ...userCards]
-        .sort((a, b) => a.time.valueOf() - b.time.valueOf())
-        .map(card => ({ ...card, time: dayjs(card.time).tz(TZ).format('h:mm A') }));
-
-    const missedTasks = allCards.filter(task =>
-        !task.completed && dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${task.time}`, 'YYYY-MM-DD h:mm A', TZ).isBefore(dayjs().tz(TZ))
-    ).length;
-
-    const alerts = missedTasks > 0 ? [{
-        type: 'warning',
-        text: 'Reassess to keep your plan aligned',
-        action: 'Check Plan'
-    }] : [];
-
-    return { dailySchedule: allCards, missed: missedTasks, alerts };
+  return { dailySchedule: allCards, missed: missedTasks, alerts };
 };
+
 
 // -----------------------------------------------------
 // Cuore Score Helper
