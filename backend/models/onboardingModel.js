@@ -621,29 +621,26 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     };
 
     // --- 3. FINAL DATA TO SAVE ---
-    const finalDataToSave = {
-      userId,
-      onboardingVersion: "7",
-      o2Data: o2Metrics.o2Data,
-      derivedMetrics: o2Metrics.derivedMetrics,
-      o3Data: o3Metrics.o3Data,
-      o4Data: o4Metrics.o4Data,
-      o5Data: o5Metrics.o5Data,
-      o6Data: o6Metrics.o6Data,
-      timestamp: new Date(),
-    };
+  // ⚙️ Preserve structure but only fill manually entered values
+const allO7Keys = [
+  'o2_sat', 'pulse', 'bp_upper', 'bp_lower', 'bs_f', 'bs_am',
+  'A1C', 'HDL', 'LDL', 'Trig', 'HsCRP', 'trig_hdl_ratio'
+];
 
-    // ⚙️ SAVE ONLY MANUAL O7 FIELDS (don’t persist auto-filled)
-    const { manual_fields } = processedO7Data;
-    finalDataToSave.o7Data = Object.fromEntries(
-      Object.entries(processedO7Data).filter(([key]) =>
-        manual_fields.includes(key) || ['manual_fields', 'auto_filled'].includes(key)
-      )
-    );
+const { manual_fields } = processedO7Data;
 
-    // --- CUORE SCORE CALCULATION ---
-    allScores.cuoreScore = calculateCuoreScore(finalDataToSave, allScores);
-    finalDataToSave.scores = allScores;
+// Build full o7Data structure
+finalDataToSave.o7Data = {};
+for (const key of allO7Keys) {
+  finalDataToSave.o7Data[key] = manual_fields.includes(key)
+    ? processedO7Data[key] ?? null
+    : null;
+}
+
+// Keep tracking flags
+finalDataToSave.o7Data.manual_fields = manual_fields;
+finalDataToSave.o7Data.auto_filled = false;
+
 
     // --- 4. HISTORY SNAPSHOTS ---
     const submissionTimestamp = finalDataToSave.timestamp;
@@ -729,8 +726,15 @@ exports.getOnboardingDataByUserId = async (userId) => {
         // If the stored O7 data was auto-filled, replace it with an empty object
         // before sending it. This ensures the user sees blank fields on the screen.
         if (onboardingData.o7Data && onboardingData.o7Data.auto_filled === true) {
-            onboardingData.o7Data = {};
-        }
+  // keep only manually filled fields (if any)
+  const manualKeys = onboardingData.o7Data.manual_fields || [];
+  onboardingData.o7Data = Object.fromEntries(
+    Object.entries(onboardingData.o7Data).filter(([key]) =>
+      manualKeys.includes(key)
+    )
+  );
+}
+
 
         return onboardingData;
 
