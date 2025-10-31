@@ -478,59 +478,80 @@ const getAlerts = async (userId) => {
 // Generate Timeline Cards
 // -----------------------------------------------------
 const generateTimelineCardsForDay = async (userId, targetDate) => {
-    const localDay = dayjs(targetDate).tz(TZ).startOf('day');
+  try {
+    const localDay = dayjs(targetDate).tz(TZ).startOf("day");
     const startOfDayUTC = localDay.utc().toDate();
-    const endOfDayUTC = localDay.endOf('day').utc().toDate();
+    const endOfDayUTC = localDay.endOf("day").utc().toDate();
 
-    await TimelineCard.deleteMany({
-        userId,
-        scheduleDate: { $gte: startOfDayUTC, $lte: endOfDayUTC },
-        type: { $in: ['USER_REMINDER', 'USER_MEDICATION'] }
-    });
-
+    // 🧩 Fetch active medications and reminders only
     const medications = await Medication.find({
-        userId,
-        isActive: true,
-        startDate: { $lte: localDay.endOf('day').toDate() },
-        $or: [{ endDate: null }, { endDate: { $gte: localDay.startOf('day').toDate() } }]
+      userId,
+      isActive: true,
+      startDate: { $lte: localDay.endOf("day").toDate() },
+      $or: [{ endDate: null }, { endDate: { $gte: localDay.startOf("day").toDate() } }],
     }).lean();
 
     const reminders = await Reminder.find({
-        userId,
-        isActive: true,
-        startDate: { $lte: localDay.endOf('day').toDate() },
-        $or: [{ endDate: null }, { endDate: { $gte: localDay.startOf('day').toDate() } }]
+      userId,
+      isActive: true,
+      startDate: { $lte: localDay.endOf("day").toDate() },
+      $or: [{ endDate: null }, { endDate: { $gte: localDay.startOf("day").toDate() } }],
     }).lean();
 
+    // 🧱 Collect all valid timeline entries
     const newCards = [];
 
-    medications.forEach(med => {
-        const timeStr = convertTo24Hour(med.time) || '00:00';
-        newCards.push({
-            userId,
-            scheduleDate: med.startDate,
-            scheduledTime: timeStr,
-            title: 'Medication',
-            description: `${med.name} ${med.dosage}`,
-            type: 'USER_MEDICATION',
-            sourceId: med._id
-        });
+    medications.forEach((med) => {
+      const timeStr = convertTo24Hour(med.time) || "00:00";
+      newCards.push({
+        userId,
+        scheduleDate: med.startDate,
+        scheduledTime: timeStr,
+        title: "Medication",
+        description: `${med.name} ${med.dosage || ""}`.trim(),
+        type: "USER_MEDICATION",
+        sourceId: med._id,
+      });
     });
 
-    reminders.forEach(rem => {
-        const timeStr = convertTo24Hour(rem.time) || '00:00';
-        newCards.push({
-            userId,
-            scheduleDate: rem.startDate,
-            scheduledTime: timeStr,
-            title: rem.title,
-            description: null,
-            type: 'USER_REMINDER',
-            sourceId: rem._id
-        });
+    reminders.forEach((rem) => {
+      const timeStr = convertTo24Hour(rem.time) || "00:00";
+      newCards.push({
+        userId,
+        scheduleDate: rem.startDate,
+        scheduledTime: timeStr,
+        title: rem.title,
+        description: rem.description || null,
+        type: "USER_REMINDER",
+        sourceId: rem._id,
+      });
     });
 
-    if (newCards.length > 0) await TimelineCard.insertMany(newCards);
+    // ✅ 1️⃣ Upsert instead of full delete-insert (idempotent)
+    for (const card of newCards) {
+      await TimelineCard.findOneAndUpdate(
+        {
+          userId,
+          sourceId: card.sourceId,
+          type: card.type,
+        },
+        { $set: card },
+        { upsert: true, new: true }
+      );
+    }
+
+    // ✅ 2️⃣ Delete orphaned cards (reminders or meds that no longer exist)
+    const validSourceIds = newCards.map((c) => c.sourceId.toString());
+    await TimelineCard.deleteMany({
+      userId,
+      type: { $in: ["USER_REMINDER", "USER_MEDICATION"] },
+      sourceId: { $nin: validSourceIds },
+    });
+
+    console.log(`✅ Timeline regenerated safely for user ${userId}.`);
+  } catch (error) {
+    console.error(`❌ Error generating timeline for ${userId}:`, error);
+  }
 };
 
 
@@ -853,12 +874,13 @@ exports.deleteReminder = async (req, res) => {
   if (!userId) {
     return res.status(401).json({ error: "Unauthorized. User ID not found." });
   }
+
   if (!reminderId) {
     return res.status(400).json({ error: "Reminder ID is required in the URL." });
   }
 
   try {
-    // 1️⃣ Delete the reminder from Reminder collection
+    // 1️⃣ Delete from Reminder collection
     const deletedReminder = await Reminder.findOneAndDelete({
       _id: reminderId,
       userId: userId,
@@ -868,24 +890,24 @@ exports.deleteReminder = async (req, res) => {
       return res.status(404).json({ error: "Reminder not found or access denied." });
     }
 
-    // 2️⃣ Delete all linked timeline cards that were created from this reminder
+    // 2️⃣ Delete linked timeline card(s)
     await TimelineCard.deleteMany({
       userId: userId,
       sourceId: reminderId,
       type: "USER_REMINDER",
     });
 
-    console.log(`✅ Reminder ${reminderId} and its timeline cards deleted for user ${userId}.`);
+    console.log(`✅ Deleted reminder ${reminderId} and its linked timeline cards.`);
 
-    // 3️⃣ (Optional but safe) Regenerate timeline for the current day
+    // ✅ 3️⃣ Regenerate timeline — but SAFELY (idempotent)
     await generateTimelineCardsForDay(userId, dayjs().tz(TZ).toDate());
 
     return res.status(200).json({
-      message: "Reminder deleted successfully from both Reminder and TimelineCard collections.",
+      message: "Reminder deleted successfully and timeline refreshed safely.",
       data: { id: reminderId },
     });
   } catch (error) {
-    console.error(`❌ Error deleting Reminder ${reminderId} for user ${userId}:`, error);
+    console.error(`❌ Error deleting reminder ${reminderId}:`, error);
     if (error.name === "CastError") {
       return res.status(400).json({ error: "Invalid Reminder ID format." });
     }
