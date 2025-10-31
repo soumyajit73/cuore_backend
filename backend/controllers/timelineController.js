@@ -738,54 +738,104 @@ const getCuoreScoreData = async (userId) => {
 // Add Entry
 // -----------------------------------------------------
 exports.addEntry = async (req, res) => {
-    const userId = req.user.userId;
-    const { title, startDate, endDate, time, repeatFrequency, isMedication } = req.body;
+  const userId = req.user.userId;
+  const { title, startDate, endDate, time, repeatFrequency, isMedication } = req.body;
 
-    if (!title || !time || !repeatFrequency)
-        return res.status(400).json({ error: 'Missing required scheduling fields.' });
+  if (!title || !time || !repeatFrequency)
+    return res.status(400).json({ error: "Missing required scheduling fields." });
 
-    try {
-        const startDay = dayjs.tz(startDate || new Date(), TZ);
-        const endDay = endDate && endDate.toLowerCase() !== 'never' ? dayjs.tz(endDate, TZ).endOf('day') : null;
+  try {
+    const startDay = dayjs.tz(startDate || new Date(), TZ);
+    const endDay =
+      endDate && endDate.toLowerCase() !== "never"
+        ? dayjs.tz(endDate, TZ).endOf("day")
+        : null;
 
-        const standardizedTime = convertTo24Hour(time);
-        if (!standardizedTime) return res.status(400).json({ error: 'Invalid time format.' });
+    const standardizedTime = convertTo24Hour(time);
+    if (!standardizedTime)
+      return res.status(400).json({ error: "Invalid time format." });
 
-        let newEntry;
-        if (isMedication) {
-            const [name, dosage] = title.split(' ');
-            newEntry = await Medication.create({
-                userId,
-                name: name || title,
-                dosage: dosage || 'N/A',
-                startDate: startDay.toDate(),
-                endDate: endDay ? endDay.toDate() : null,
-                time: standardizedTime,
-                repeatFrequency
-            });
-        } else {
-            newEntry = await Reminder.create({
-                userId,
-                title,
-                startDate: startDay.toDate(),
-                endDate: endDay ? endDay.toDate() : null,
-                time: standardizedTime,
-                repeatFrequency
-            });
-        }
+    // 🧩 Check if an identical reminder/medication already exists
+    const duplicateCheck = await TimelineCard.findOne({
+      userId,
+      title,
+      scheduledTime: standardizedTime,
+      type: isMedication ? "USER_MEDICATION" : "USER_REMINDER",
+    });
 
-        await generateTimelineCardsForDay(userId, dayjs().tz(TZ).toDate());
-
-        return res.status(201).json({
-            message: `${isMedication ? 'Medication' : 'Reminder'} added successfully.`,
-            type: isMedication ? 'medication' : 'reminder',
-            data: newEntry
-        });
-    } catch (error) {
-        console.error('Error adding new timeline entry:', error);
-        return res.status(500).json({ error: 'Internal server error.' });
+    if (duplicateCheck) {
+      return res.status(409).json({
+        error: "A similar entry already exists at this time.",
+        existingEntry: duplicateCheck,
+      });
     }
+
+    let newEntry;
+
+    if (isMedication) {
+      // 🩺 Handle “Flag as Medication” — store as Reminder but with med flag
+      newEntry = await Reminder.create({
+        userId,
+        title,
+        startDate: startDay.toDate(),
+        endDate: endDay ? endDay.toDate() : null,
+        time: standardizedTime,
+        repeatFrequency,
+        isActive: true,
+        isMedication: true, // ✅ store medication flag for display
+      });
+    } else {
+      newEntry = await Reminder.create({
+        userId,
+        title,
+        startDate: startDay.toDate(),
+        endDate: endDay ? endDay.toDate() : null,
+        time: standardizedTime,
+        repeatFrequency,
+        isActive: true,
+        isMedication: false,
+      });
+    }
+
+    // 🧱 Create/Update timeline card directly for immediate feedback
+    const cardType = isMedication ? "USER_MEDICATION" : "USER_REMINDER";
+    const icon = isMedication ? "💊" : "🔔";
+
+    await TimelineCard.findOneAndUpdate(
+      {
+        userId,
+        sourceId: newEntry._id,
+        type: cardType,
+      },
+      {
+        $set: {
+          userId,
+          sourceId: newEntry._id,
+          title: newEntry.title,
+          description: null,
+          type: cardType,
+          scheduledTime: standardizedTime,
+          scheduleDate: startDay.toDate(),
+          icon,
+          reminder: true,
+          editable: true,
+          completed: false,
+        },
+      },
+      { upsert: true, new: true }
+    );
+
+    return res.status(201).json({
+      message: `${isMedication ? "Medication" : "Reminder"} added successfully.`,
+      type: isMedication ? "medication" : "reminder",
+      data: newEntry,
+    });
+  } catch (error) {
+    console.error("❌ Error adding new timeline entry:", error);
+    return res.status(500).json({ error: "Internal server error." });
+  }
 };
+
 
 // -----------------------------------------------------
 // Update Wake Up Time
