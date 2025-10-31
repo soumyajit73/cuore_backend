@@ -892,84 +892,65 @@ const calculateRecommendedExercise = (o5Data) => {
 };
 
 const calculateBPStatus = (userData) => {
-  const { bp_upper, bp_lower } = userData.o7Data;
+  const o7 = userData.o7Data || {};
+
+  const bp_upper = o7.bp_upper ?? null;
+  const bp_lower = o7.bp_lower ?? null;
+
+  const getStatus = (val, low, high) => {
+    if (val == null) return "unknown";
+    if (val < low) return "orange";
+    if (val <= high) return "green";
+    return "red";
+  };
 
   return {
     upper: {
       current: bp_upper,
       target: 120,
-      status:
-        bp_upper < 100
-          ? "orange"
-          : bp_upper <= 130
-          ? "green"
-          : bp_upper <= 145
-          ? "orange"
-          : "red",
+      status: getStatus(bp_upper, 100, 130),
     },
     lower: {
       current: bp_lower,
       target: 80,
-      status:
-        bp_lower < 64
-          ? "orange"
-          : bp_lower <= 82
-          ? "green"
-          : bp_lower <= 95
-          ? "orange"
-          : "red",
+      status: getStatus(bp_lower, 64, 82),
     },
   };
 };
 
+
 const calculateBloodSugar = (userData) => {
-  const { bs_f, bs_am } = userData.o7Data;
-  const hasDiabetes = userData.o3Data.hasDiabetes;
+  const o7 = userData.o7Data || {};
+  const o3 = userData.o3Data || {};
+  const hasDiabetes = o3.hasDiabetes || false;
+
+  const bs_f = o7.bs_f ?? null;
+  const bs_am = o7.bs_am ?? null;
+  const A1C = o7.A1C ?? null;
+
+  const getStatus = (val, low, high) => {
+    if (val == null) return "unknown";
+    if (val < low) return "orange";
+    if (val <= high) return "green";
+    return "red";
+  };
 
   return {
     fasting: {
-      current: bs_f,
-      target: 100,
-      status: hasDiabetes
-        ? bs_f < 100
-          ? "red"
-          : bs_f <= 139
-          ? "green"
-          : bs_f <= 170
-          ? "orange"
-          : "red"
-        : bs_f < 100
-        ? "green"
-        : bs_f <= 125
-        ? "orange"
-        : "red",
+      value: bs_f,
+      target: hasDiabetes ? 130 : 100,
+      status: getStatus(bs_f, 70, hasDiabetes ? 130 : 100),
     },
     afterMeal: {
-      current: bs_am,
-      target: hasDiabetes ? 160 : 140,
-      status: hasDiabetes
-        ? bs_am < 130
-          ? "red"
-          : bs_am <= 169
-          ? "green"
-          : bs_am <= 220
-          ? "orange"
-          : "red"
-        : bs_am < 140
-        ? "green"
-        : bs_am <= 200
-        ? "orange"
-        : "red",
+      value: bs_am,
+      target: hasDiabetes ? 180 : 140,
+      status: getStatus(bs_am, 90, hasDiabetes ? 180 : 140),
     },
-  };
-};
-
-const calculateTrigHDLRatio = (userData) => {
-  const ratio = userData.o7Data.trig_hdl_ratio;
-  return {
-    current: ratio,
-    target: 2.6,
-    status: ratio < 2.8 ? "green" : ratio <= 4.0 ? "orange" : "red",
+    A1C: {
+      value: A1C,
+      target: 5.6,
+      status: getStatus(A1C, 4.5, 5.6),
+    },
   };
 };
 
