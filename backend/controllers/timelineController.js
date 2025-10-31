@@ -1064,130 +1064,162 @@ exports.getTimeline = async (req, res) => {
 exports.completeCard = async (req, res) => {
     res.status(501).json({ message: "Not Implemented Yet. This will mark a task as complete." });
 };
-const safeNum = (v) => (typeof v === 'number' && !Number.isNaN(v) ? v : 0);
+const safeNum = (v) =>
+  typeof v === "number" && !Number.isNaN(v) && v !== 0 ? v : null;
+
 exports.getCuoreScoreDetails = async (req, res) => {
   const userId = req.user && req.user.userId;
-  if (!userId) return res.status(401).json({ message: 'Unauthorized / userId missing' });
+  if (!userId)
+    return res.status(401).json({ message: "Unauthorized / userId missing" });
 
   try {
-    // 1) Fetch onboarding doc (raw values)
     const onboardingDoc = await Onboarding.findOne({ userId }).lean();
-    if (!onboardingDoc) {
-      return res.status(404).json({ message: 'Onboarding data not found for this user.' });
-    }
+    if (!onboardingDoc)
+      return res
+        .status(404)
+        .json({ message: "Onboarding data not found for this user." });
 
-    // 2) Recompute metrics from onboardingDoc (pure read-only)
-    //    calculateAllMetrics should accept the raw onboardingDoc and return the metrics object
-    const metrics = typeof calculateAllMetrics === 'function'
-      ? calculateAllMetrics(onboardingDoc)
-      : {};
+    const metrics =
+      typeof calculateAllMetrics === "function"
+        ? calculateAllMetrics(onboardingDoc)
+        : {};
 
-    // 3) Determine recommended exercise (dynamic from o5Data)
-    const recommendedExercise = typeof calculateRecommendedExercise === 'function'
-      ? calculateRecommendedExercise(onboardingDoc.o5Data || {})
-      : 15;
+    const recommendedExercise =
+      typeof calculateRecommendedExercise === "function"
+        ? calculateRecommendedExercise(onboardingDoc.o5Data || {})
+        : 15;
 
-    // 4) Blood pressure: prefer o7Data (raw), fallback to metrics, then default 0
     const o7 = onboardingDoc.o7Data || {};
-    const bp_upper_raw = safeNum(o7.bp_upper ?? o7.bpUpper ?? onboardingDoc.bp_upper ?? metrics?.bloodPressure?.upper?.current);
-    const bp_lower_raw = safeNum(o7.bp_lower ?? o7.bpLower ?? onboardingDoc.bp_lower ?? metrics?.bloodPressure?.lower?.current);
 
-    const upperStatus = bp_upper_raw < 100 ? 'orange' :
-                        bp_upper_raw <= 130 ? 'green' :
-                        bp_upper_raw <= 145 ? 'orange' : 'red';
+    // 🩺 Prefer manual values from o7Data if available
+    const bp_upper = safeNum(o7.bp_upper ?? metrics?.bloodPressure?.upper?.current);
+    const bp_lower = safeNum(o7.bp_lower ?? metrics?.bloodPressure?.lower?.current);
+    const bs_f = safeNum(o7.bs_f ?? metrics?.bloodSugar?.fasting?.current);
+    const bs_am = safeNum(o7.bs_am ?? metrics?.bloodSugar?.afterMeal?.current);
+    const A1C = safeNum(o7.A1C ?? metrics?.bloodSugar?.A1C?.current);
+    const tg_hdl_ratio = safeNum(o7.trig_hdl_ratio ?? metrics?.trigHDLRatio?.current);
+    const body_fat = safeNum(o7.body_fat ?? metrics?.bodyFat?.current);
 
-    const lowerStatus = bp_lower_raw < 64 ? 'orange' :
-                        bp_lower_raw <= 82 ? 'green' :
-                        bp_lower_raw <= 95 ? 'orange' : 'red';
+    const upperStatus =
+      bp_upper == null
+        ? "unknown"
+        : bp_upper < 100
+        ? "orange"
+        : bp_upper <= 130
+        ? "green"
+        : bp_upper <= 145
+        ? "orange"
+        : "red";
 
-    const bloodPressure = {
-      upper: { current: bp_upper_raw, target: 120, status: upperStatus },
-      lower: { current: bp_lower_raw, target: 80,  status: lowerStatus },
-    };
+    const lowerStatus =
+      bp_lower == null
+        ? "unknown"
+        : bp_lower < 64
+        ? "orange"
+        : bp_lower <= 82
+        ? "green"
+        : bp_lower <= 95
+        ? "orange"
+        : "red";
 
-    // 5) Build response using metrics where possible, with safe fallbacks
     const responseBody = {
       health_metrics: {
-        health_score: onboardingDoc?.scores?.cuoreScore ?? metrics?.cuoreScore ?? metrics?.scores?.cuoreScore ?? 0,
+        health_score:
+          onboardingDoc?.scores?.cuoreScore ??
+          metrics?.cuoreScore ??
+          metrics?.scores?.cuoreScore ??
+          0,
         estimated_time_to_target: {
           value: metrics?.timeToTarget ?? 0,
-          unit: 'months'
+          unit: "months",
         },
         metabolic_age: {
           value: metrics?.metabolicAge?.metabolicAge ?? 0,
-          unit: 'years',
-          gap: metrics?.metabolicAge?.gap ?? 0
+          unit: "years",
+          gap: metrics?.metabolicAge?.gap ?? 0,
         },
         weight: {
           current: metrics?.weight?.current ?? null,
           target: metrics?.weight?.target ?? null,
-          unit: 'kg',
-          status: metrics?.weight?.status ?? 'unknown'
+          unit: "kg",
+          status: metrics?.weight?.status ?? "unknown",
         },
         bmi: {
           value: metrics?.bmi?.current ?? null,
           target: metrics?.bmi?.target ?? null,
-          status: metrics?.bmi?.status ?? 'unknown'
+          status: metrics?.bmi?.status ?? "unknown",
         },
         lifestyle_score: {
           value: metrics?.lifestyle?.score ?? null,
           target: 75,
-          unit: '%',
-          status: metrics?.lifestyle?.status ?? 'unknown'
+          unit: "%",
+          status: metrics?.lifestyle?.status ?? "unknown",
         },
         recommended: {
           calories: {
             value: metrics?.recommendedCalories ?? null,
-            unit: 'kcal'
+            unit: "kcal",
           },
           exercise: {
             value: recommendedExercise,
-            unit: 'min'
-          }
+            unit: "min",
+          },
         },
         vitals: {
           blood_pressure: {
-            current: `${bloodPressure.upper.current}/${bloodPressure.lower.current}`,
-            target: `${bloodPressure.upper.target}/${bloodPressure.lower.target}`,
+            current:
+              bp_upper && bp_lower ? `${bp_upper}/${bp_lower}` : null,
+            target: "120/80",
             status: {
-              upper: bloodPressure.upper.status,
-              lower: bloodPressure.lower.status
-            }
+              upper: upperStatus,
+              lower: lowerStatus,
+            },
           },
           blood_sugar: {
             fasting: {
-              value: metrics?.bloodSugar?.fasting?.current ?? null,
-              target: metrics?.bloodSugar?.fasting?.target ?? null,
-              status: metrics?.bloodSugar?.fasting?.status ?? 'unknown'
+              value: bs_f,
+              target: 100,
+              status: bs_f == null ? "unknown" : bs_f <= 100 ? "green" : "red",
             },
             after_meal: {
-              value: metrics?.bloodSugar?.afterMeal?.current ?? null,
-              target: metrics?.bloodSugar?.afterMeal?.target ?? null,
-              status: metrics?.bloodSugar?.afterMeal?.status ?? 'unknown'
-            }
+              value: bs_am,
+              target: 140,
+              status:
+                bs_am == null ? "unknown" : bs_am <= 140 ? "green" : "red",
+            },
+            A1C: {
+              value: A1C,
+              target: 5.6,
+              status:
+                A1C == null ? "unknown" : A1C <= 5.6 ? "green" : "red",
+            },
           },
           cholesterol: {
             tg_hdl_ratio: {
-              value: metrics?.trigHDLRatio?.current ?? null,
-              target: metrics?.trigHDLRatio?.target ?? null,
-              status: metrics?.trigHDLRatio?.status ?? 'unknown'
-            }
+              value: tg_hdl_ratio,
+              target: 3,
+              status:
+                tg_hdl_ratio == null
+                  ? "unknown"
+                  : tg_hdl_ratio <= 3
+                  ? "green"
+                  : "red",
+            },
           },
           body_fat: {
-            value: metrics?.bodyFat?.current ?? null,
-            target: metrics?.bodyFat?.target ?? null,
-            unit: '%',
-            status: metrics?.bodyFat?.status ?? 'unknown'
-          }
+            value: body_fat,
+            target: metrics?.bodyFat?.target ?? 23,
+            unit: "%",
+            status: metrics?.bodyFat?.status ?? "unknown",
+          },
         },
-        main_focus: metrics?.mainFocus ?? []
-      }
+        main_focus: metrics?.mainFocus ?? [],
+      },
     };
 
     return res.status(200).json(responseBody);
-
   } catch (err) {
-    console.error('Error in getCuoreScoreDetails:', err);
-    return res.status(500).json({ message: 'Internal server error' });
+    console.error("Error in getCuoreScoreDetails:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
