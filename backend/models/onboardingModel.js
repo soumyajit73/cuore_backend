@@ -509,189 +509,208 @@ const calculateCuoreScore = (allData, allScores) => {
 // ... (Make sure OnboardingModel is imported/defined)
 
 exports.processAndSaveFinalSubmission = async (userId, payload) => {
-  try {
-    const existingDoc = await OnboardingModel.findOne({ userId });
+  try {
+    const existingDoc = await OnboardingModel.findOne({ userId });
 
-    if (!existingDoc && !payload.o2Data) {
-      throw new ValidationError(
-        "A full submission (starting with o2Data) is required for the first onboarding."
-      );
-    }
+    if (!existingDoc && !payload.o2Data) {
+      throw new ValidationError(
+        "A full submission (starting with o2Data) is required for the first onboarding."
+      );
+    }
 
     // --- 1. MERGE PAYLOAD WITH EXISTING DATA ---
-    const mergedData = {
-      ...(existingDoc ? existingDoc.toObject() : {}),
-      ...payload,
-      // Deep merge section-specific data
-      o2Data: { ...(existingDoc ? existingDoc.o2Data : {}), ...payload.o2Data },
-      o3Data: { ...(existingDoc ? existingDoc.o3Data : {}), ...payload.o3Data },
-      o4Data: { ...(existingDoc ? existingDoc.o4Data : {}), ...payload.o4Data },
-      o5Data: { ...(existingDoc ? existingDoc.o5Data : {}), ...payload.o5Data },
-      o6Data: { ...(existingDoc ? existingDoc.o6Data : {}), ...payload.o6Data },
-      o7Data: { ...(existingDoc ? existingDoc.o7Data : {}), ...payload.o7Data },
-    };
+    const mergedData = {
+      ...(existingDoc ? existingDoc.toObject() : {}),
+      ...payload,
+      o2Data: { ...(existingDoc ? existingDoc.o2Data : {}), ...payload.o2Data },
+      o3Data: { ...(existingDoc ? existingDoc.o3Data : {}), ...payload.o3Data },
+      o4Data: { ...(existingDoc ? existingDoc.o4Data : {}), ...payload.o4Data },
+      o5Data: { ...(existingDoc ? existingDoc.o5Data : {}), ...payload.o5Data },
+      o6Data: { ...(existingDoc ? existingDoc.o6Data : {}), ...payload.o6Data },
+
+      // 🩺 FIXED MERGE LOGIC for O7 (remove previous auto-filled values)
+      o7Data: Object.entries({
+        ...(existingDoc ? existingDoc.o7Data : {}),
+        ...payload.o7Data
+      }).reduce((acc, [key, value]) => {
+        // If the new payload includes this key (even as null), override it
+        if (payload.o7Data && Object.prototype.hasOwnProperty.call(payload.o7Data, key)) {
+          acc[key] = value === null || value === undefined ? null : value;
+        } else {
+          acc[key] = value;
+        }
+        return acc;
+      }, {}),
+    };
 
     // --- 2. CALCULATE METRICS & SCORES ---
-    // (Your existing calculation functions)
-    const o2Metrics = validateAndCalculateScores(mergedData.o2Data);
-    const o3Metrics = processO3Data(mergedData.o3Data);
-    const o4Metrics = processO4Data(mergedData.o4Data);
-    const o5Metrics = processO5Data(mergedData.o5Data);
-    const o6Metrics = processO6Data(mergedData.o6Data);
-    let processedO7Data; // Will hold final O7 data
-    
-    // --- O7 Data Processing (Handling Manual vs. Autofill) ---
-    // (Your existing O7 logic - unchanged)
+    const o2Metrics = validateAndCalculateScores(mergedData.o2Data);
+    const o3Metrics = processO3Data(mergedData.o3Data);
+    const o4Metrics = processO4Data(mergedData.o4Data);
+    const o5Metrics = processO5Data(mergedData.o5Data);
+    const o6Metrics = processO6Data(mergedData.o6Data);
+    let processedO7Data;
+
+    // --- O7 Data Processing ---
     const o7Payload = mergedData.o7Data || {};
-    const manuallyEnteredFields = Object.keys(o7Payload).filter(key => 
+    const manuallyEnteredFields = Object.keys(o7Payload).filter(key =>
       o7Payload[key] !== null && o7Payload[key] !== undefined && key !== 'auto_filled'
     );
+
     if (manuallyEnteredFields.length > 0) {
-        processedO7Data = {
-            ...getAutofillData(0), // Initialize with default values
-            ...Object.fromEntries(
-                manuallyEnteredFields.map(field => [field, o7Payload[field]])
-            ),
-            manual_fields: manuallyEnteredFields,
-            auto_filled: false
-        };
-        if (processedO7Data.bs_f && processedO7Data.bs_am && !processedO7Data.A1C) {
-            processedO7Data.A1C = roundTo(((processedO7Data.bs_f + processedO7Data.bs_am) / 2 + 46.7) / 28.7, 2);
-        }
-        if (processedO7Data.Trig && processedO7Data.HDL && !processedO7Data.trig_hdl_ratio) {
-            processedO7Data.trig_hdl_ratio = roundTo(processedO7Data.Trig / processedO7Data.HDL, 2);
-        }
+      processedO7Data = {
+        ...getAutofillData(0), // base template
+        ...Object.fromEntries(
+          manuallyEnteredFields.map(field => [field, o7Payload[field]])
+        ),
+        manual_fields: manuallyEnteredFields,
+        auto_filled: false
+      };
+
+      // Calculate dependent values if partially filled
+      if (processedO7Data.bs_f && processedO7Data.bs_am && !processedO7Data.A1C) {
+        processedO7Data.A1C = roundTo(
+          ((processedO7Data.bs_f + processedO7Data.bs_am) / 2 + 46.7) / 28.7,
+          2
+        );
+      }
+      if (processedO7Data.Trig && processedO7Data.HDL && !processedO7Data.trig_hdl_ratio) {
+        processedO7Data.trig_hdl_ratio = roundTo(
+          processedO7Data.Trig / processedO7Data.HDL,
+          2
+        );
+      }
     } else {
-        const tempScores = {
-            ...o2Metrics.scores, o3Score: o3Metrics.o3Score, o4Score: o4Metrics.o4Score,
-            o5Score: o5Metrics.o5Score, o6Score: o6Metrics.o6Score
-        };
-        const totalScoreBeforeO7 = Object.values(tempScores).filter(s => typeof s === 'number').reduce((a, b) => a + b, 0);
-        processedO7Data = { ...getAutofillData(totalScoreBeforeO7), manual_fields: [], auto_filled: true };
+      // Auto-fill only if no manual fields
+      const tempScores = {
+        ...o2Metrics.scores,
+        o3Score: o3Metrics.o3Score,
+        o4Score: o4Metrics.o4Score,
+        o5Score: o5Metrics.o5Score,
+        o6Score: o6Metrics.o6Score,
+      };
+      const totalScoreBeforeO7 = Object.values(tempScores)
+        .filter(s => typeof s === 'number')
+        .reduce((a, b) => a + b, 0);
+      processedO7Data = {
+        ...getAutofillData(totalScoreBeforeO7),
+        manual_fields: [],
+        auto_filled: true
+      };
     }
-    // --- End O7 Processing ---
 
-    // Calculate final O7 score based on the processed data
-    const o7Score =
-      score_o2_sat(processedO7Data.o2_sat) +
-      score_hr(processedO7Data.pulse) +
-      (score_bp_upper(processedO7Data.bp_upper) + score_bp_lower(processedO7Data.bp_lower)) / 2 +
-      (score_bs_f(processedO7Data.bs_f) + score_bs_am(processedO7Data.bs_am) + score_a1c(processedO7Data.A1C)) / 3 +
-      score_hdl(processedO7Data.HDL) + score_ldl(processedO7Data.LDL) + score_trig(processedO7Data.Trig) +
-      score_hscrp(processedO7Data.HsCRP) + score_trig_hdl_ratio(processedO7Data.trig_hdl_ratio);
-    
-    // Aggregate all scores
+    // --- O7 SCORE CALCULATION ---
+    const o7Score =
+      score_o2_sat(processedO7Data.o2_sat) +
+      score_hr(processedO7Data.pulse) +
+      (score_bp_upper(processedO7Data.bp_upper) + score_bp_lower(processedO7Data.bp_lower)) / 2 +
+      (score_bs_f(processedO7Data.bs_f) + score_bs_am(processedO7Data.bs_am) + score_a1c(processedO7Data.A1C)) / 3 +
+      score_hdl(processedO7Data.HDL) +
+      score_ldl(processedO7Data.LDL) +
+      score_trig(processedO7Data.Trig) +
+      score_hscrp(processedO7Data.HsCRP) +
+      score_trig_hdl_ratio(processedO7Data.trig_hdl_ratio);
+
     const allScores = {
-      ...o2Metrics.scores,
-      o3Score: o3Metrics.o3Score,
-      o4Score: o4Metrics.o4Score,
-      o5Score: o5Metrics.o5Score,
-      o6Score: o6Metrics.o6Score,
-      o7Score,
-    };
+      ...o2Metrics.scores,
+      o3Score: o3Metrics.o3Score,
+      o4Score: o4Metrics.o4Score,
+      o5Score: o5Metrics.o5Score,
+      o6Score: o6Metrics.o6Score,
+      o7Score,
+    };
 
-    // --- 3. PREPARE FINAL DATA TO SAVE ---
-    const finalDataToSave = {
-      userId,
-      onboardingVersion: "7", // Or dynamically set version?
-      o2Data: o2Metrics.o2Data,
-      derivedMetrics: o2Metrics.derivedMetrics,
-      o3Data: o3Metrics.o3Data,
-      o4Data: o4Metrics.o4Data,
-      o5Data: o5Metrics.o5Data,
-      o6Data: o6Metrics.o6Data,
-      o7Data: processedO7Data,
-      timestamp: new Date(), // Use a consistent timestamp for this submission
-    };
-    // Calculate final Cuore Score based on the data *being saved now*
-    allScores.cuoreScore = calculateCuoreScore(finalDataToSave, allScores);
-    finalDataToSave.scores = allScores; // Add the final scores object
+    // --- 3. FINAL DATA TO SAVE ---
+    const finalDataToSave = {
+      userId,
+      onboardingVersion: "7",
+      o2Data: o2Metrics.o2Data,
+      derivedMetrics: o2Metrics.derivedMetrics,
+      o3Data: o3Metrics.o3Data,
+      o4Data: o4Metrics.o4Data,
+      o5Data: o5Metrics.o5Data,
+      o6Data: o6Metrics.o6Data,
+      timestamp: new Date(),
+    };
 
-    // --- 4. PREPARE HISTORY SNAPSHOTS ---
-    // These snapshots capture the data *as it is being saved* in this submission.
+    // ⚙️ SAVE ONLY MANUAL O7 FIELDS (don’t persist auto-filled)
+    const { manual_fields } = processedO7Data;
+    finalDataToSave.o7Data = Object.fromEntries(
+      Object.entries(processedO7Data).filter(([key]) =>
+        manual_fields.includes(key) || ['manual_fields', 'auto_filled'].includes(key)
+      )
+    );
+
+    // --- CUORE SCORE CALCULATION ---
+    allScores.cuoreScore = calculateCuoreScore(finalDataToSave, allScores);
+    finalDataToSave.scores = allScores;
+
+    // --- 4. HISTORY SNAPSHOTS ---
     const submissionTimestamp = finalDataToSave.timestamp;
 
     const o2Snapshot = {
-        data: {
-            weight_kg: finalDataToSave.o2Data.weight_kg,
-            bmi: finalDataToSave.derivedMetrics.bmi // Use calculated BMI
-        },
-        timestamp: submissionTimestamp
+      data: {
+        weight_kg: finalDataToSave.o2Data.weight_kg,
+        bmi: finalDataToSave.derivedMetrics.bmi
+      },
+      timestamp: submissionTimestamp
     };
 
     const o5Snapshot = {
-        data: {
-            o5Score: finalDataToSave.scores.o5Score // Use calculated O5 Score
-        },
-        timestamp: submissionTimestamp
+      data: { o5Score: finalDataToSave.scores.o5Score },
+      timestamp: submissionTimestamp
     };
 
     const o6Snapshot = {
-        data: {
-            o6Score: finalDataToSave.scores.o6Score // Use calculated O6 Score
-        },
-        timestamp: submissionTimestamp
+      data: { o6Score: finalDataToSave.scores.o6Score },
+      timestamp: submissionTimestamp
     };
 
     const o7Snapshot = {
-        data: { ...finalDataToSave.o7Data }, // Snapshot of the O7 data saved
-        timestamp: submissionTimestamp
+      data: { ...finalDataToSave.o7Data },
+      timestamp: submissionTimestamp
     };
 
     const scoreSnapshot = {
-        data: {
-            cuoreScore: finalDataToSave.scores.cuoreScore // Use calculated Cuore Score
-        },
-        timestamp: submissionTimestamp
+      data: { cuoreScore: finalDataToSave.scores.cuoreScore },
+      timestamp: submissionTimestamp
     };
 
-    // --- 5. BUILD THE UPDATE OPERATION ---
-    // Start with $set to update the main fields
-    const updateOperation = { $set: finalDataToSave };
-    
-    // Conditionally add $push operations for history arrays
-    // Only push if the corresponding data was part of *this* submission payload.
+    // --- 5. BUILD UPDATE OPERATION ---
+    const updateOperation = { $set: finalDataToSave };
     const pushOperations = {};
-    if (payload.o2Data && Object.keys(payload.o2Data).length > 0) {
+
+    if (payload.o2Data && Object.keys(payload.o2Data).length > 0)
       pushOperations.o2History = o2Snapshot;
-    }
-    if (payload.o5Data && Object.keys(payload.o5Data).length > 0) {
-        pushOperations.o5History = o5Snapshot;
-    }
-    if (payload.o6Data && Object.keys(payload.o6Data).length > 0) {
-        pushOperations.o6History = o6Snapshot;
-    }
-    if (payload.o7Data && Object.keys(payload.o7Data).length > 0) {
-      pushOperations.o7History = o7Snapshot;
-    }
-    // Always push the score snapshot (as it's recalculated on every submission)
+    if (payload.o5Data && Object.keys(payload.o5Data).length > 0)
+      pushOperations.o5History = o5Snapshot;
+    if (payload.o6Data && Object.keys(payload.o6Data).length > 0)
+      pushOperations.o6History = o6Snapshot;
+    if (payload.o7Data && Object.keys(payload.o7Data).length > 0)
+      pushOperations.o7History = o7Snapshot;
+
     pushOperations.scoreHistory = scoreSnapshot;
+    if (Object.keys(pushOperations).length > 0)
+      updateOperation.$push = pushOperations;
 
-    // Add the $push operations to the main update object if any exist
-    if (Object.keys(pushOperations).length > 0) {
-        updateOperation.$push = pushOperations;
-    }
+    // --- 6. EXECUTE UPDATE ---
+    const finalOnboardingDoc = await OnboardingModel.findOneAndUpdate(
+      { userId },
+      updateOperation,
+      { new: true, upsert: true, runValidators: true }
+    );
 
-    // --- 6. EXECUTE THE UPDATE ---
-    const finalOnboardingDoc = await OnboardingModel.findOneAndUpdate(
-      { userId },
-      updateOperation,
-      { new: true, upsert: true, runValidators: true } // Options
-    );
+    if (!finalOnboardingDoc)
+      throw new ValidationError("Failed to save onboarding data.");
 
-    // --- 7. CHECK AND RETURN ---
-    if (!finalOnboardingDoc) {
-      throw new ValidationError("Failed to save onboarding data.");
-    }
-    return finalOnboardingDoc; // Return the final, saved document
-
-  } catch (error) {
-    // Handle errors (your existing error handling)
-    console.error("Error in processAndSaveFinalSubmission:", error.name, error.message);
-    if (error.name === "ValidationError") throw error; // Re-throw validation errors
-    throw new Error("Internal Server Error"); // Throw generic error for others
-  }
+    return finalOnboardingDoc;
+  } catch (error) {
+    console.error("Error in processAndSaveFinalSubmission:", error.name, error.message);
+    if (error.name === "ValidationError") throw error;
+    throw new Error("Internal Server Error");
+  }
 };
+
 
 // ... (Your other model functions: calculateAllMetrics, getOnboardingDataByUserId, helpers, etc.) ...
 // ... (Make sure OnboardingModel is defined/imported)
