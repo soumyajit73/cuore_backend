@@ -973,6 +973,31 @@ const calculateBodyFat = (userData) => {
     status: difference < 5 ? "green" : difference < 15 ? "orange" : "red",
   };
 };
+function calculateTrigHDLRatio(userData) {
+  const o7 = userData.o7Data || {};
+  const trig = parseFloat(o7.Trig ?? o7.trig ?? null);
+  const hdl = parseFloat(o7.HDL ?? o7.hdl ?? null);
+
+  if (!trig || !hdl || hdl === 0) {
+    return {
+      current: null,
+      target: 3,
+      status: 'unknown'
+    };
+  }
+
+  const ratio = parseFloat((trig / hdl).toFixed(2));
+  let status = 'green';
+  if (ratio > 3 && ratio <= 4) status = 'orange';
+  else if (ratio > 4) status = 'red';
+
+  return {
+    current: ratio,
+    target: 3,
+    status
+  };
+}
+
 
 const calculateMainFocus = (userData) => {
   const scores = [
