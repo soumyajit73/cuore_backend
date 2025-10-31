@@ -938,43 +938,52 @@ exports.getEntries = async (req, res) => {
 };
 
 exports.updateEntry = async (req, res) => {
-    const userId = req.user.userId;
-    const { model, docId } = getModelAndId(req);
-    
-    const { title, startDate, endDate, time, repeatFrequency, name, dosage } = req.body;
-    
+  const userId = req.user.userId;
+  const { model, docId } = getModelAndId(req);
+  const { title, startDate, endDate, time, repeatFrequency, name, dosage } = req.body;
+
+  try {
+    // 1️⃣ Fetch the existing entry (before update)
+    const existingEntry = await model.findOne({ _id: docId, userId }).lean();
+    if (!existingEntry) {
+      return res.status(404).json({ error: `${model.modelName} not found or access denied.` });
+    }
+
+    // 2️⃣ Prepare update object (only provided fields)
     const updateData = {};
-    if (title) updateData.title = title;
-    if (startDate) updateData.startDate = parseDate(startDate);
+    if (title !== undefined) updateData.title = title;
+    if (startDate !== undefined) updateData.startDate = parseDate(startDate);
     if (endDate !== undefined) updateData.endDate = parseDate(endDate);
-    if (time) updateData.time = convertTo24Hour(time);
-    if (repeatFrequency) updateData.repeatFrequency = repeatFrequency;
-    
+    if (time !== undefined) updateData.time = convertTo24Hour(time);
+    if (repeatFrequency !== undefined) updateData.repeatFrequency = repeatFrequency;
+
     if (model === Medication) {
-        if (name) updateData.name = name;
-        if (dosage) updateData.dosage = dosage;
+      if (name !== undefined) updateData.name = name;
+      if (dosage !== undefined) updateData.dosage = dosage;
     }
 
-    try {
-        const updatedEntry = await model.findOneAndUpdate(
-            { _id: docId, userId: userId }, 
-            { $set: updateData },
-            { new: true, runValidators: true }
-        );
+    // 3️⃣ Perform the update (partial update)
+    const updatedEntry = await model.findOneAndUpdate(
+      { _id: docId, userId },
+      { $set: updateData },
+      { new: true, runValidators: true }
+    );
 
-        if (!updatedEntry) {
-            return res.status(404).json({ error: `${model.modelName} not found or access denied.` });
-        }
-        
-        await generateTimelineCardsForDay(userId, dayjs().toDate());
+    // 4️⃣ Regenerate timeline safely
+    await generateTimelineCardsForDay(userId, dayjs().toDate());
 
-        return res.status(200).json({ message: `${model.modelName} updated successfully.`, data: updatedEntry });
-
-    } catch (error) {
-        console.error(`Error updating ${model.modelName}:`, error);
-        return res.status(500).json({ error: "Internal server error during update." });
-    }
+    // 5️⃣ Return updated entry + previous entry (so frontend can pre-fill)
+    return res.status(200).json({
+      message: `${model.modelName} updated successfully.`,
+      previousData: existingEntry,
+      updatedData: updatedEntry,
+    });
+  } catch (error) {
+    console.error(`❌ Error updating ${model.modelName}:`, error);
+    return res.status(500).json({ error: "Internal server error during update." });
+  }
 };
+
 
 exports.getCuoreScore = async (req, res) => {
     try {
