@@ -519,45 +519,48 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     }
 
     // --- 1️⃣ MERGE PAYLOAD WITH EXISTING DATA SAFELY ---
-    const existingData = existingDoc ? existingDoc.toObject() : {};
+// --- 1️⃣ MERGE PAYLOAD WITH EXISTING DATA SAFELY ---
+const existingData = existingDoc ? existingDoc.toObject() : {};
 
-    // --- Smart merge for O3 data (bug fix) ---
-    const existingO3 = existingData.o3Data || {};
-    const incomingO3 = payload.o3Data || {};
-    const mergedO3 = { ...existingO3 };
+// Smart merge for O3 data (bug fix)
+const existingO3 = existingData.o3Data || {};
+const incomingO3 = payload.o3Data || {};
+const mergedO3 = { ...existingO3 };
 
-    // Only update fields that are explicitly sent
-    ['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'other_conditions', 'hasHypertension', 'hasDiabetes'].forEach(field => {
-      if (incomingO3[field] !== undefined && incomingO3[field] !== null) {
-        mergedO3[field] = incomingO3[field];
-      }
-    });
+['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'other_conditions', 'hasHypertension', 'hasDiabetes'].forEach(field => {
+  if (incomingO3[field] !== undefined && incomingO3[field] !== null) {
+    mergedO3[field] = incomingO3[field];
+  }
+});
 
-    // If selectedOptions array is present, update it too
-    if (Array.isArray(incomingO3.selectedOptions)) {
-      mergedO3.selectedOptions = incomingO3.selectedOptions;
+if (Array.isArray(incomingO3.selectedOptions)) {
+  mergedO3.selectedOptions = incomingO3.selectedOptions;
+}
+
+// Build mergedData safely
+const mergedData = {
+  ...existingData,        // start from existing
+  ...payload,             // merge new payload
+  o2Data: { ...(existingData.o2Data || {}), ...(payload.o2Data || {}) },
+  o4Data: { ...(existingData.o4Data || {}), ...(payload.o4Data || {}) },
+  o5Data: { ...(existingData.o5Data || {}), ...(payload.o5Data || {}) },
+  o6Data: { ...(existingData.o6Data || {}), ...(payload.o6Data || {}) },
+  o7Data: Object.entries({
+    ...(existingData.o7Data || {}),
+    ...(payload.o7Data || {})
+  }).reduce((acc, [key, value]) => {
+    if (payload.o7Data && Object.prototype.hasOwnProperty.call(payload.o7Data, key)) {
+      acc[key] = value === null || value === undefined ? null : value;
+    } else {
+      acc[key] = value;
     }
+    return acc;
+  }, {}),
+};
 
-    const mergedData = {
-      ...existingData,
-      ...payload,
-      o2Data: { ...(existingData.o2Data || {}), ...(payload.o2Data || {}) },
-      o3Data: mergedO3,
-      o4Data: { ...(existingData.o4Data || {}), ...(payload.o4Data || {}) },
-      o5Data: { ...(existingData.o5Data || {}), ...(payload.o5Data || {}) },
-      o6Data: { ...(existingData.o6Data || {}), ...(payload.o6Data || {}) },
-      o7Data: Object.entries({
-        ...(existingData.o7Data || {}),
-        ...(payload.o7Data || {})
-      }).reduce((acc, [key, value]) => {
-        if (payload.o7Data && Object.prototype.hasOwnProperty.call(payload.o7Data, key)) {
-          acc[key] = value === null || value === undefined ? null : value;
-        } else {
-          acc[key] = value;
-        }
-        return acc;
-      }, {}),
-    };
+// finally force merged O3 data so it overrides payload blank one
+mergedData.o3Data = mergedO3;
+
 
     // --- 2️⃣ CALCULATE METRICS & SCORES ---
     const o2Metrics = validateAndCalculateScores(mergedData.o2Data);
