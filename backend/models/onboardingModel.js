@@ -773,7 +773,7 @@ const calculateTimeToTarget = (userData, totalScore = 0) => {
   const bsDiff = Math.abs(bs_am - 160) / 10;
 
   // --- 4. Pick highest + 1 month buffer ---
-  const months = Math.max(weightDiff, bpDiff, bsDiff) + 1;
+  let months = Math.max(weightDiff, bpDiff, bsDiff) + 1;
 
   // if(months>=18) return 18;
    months = Math.min(Math.round(months), 18);
