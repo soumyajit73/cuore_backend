@@ -725,24 +725,37 @@ exports.getOnboardingDataByUserId = async (userId) => {
     }
 };
 
-const calculateTimeToTarget = (userData) => {
-  const { o2Data, o7Data, o3Data } = userData;
+// Calculates "Time to Reach Target" in months
+const calculateTimeToTarget = (userData, totalScore = 0) => {
+  const { o2Data = {}, o7Data = {} } = userData;
   const { height_cm, weight_kg, gender } = o2Data;
-  const { bp_upper, bs_am } = o7Data;
 
-  // Calculate target weight based on gender
+  // --- 1. Compute Target Weight ---
   const heightInInches = (height_cm - 152.4) / 2.4;
   const targetWeight =
-    gender === "male" ? 52 + 1.9 * heightInInches : 50 + 1.7 * heightInInches;
+    gender === "male"
+      ? 52 + 1.9 * heightInInches
+      : 50 + 1.7 * heightInInches;
 
-  // Calculate differences
-  const weightDiff = Math.abs(weight_kg - targetWeight) / 1.2;
+  // --- 2. Get missing BP/BS values from autofill logic ---
+  // (Uses same logic you provided earlier)
+  const autoData = getAutofillData(totalScore);
+  const bp_upper = o7Data.bp_upper ?? autoData.bp_upper;
+  const bs_am = o7Data.bs_am ?? autoData.bs_am;
+
+  // --- 3. Calculate differences ---
+  const weightDiff =
+    Math.abs(weight_kg - targetWeight) / 1.2;
   const bpDiff = Math.abs(bp_upper - 120) / 2;
   const bsDiff = Math.abs(bs_am - 160) / 10;
 
-  // Return highest value + 1
-  return Math.max(weightDiff, bpDiff, bsDiff) + 1;
+  // --- 4. Pick highest + 1 month buffer ---
+  const months = Math.max(weightDiff, bpDiff, bsDiff) + 1;
+
+  // Optional rounding
+  return Math.round(months);
 };
+
 
 const calculateMetabolicAge = (userData) => {
   const { o2Data, scores } = userData;
