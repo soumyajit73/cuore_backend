@@ -793,7 +793,7 @@ const getTimelineData = async (userId, dateString) => {
         description: card.description,
         completed: card.isCompleted,
         reminder: true,
-        editable: false,
+        editable: card.type !== 'USER_MEDICATION',
         type: card.type,
         id: card._id.toString(),
         sourceId: card.sourceId?.toString()
