@@ -1188,6 +1188,7 @@ exports.getCuoreScoreDetails = async (req, res) => {
     const tg_hdl_ratio = safeNum(o7.trig_hdl_ratio ?? metrics?.trigHDLRatio?.current);
     const body_fat = safeNum(o7.body_fat ?? metrics?.bodyFat?.current);
 
+    // 🧠 BP Status logic
     const upperStatus =
       bp_upper == null
         ? "unknown"
@@ -1209,6 +1210,15 @@ exports.getCuoreScoreDetails = async (req, res) => {
         : bp_lower <= 95
         ? "orange"
         : "red";
+
+    // 🧠 FIXED: Correct Trig/HDL logic (Target <2.6; <2.8 green; 2.8–4.0 orange; >4.0 red)
+    let tgStatus = "unknown";
+    const tgTarget = 2.6;
+    if (tg_hdl_ratio != null && !isNaN(tg_hdl_ratio)) {
+      if (tg_hdl_ratio > 4.0) tgStatus = "red";
+      else if (tg_hdl_ratio >= 2.8) tgStatus = "orange";
+      else tgStatus = "green";
+    }
 
     const responseBody = {
       health_metrics: {
@@ -1256,7 +1266,9 @@ exports.getCuoreScoreDetails = async (req, res) => {
         vitals: {
           blood_pressure: {
             current:
-              bp_upper && bp_lower ? `${bp_upper}/${bp_lower}` : null,
+              bp_upper != null && bp_lower != null
+                ? `${bp_upper}/${bp_lower}`
+                : null,
             target: "120/80",
             status: {
               upper: upperStatus,
@@ -1285,13 +1297,8 @@ exports.getCuoreScoreDetails = async (req, res) => {
           cholesterol: {
             tg_hdl_ratio: {
               value: tg_hdl_ratio,
-              target: 3,
-              status:
-                tg_hdl_ratio == null
-                  ? "unknown"
-                  : tg_hdl_ratio <= 3
-                  ? "green"
-                  : "red",
+              target: tgTarget,
+              status: tgStatus,
             },
           },
           body_fat: {
