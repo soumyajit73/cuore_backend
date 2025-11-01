@@ -208,7 +208,7 @@ const getPredictionData = async (req, res) => {
         formatGraphData('Weight', [{ label: 'Weight (kg)', ...splitData(weightSeries, weightHist), color: '#34495e', limit: METRIC_LIMITS.weight }]),
         formatGraphData('BMI & Body Fat', [
             { label: 'BMI', ...splitData(bmiSeries, bmiHist), color: '#2ecc71', limit: METRIC_LIMITS.bmi },
-            { label: 'Body Fat (%)', ...splitData(bodyFatSeries, bodyFatHist), color: '#dc1717ff', limit: METRIC_LIMITS.bodyFat }
+            { label: 'Body Fat (%)', ...splitData(bodyFatSeries, bodyFatHist), color: '#ff0000', limit: METRIC_LIMITS.bodyFat }
         ]),
         formatGraphData('Cholesterol', [
             { label: 'HDL', ...splitData(hdlSeries, hdlHist), color: '#3498db', limit: METRIC_LIMITS.hdl },
