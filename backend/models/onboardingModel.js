@@ -518,18 +518,37 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       );
     }
 
-    // --- 1️⃣ MERGE PAYLOAD WITH EXISTING DATA ---
+    // --- 1️⃣ MERGE PAYLOAD WITH EXISTING DATA SAFELY ---
+    const existingData = existingDoc ? existingDoc.toObject() : {};
+
+    // --- Smart merge for O3 data (bug fix) ---
+    const existingO3 = existingData.o3Data || {};
+    const incomingO3 = payload.o3Data || {};
+    const mergedO3 = { ...existingO3 };
+
+    // Only update fields that are explicitly sent
+    ['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'other_conditions', 'hasHypertension', 'hasDiabetes'].forEach(field => {
+      if (incomingO3[field] !== undefined && incomingO3[field] !== null) {
+        mergedO3[field] = incomingO3[field];
+      }
+    });
+
+    // If selectedOptions array is present, update it too
+    if (Array.isArray(incomingO3.selectedOptions)) {
+      mergedO3.selectedOptions = incomingO3.selectedOptions;
+    }
+
     const mergedData = {
-      ...(existingDoc ? existingDoc.toObject() : {}),
+      ...existingData,
       ...payload,
-      o2Data: { ...(existingDoc ? existingDoc.o2Data : {}), ...payload.o2Data },
-      o3Data: { ...(existingDoc ? existingDoc.o3Data : {}), ...payload.o3Data },
-      o4Data: { ...(existingDoc ? existingDoc.o4Data : {}), ...payload.o4Data },
-      o5Data: { ...(existingDoc ? existingDoc.o5Data : {}), ...payload.o5Data },
-      o6Data: { ...(existingDoc ? existingDoc.o6Data : {}), ...payload.o6Data },
+      o2Data: { ...(existingData.o2Data || {}), ...(payload.o2Data || {}) },
+      o3Data: mergedO3,
+      o4Data: { ...(existingData.o4Data || {}), ...(payload.o4Data || {}) },
+      o5Data: { ...(existingData.o5Data || {}), ...(payload.o5Data || {}) },
+      o6Data: { ...(existingData.o6Data || {}), ...(payload.o6Data || {}) },
       o7Data: Object.entries({
-        ...(existingDoc ? existingDoc.o7Data : {}),
-        ...payload.o7Data
+        ...(existingData.o7Data || {}),
+        ...(payload.o7Data || {})
       }).reduce((acc, [key, value]) => {
         if (payload.o7Data && Object.prototype.hasOwnProperty.call(payload.o7Data, key)) {
           acc[key] = value === null || value === undefined ? null : value;
@@ -546,11 +565,11 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     const o4Metrics = processO4Data(mergedData.o4Data);
     const o5Metrics = processO5Data(mergedData.o5Data);
     const o6Metrics = processO6Data(mergedData.o6Data);
-    let processedO7Data;
 
+    let processedO7Data;
     const o7Payload = mergedData.o7Data || {};
-    const manuallyEnteredFields = Object.keys(o7Payload).filter(key =>
-      o7Payload[key] !== null && o7Payload[key] !== undefined && key !== 'auto_filled'
+    const manuallyEnteredFields = Object.keys(o7Payload).filter(
+      key => o7Payload[key] !== null && o7Payload[key] !== undefined && key !== 'auto_filled'
     );
 
     if (manuallyEnteredFields.length > 0) {
@@ -568,10 +587,7 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
         );
       }
       if (processedO7Data.Trig && processedO7Data.HDL && !processedO7Data.trig_hdl_ratio) {
-        processedO7Data.trig_hdl_ratio = roundTo(
-          processedO7Data.Trig / processedO7Data.HDL,
-          2
-        );
+        processedO7Data.trig_hdl_ratio = roundTo(processedO7Data.Trig / processedO7Data.HDL, 2);
       }
     } else {
       const tempScores = {
@@ -581,9 +597,11 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
         o5Score: o5Metrics.o5Score,
         o6Score: o6Metrics.o6Score,
       };
+
       const totalScoreBeforeO7 = Object.values(tempScores)
         .filter(s => typeof s === "number")
         .reduce((a, b) => a + b, 0);
+
       processedO7Data = {
         ...getAutofillData(totalScoreBeforeO7),
         manual_fields: [],
@@ -596,7 +614,9 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       score_o2_sat(processedO7Data.o2_sat) +
       score_hr(processedO7Data.pulse) +
       (score_bp_upper(processedO7Data.bp_upper) + score_bp_lower(processedO7Data.bp_lower)) / 2 +
-      (score_bs_f(processedO7Data.bs_f) + score_bs_am(processedO7Data.bs_am) + score_a1c(processedO7Data.A1C)) / 3 +
+      (score_bs_f(processedO7Data.bs_f) +
+        score_bs_am(processedO7Data.bs_am) +
+        score_a1c(processedO7Data.A1C)) / 3 +
       score_hdl(processedO7Data.HDL) +
       score_ldl(processedO7Data.LDL) +
       score_trig(processedO7Data.Trig) +
