@@ -624,9 +624,9 @@ const getTimelineData = async (userId, dateString) => {
   const utcStart = localDay.utc().toDate();
   const utcEnd = localDay.endOf('day').utc().toDate();
 
-  // Fetch onboarding data
+  // 🧠 Fetch onboarding data
   const onboarding = await Onboarding.findOne({ userId })
-    .select('o5Data.preferred_ex_time o6Data.sleep_hours o6Data.wake_time')
+    .select('o2Data.smoker_status o5Data.preferred_ex_time o6Data.wake_time')
     .lean();
 
   const preferredWake = convertTo24Hour(onboarding?.o6Data?.wake_time) || '07:00';
@@ -640,26 +640,135 @@ const getTimelineData = async (userId, dateString) => {
     const fitnessTimeStr = convertTo24Hour(onboarding.o5Data.preferred_ex_time);
     fitnessTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${fitnessTimeStr}`, 'YYYY-MM-DD HH:mm', TZ);
   } else {
-    fitnessTime = calculateScheduledTime(wakeUpAnchor, 360);
+    fitnessTime = calculateScheduledTime(wakeUpAnchor, 360); // fallback 6 hrs after wake
   }
 
-  // System Cards
+  // 🧩 Check if user is a smoker (for "Your Daily Health Win")
+  const isSmoker =
+    onboarding?.o2Data?.smoker_status &&
+    onboarding.o2Data.smoker_status.toLowerCase() === 'yes';
+
+  // ⚙️ Build System Timeline based on rules
   const systemCards = [
-    { time: wakeUpAnchor, icon: '🌞', title: 'Wake Up', description: 'Start your day with Morning Harmony', type: 'SYSTEM_WAKEUP' },
-    { time: calculateScheduledTime(wakeUpAnchor, 105), icon: '🍳', title: 'Breakfast', description: 'Healthy smoothie with oats and banana', type: 'SYSTEM_NUTRITION' },
-    { time: fitnessTime, icon: '🏃', title: 'Fitness', description: 'Cardio & strength training', type: 'SYSTEM_FITNESS' },
-    { time: calculateScheduledTime(wakeUpAnchor, 480), icon: '🍽️', title: 'Lunch', description: 'Re-energize yourself', type: 'SYSTEM_NUTRITION' },
-    { time: calculateScheduledTime(wakeUpAnchor, 720), icon: '😴', title: 'Short Nap or Walk', description: 'Defeat the midday slump', type: 'SYSTEM_REST' },
-    { time: calculateScheduledTime(wakeUpAnchor, 960), icon: '🌙', title: 'Dinner', description: 'Balanced and light', type: 'SYSTEM_NUTRITION' },
-    { time: calculateScheduledTime(wakeUpAnchor, 1200), icon: '🛌', title: 'Sleep', description: 'Restore & repair', type: 'SYSTEM_REST' },
+    {
+      time: wakeUpAnchor,
+      icon: '🌞',
+      title: 'Wake Up',
+      description: 'Start your day with Morning Harmony',
+      type: 'SYSTEM_WAKEUP',
+      link: 'Cuore Mind'
+    },
+    ...(isSmoker
+      ? [
+          {
+            time: calculateScheduledTime(wakeUpAnchor, 10),
+            icon: '🚭',
+            title: 'Your Daily Health Win',
+            description: 'Track your tobacco-free journey',
+            type: 'SYSTEM_TOBACCO',
+            link: 'Tobacco Cessation'
+          }
+        ]
+      : []),
+    {
+      time: calculateScheduledTime(wakeUpAnchor, 15),
+      icon: '🔥',
+      title: 'Calorie Ignite',
+      description: 'Kickstart your metabolism',
+      type: 'SYSTEM_CALORIE',
+      link: 'Calorie Ignite'
+    },
+    {
+      time: fitnessTime,
+      icon: '🏃',
+      title: 'Fitness',
+      description: 'Cardio & strength training',
+      type: 'SYSTEM_FITNESS',
+      link: 'Cuore Fitness'
+    },
+    {
+      time: calculateScheduledTime(wakeUpAnchor, 105), // +1h45m
+      icon: '🍳',
+      title: 'Breakfast',
+      description: 'Healthy smoothie with oats and banana',
+      type: 'SYSTEM_BREAKFAST',
+      link: 'Cuore Nutrition BF'
+    },
+    {
+      time: calculateScheduledTime(wakeUpAnchor, 255), // +4h15m (2h30 after BF)
+      icon: '☕',
+      title: 'Mid-Morning Boost',
+      description: 'Energize your morning',
+      type: 'SYSTEM_MIDMORNING',
+      link: 'Mid-Morning Boost'
+    },
+    {
+      time: calculateScheduledTime(wakeUpAnchor, 375), // Lunch - 1hr → 6h15 - 1h = 5h15 (315min), adjusted to show earlier
+      icon: '💧',
+      title: 'Water Alert #1',
+      description: 'You should have had 3-4 glasses of water by now.',
+      type: 'SYSTEM_WATER1'
+    },
+    {
+      time: calculateScheduledTime(wakeUpAnchor, 390), // +6h30
+      icon: '🍽️',
+      title: 'Lunch',
+      description: 'Re-energize yourself',
+      type: 'SYSTEM_LUNCH',
+      link: 'Cuore Nutrition L&D'
+    },
+    {
+      time: calculateScheduledTime(wakeUpAnchor, 450), // +7h30
+      icon: '😴',
+      title: 'Short Nap or Walk',
+      description: 'Defeat the midday slump',
+      type: 'SYSTEM_REST'
+    },
+    {
+      time: calculateScheduledTime(wakeUpAnchor, 570), // +9h30
+      icon: '🥗',
+      title: 'Refresh & Refuel (Snacks)',
+      description: 'Healthy evening refuel',
+      type: 'SYSTEM_SNACK',
+      link: 'Refresh & Refuel'
+    },
+    {
+      time: calculateScheduledTime(wakeUpAnchor, 690), // +11h30 (Dinner - 1h)
+      icon: '💧',
+      title: 'Water Alert #2',
+      description: 'You should have had 7-8 glasses of water by now.',
+      type: 'SYSTEM_WATER2'
+    },
+    {
+      time: calculateScheduledTime(wakeUpAnchor, 780), // +13h (Dinner)
+      icon: '🌙',
+      title: 'Dinner',
+      description: 'Balanced and light',
+      type: 'SYSTEM_DINNER',
+      link: 'Cuore Nutrition L&D'
+    },
+    {
+      time: calculateScheduledTime(wakeUpAnchor, 840), // +14h (After Dinner)
+      icon: '🚶',
+      title: 'After-Dinner Walk',
+      description: 'Light 10-minute walk to aid digestion',
+      type: 'SYSTEM_WALK'
+    },
+    {
+      time: calculateScheduledTime(wakeUpAnchor, 1020), // +17h
+      icon: '🛌',
+      title: 'Sleep',
+      description: 'Restore & repair',
+      type: 'SYSTEM_SLEEP'
+    }
   ].map(card => ({
     ...card,
     completed: dayjs().tz(TZ).isAfter(card.time),
     reminder: true,
-    editable: card.type === 'SYSTEM_WAKEUP'
+    editable: card.type === 'SYSTEM_WAKEUP' || card.type === 'SYSTEM_FITNESS'
   }));
 
-  // Fetch user cards
+  // 💊 Fetch user cards (medicine, reminders)
   const rawCards = await TimelineCard.find({
     userId,
     scheduleDate: { $gte: utcStart, $lte: utcEnd }
@@ -668,16 +777,16 @@ const getTimelineData = async (userId, dateString) => {
   const userCards = rawCards
     .map(card => {
       if (!card.scheduledTime) return null;
-
-      let parsedTime;
-      if (card.scheduledTime.includes('AM') || card.scheduledTime.includes('PM')) {
-        parsedTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD hh:mm A', TZ);
-      } else {
-        parsedTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`, 'YYYY-MM-DD HH:mm', TZ);
-      }
+      const parsedTime = dayjs.tz(
+        `${localDay.format('YYYY-MM-DD')} ${card.scheduledTime}`,
+        card.scheduledTime.includes('AM') || card.scheduledTime.includes('PM')
+          ? 'YYYY-MM-DD hh:mm A'
+          : 'YYYY-MM-DD HH:mm',
+        TZ
+      );
       if (!parsedTime.isValid()) return null;
 
-      const cardObject = {
+      return {
         time: parsedTime,
         icon: card.type === 'USER_MEDICATION' ? '💊' : '🔔',
         title: card.title,
@@ -685,36 +794,42 @@ const getTimelineData = async (userId, dateString) => {
         completed: card.isCompleted,
         reminder: true,
         editable: card.type !== 'USER_MEDICATION',
-        type: card.type
+        type: card.type,
+        id: card._id.toString(),
+        sourceId: card.sourceId?.toString()
       };
-
-      if (card.type === 'USER_REMINDER' || card.type === 'USER_MEDICATION') {
-        cardObject.id = card._id.toString();
-        cardObject.sourceId = card.sourceId?.toString();
-      }
-
-      return cardObject;
     })
     .filter(Boolean);
 
-  // Combine system + user cards
+  // 🧭 Merge & Sort all cards
   const allCards = [...systemCards, ...userCards]
     .sort((a, b) => a.time.valueOf() - b.time.valueOf())
-    .map(card => ({ ...card, time: dayjs(card.time).tz(TZ).format('h:mm A') }));
+    .map(card => ({
+      ...card,
+      time: dayjs(card.time).tz(TZ).format('h:mm A')
+    }));
 
-  // Missed tasks check
+  // ⚠️ Missed task check
   const missedTasks = allCards.filter(task =>
-    !task.completed && dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${task.time}`, 'YYYY-MM-DD h:mm A', TZ).isBefore(dayjs().tz(TZ))
+    !task.completed &&
+    dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${task.time}`, 'YYYY-MM-DD h:mm A', TZ)
+      .isBefore(dayjs().tz(TZ))
   ).length;
 
-  const alerts = missedTasks > 0 ? [{
-    type: 'warning',
-    text: 'Reassess to keep your plan aligned',
-    action: 'Check Plan'
-  }] : [];
+  const alerts =
+    missedTasks > 0
+      ? [
+          {
+            type: 'warning',
+            text: 'Reassess to keep your plan aligned',
+            action: 'Check Plan'
+          }
+        ]
+      : [];
 
   return { dailySchedule: allCards, missed: missedTasks, alerts };
 };
+
 
 
 // -----------------------------------------------------
