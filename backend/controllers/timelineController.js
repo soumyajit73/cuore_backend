@@ -626,7 +626,7 @@ const getTimelineData = async (userId, dateString) => {
 
   // 🧠 Fetch onboarding data
   const onboarding = await Onboarding.findOne({ userId })
-    .select('o2Data.smoker_status o5Data.preferred_ex_time o6Data.wake_time')
+    .select('o4Data.smoking o5Data.preferred_ex_time o6Data.wake_time')
     .lean();
 
   const preferredWake = convertTo24Hour(onboarding?.o6Data?.wake_time) || '07:00';
@@ -645,8 +645,8 @@ const getTimelineData = async (userId, dateString) => {
 
   // 🧩 Check if user is a smoker (for "Your Daily Health Win")
   const isSmoker =
-    onboarding?.o2Data?.smoker_status &&
-    onboarding.o2Data.smoker_status.toLowerCase() === 'yes';
+    onboarding?.o4Data?.smoking &&
+    onboarding.o4Data.smoking.toLowerCase() === 'yes';
 
   // ⚙️ Build System Timeline based on rules
   const systemCards = [
