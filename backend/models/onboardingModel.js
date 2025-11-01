@@ -959,28 +959,38 @@ const calculateBodyFat = (userData) => {
   };
 };
 function calculateTrigHDLRatio(userData) {
-  const o7 = userData.o7Data || {};
-  const trig = parseFloat(o7.Trig ?? o7.trig ?? null);
-  const hdl = parseFloat(o7.HDL ?? o7.hdl ?? null);
+  const o7 = userData.o7Data || {};
+  // Use nullish coalescing to check for all 'Trig' and 'HDL' variations
+  const trig = parseFloat(o7.Trig ?? o7.trig ?? o7.triglyceride ?? null);
+  const hdl = parseFloat(o7.HDL ?? o7.hdl ?? null);
 
-  if (!trig || !hdl || hdl === 0) {
-    return {
-      current: null,
-      target: 3,
-      status: 'unknown'
-    };
+  // This check correctly handles the "left blank" test case.
+  // parseFloat(null) is NaN, which is falsy, so !trig will be true.
+  if (isNaN(trig) || isNaN(hdl) || hdl === 0) {
+    return {
+      current: null, // Correctly returns null when data is blank
+      target: 2.6,   // --- FIXED: Target changed from 3 to 2.6
+      status: 'unknown'
+    };
+  }
+
+  // --- FIXED: Changed from toFixed(2) to toFixed(1) ---
+  const ratio = parseFloat((trig / hdl).toFixed(1)); 
+
+  // --- FIXED: Updated status logic to match your calculateAllMetrics ---
+  let status = 'green';
+  if (ratio > 4.0) {
+      status = 'red';
+  } else if (ratio >= 2.8) { // Per your model file, < 2.8 is green
+      status = 'orange';
   }
+  // --- END FIX ---
 
-  const ratio = parseFloat((trig / hdl).toFixed(2));
-  let status = 'green';
-  if (ratio > 3 && ratio <= 4) status = 'orange';
-  else if (ratio > 4) status = 'red';
-
-  return {
-    current: ratio,
-    target: 3,
-    status
-  };
+  return {
+    current: ratio,
+    target: 2.6,   // --- FIXED: Target changed from 3 to 2.6
+    status
+  };
 }
 
 
