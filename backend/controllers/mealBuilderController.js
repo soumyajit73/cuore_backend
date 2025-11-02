@@ -57,18 +57,61 @@ function MROUND(number, multiple) {
 }
 
 function formatServingString(finalAdjustedQuantity, unit, itemName) {
-  const unspecifiedUnits = ['unit', 'units', 'piece', 'pieces', 'unit(s)', '', null, undefined];
-  const lowerUnit = (unit || '').toLowerCase().trim();
+  const qty = parseFloat(finalAdjustedQuantity);
+  const unitLower = (unit || '').toLowerCase().trim();
   const nameLower = (itemName || '').toLowerCase().trim();
 
-  // if unit is generic → say "5 Boiled Egg White(s)"
-  if (unspecifiedUnits.includes(lowerUnit) || nameLower.includes(lowerUnit)) {
-    const plural = finalAdjustedQuantity > 1 ? `${itemName}s` : itemName;
-    return `${finalAdjustedQuantity} ${plural}`;
+  // --- Convert decimals to nice fractions like ¼, ½, ¾
+  const formatFraction = (n) => {
+    const rounded = Math.round(n * 12) / 12;
+    if (Math.abs(rounded - 0.25) < 0.01) return '¼';
+    if (Math.abs(rounded - 0.33) < 0.02) return '⅓';
+    if (Math.abs(rounded - 0.5) < 0.01) return '½';
+    if (Math.abs(rounded - 0.66) < 0.02) return '⅔';
+    if (Math.abs(rounded - 0.75) < 0.01) return '¾';
+    return rounded % 1 === 0 ? `${rounded}` : rounded.toFixed(2);
+  };
+
+  // --- Identify unit type
+  const measureUnits = [
+    'cup', 'bowl', 'katori', 'spoon', 'glass', 'plate',
+    'tbsp', 'tsp', 'ladle', 'slice', 'ml', 'g', 'gram', 'grams'
+  ];
+  const genericUnits = ['unit', 'units', 'pcs', 'piece', 'pieces', '', null, undefined];
+
+  const isMeasureBased = measureUnits.some(u => unitLower.includes(u));
+  const isCountBased = genericUnits.includes(unitLower);
+
+  // --- Smart pluralization
+  const pluralize = (word) => {
+    if (!word) return word;
+    const noPluralWords = [
+      'milk', 'rice', 'dal', 'curd', 'water', 'juice', 'poha', 'upma', 'chutney', 'sambar'
+    ];
+    if (noPluralWords.some(w => word.includes(w))) return word;
+    if (word.endsWith('y')) return word.slice(0, -1) + 'ies';
+    if (word.endsWith('s')) return word;
+    return word + 's';
+  };
+
+  const qtyText = formatFraction(qty);
+
+  // --- Build final string
+  if (isMeasureBased) {
+    // e.g., ½ cup oats or 2 katoris dal
+    const pluralUnit = qty > 1 && !unitLower.endsWith('s') ? `${unitLower}s` : unitLower;
+    return `${qtyText} ${pluralUnit} ${itemName}`;
   }
 
-  // otherwise → "0.5 cup of Oats"
-  return `${finalAdjustedQuantity} ${unit} of ${itemName}`;
+  if (isCountBased) {
+    // e.g., 5 boiled eggs or 1 apple
+    const pluralName = qty > 1 ? pluralize(itemName) : itemName;
+    return `${qtyText} ${pluralName}`;
+  }
+
+  // fallback (mixed / unknown unit)
+  const pluralUnit = qty > 1 && !unitLower.endsWith('s') ? `${unitLower}s` : unitLower;
+  return `${qtyText} ${pluralUnit} ${itemName}`;
 }
 
 
