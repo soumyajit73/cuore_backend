@@ -1294,15 +1294,21 @@ exports.getCuoreScoreDetails = async (req, res) => {
   },
 
   // 👇 Conditionally include cholesterol (tgl/hdl)
-  ...(tg_hdl_ratio != null && !isNaN(tg_hdl_ratio)
+  ...(o7.Trig != null &&
+  o7.HDL != null &&
+  o7.Trig !== "" &&
+  o7.HDL !== ""
     ? {
-        "cholesterol": {
-          value: tg_hdl_ratio,
-          target: tgTarget,
-          status: tgStatus,
+        cholesterol: {
+          tg_hdl_ratio: {
+            value: tg_hdl_ratio,
+            target: tgTarget,
+            status: tgStatus,
+          },
         },
       }
     : {}),
+
 
   body_fat: {
     value: body_fat,
