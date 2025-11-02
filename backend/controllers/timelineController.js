@@ -1263,51 +1263,55 @@ exports.getCuoreScoreDetails = async (req, res) => {
             unit: "min",
           },
         },
-        vitals: {
-          blood_pressure: {
-            current:
-              bp_upper != null && bp_lower != null
-                ? `${bp_upper}/${bp_lower}`
-                : null,
-            target: "120/80",
-            status: {
-              upper: upperStatus,
-              lower: lowerStatus,
-            },
-          },
-          blood_sugar: {
-            fasting: {
-              value: bs_f,
-              target: 100,
-              status: bs_f == null ? "unknown" : bs_f <= 100 ? "green" : "red",
-            },
-            after_meal: {
-              value: bs_am,
-              target: 140,
-              status:
-                bs_am == null ? "unknown" : bs_am <= 140 ? "green" : "red",
-            },
-            A1C: {
-              value: A1C,
-              target: 5.6,
-              status:
-                A1C == null ? "unknown" : A1C <= 5.6 ? "green" : "red",
-            },
-          },
-          cholesterol: {
-            tg_hdl_ratio: {
-              value: tg_hdl_ratio,
-              target: tgTarget,
-              status: tgStatus,
-            },
-          },
-          body_fat: {
-            value: body_fat,
-            target: metrics?.bodyFat?.target ?? 23,
-            unit: "%",
-            status: metrics?.bodyFat?.status ?? "unknown",
-          },
+      vitals: {
+  blood_pressure: {
+    current:
+      bp_upper != null && bp_lower != null
+        ? `${bp_upper}/${bp_lower}`
+        : null,
+    target: "120/80",
+    status: {
+      upper: upperStatus,
+      lower: lowerStatus,
+    },
+  },
+  blood_sugar: {
+    fasting: {
+      value: bs_f,
+      target: 100,
+      status: bs_f == null ? "unknown" : bs_f <= 100 ? "green" : "red",
+    },
+    after_meal: {
+      value: bs_am,
+      target: 140,
+      status: bs_am == null ? "unknown" : bs_am <= 140 ? "green" : "red",
+    },
+    A1C: {
+      value: A1C,
+      target: 5.6,
+      status: A1C == null ? "unknown" : A1C <= 5.6 ? "green" : "red",
+    },
+  },
+
+  // 👇 Conditionally include cholesterol (tgl/hdl)
+  ...(tg_hdl_ratio != null && !isNaN(tg_hdl_ratio)
+    ? {
+        "cholesterol (tgl/hdl)": {
+          value: tg_hdl_ratio,
+          target: tgTarget,
+          status: tgStatus,
         },
+      }
+    : {}),
+
+  body_fat: {
+    value: body_fat,
+    target: metrics?.bodyFat?.target ?? 23,
+    unit: "%",
+    status: metrics?.bodyFat?.status ?? "unknown",
+  },
+},
+
         main_focus: metrics?.mainFocus ?? [],
       },
     };
