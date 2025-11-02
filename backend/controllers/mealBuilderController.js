@@ -1,6 +1,5 @@
 const client = require('../utils/sanityClient');
-const { calculateAllMetrics } = require('../models/onboardingModel.js');
-const Onboarding = require('../models/onboardingModel.js').Onboarding;
+const { calculateAllMetrics, Onboarding } = require('../models/onboardingModel.js');
 
 // --- Helper Functions ---
 function parseServingSize(servingSizeString) {
@@ -68,14 +67,13 @@ function formatServingString(finalAdjustedQuantity, unit, itemName) {
   return `${finalAdjustedQuantity} ${unit}`;
 }
 
-// Meal calorie split
+// --- Constants ---
 const MEAL_CALORIE_DISTRIBUTION = {
   Breakfast: 0.25,
   Lunch: 0.30,
   Dinner: 0.30
 };
 
-// Section order mapping from Excel
 const SECTION_ORDER = {
   Indian: {
     Breakfast: [
@@ -181,7 +179,7 @@ async function getBuilderItems(req, res) {
       }
     });
 
-    // Include any leftover unlisted sections at the end
+    // Include any leftover sections
     Object.keys(groupedItems).forEach(section => {
       if (!orderedGroupedItems[section]) {
         orderedGroupedItems[section] = groupedItems[section];
@@ -211,16 +209,16 @@ async function adjustMealPortions(req, res) {
       return res.status(400).json({ message: "Valid positive recommendedCalories required." });
     }
 
+    // 🧾 Preprocess items
     const processedCartItems = inputCartItems.map(item => {
-      const servings = (typeof item.numOfServings === 'number' && item.numOfServings > 0) ? item.numOfServings : 1;
-      const baseCalories = (typeof item.calories === 'number' && item.calories >= 0) ? item.calories : 0;
+      const servings = typeof item.numOfServings === 'number' && item.numOfServings > 0 ? item.numOfServings : 1;
+      const baseCalories = typeof item.calories === 'number' && item.calories >= 0 ? item.calories : 0;
       const { totalQuantity, unit } = calculateTotalQuantity(item.servingSize, servings);
-      const weight = (typeof item.adjustmentWeight === 'number' && item.adjustmentWeight >= 0) ? item.adjustmentWeight : 0;
+      const weight = typeof item.adjustmentWeight === 'number' && item.adjustmentWeight >= 0 ? item.adjustmentWeight : 0;
 
       return {
         _id: item._id,
         name: item.name,
-        originalServingSize: item.servingSize,
         baseCalories,
         numOfServings: servings,
         recipeLink: item.recipeLink,
@@ -235,99 +233,47 @@ async function adjustMealPortions(req, res) {
       };
     });
 
-    const totalSelectedCalories = processedCartItems.reduce((sum, item) => sum + item.totalCalories, 0);
-    const totalAdjustmentWeight = processedCartItems.reduce((sum, item) => sum + item.adjustmentWeight, 0);
+    // ⚙️ Step 1: Compute totals
+    const totalAdjustmentWeight = processedCartItems.reduce((sum, i) => sum + i.adjustmentWeight, 0);
+    const effectiveTotalWeight = totalAdjustmentWeight < 100 && totalAdjustmentWeight > 0 ? 100 : totalAdjustmentWeight;
 
-    // ✅ Fix 1: Ensure at least 100% weight
-    const alertMessage = (totalAdjustmentWeight < 100 && totalAdjustmentWeight > 0)
-      ? "Balance your meal by adding more dishes."
-      : undefined;
+    const alertMessage =
+      totalAdjustmentWeight < 100 && totalAdjustmentWeight > 0
+        ? "⚠️ Balance your meal by adding more dishes (total <100%)."
+        : "✅ Total OK";
 
-    const effectiveTotalAdjustmentWeight = (totalAdjustmentWeight < 100 && totalAdjustmentWeight > 0)
-      ? 100
-      : totalAdjustmentWeight;
-
-    // If total = target, return as is
-    if (totalSelectedCalories === recommendedCalories) {
-      const adjustedItems = processedCartItems.map(item => ({
-        ...item,
-        adjustedQuantity: item.totalQuantity,
-        adjustedCalories: item.totalCalories,
-        newServingSizeString: formatServingString(item.totalQuantity, item.unit, item.name)
-      }));
-
-      return res.status(200).json({
-        status: "no_change",
-        message: "Total calories already match target.",
-        alert: alertMessage,
-        originalTotalCalories: totalSelectedCalories,
-        newTotalCalories: totalSelectedCalories,
-        targetCalories: recommendedCalories,
-        totalPercentage: totalAdjustmentWeight,
-        adjustedItems,
-        isBelowTarget: false
-      });
-    }
-
-    // BELOW target → scale up
-    if (totalSelectedCalories < recommendedCalories) {
-      const scalingFactor = totalSelectedCalories > 0 ? (recommendedCalories / totalSelectedCalories) : 0;
-
-      const adjustedItems = processedCartItems.map(item => {
-        const adjustedQuantity = MROUND(item.totalQuantity * scalingFactor, 0.25);
-        const finalAdjustedCalories = Math.round(item.totalCalories * scalingFactor);
-        return {
-          ...item,
-          adjustedQuantity,
-          adjustedCalories: finalAdjustedCalories,
-          newServingSizeString: formatServingString(adjustedQuantity, item.unit, item.name)
-        };
-      });
-
-      return res.status(200).json({
-        status: "adjusted_up",
-        message: "Portions scaled up to meet calorie target.",
-        alert: alertMessage,
-        originalTotalCalories: totalSelectedCalories,
-        newTotalCalories: recommendedCalories,
-        targetCalories: recommendedCalories,
-        totalPercentage: totalAdjustmentWeight,
-        adjustedItems,
-        isBelowTarget: true
-      });
-    }
-
-    // ABOVE target → weighted scale down
-    const adjustedItemsWeighted = processedCartItems.map(item => {
-      const calculatedNewQuantity =
-        (item.adjustmentWeight / effectiveTotalAdjustmentWeight) *
-        (recommendedCalories / item.totalCalories) *
+    // ⚙️ Step 2: Apply Excel formula for each item
+    const adjustedItems = processedCartItems.map(item => {
+      const calcRaw =
+        (item.adjustmentWeight / effectiveTotalWeight) *
+        (recommendedCalories / item.baseCalories) *
         item.totalQuantity;
 
-      const adjustedQuantity = MROUND(calculatedNewQuantity, 0.25);
+      const adjustedQuantity = MROUND(calcRaw, 0.25);
       const quantityRatio = item.totalQuantity > 0 ? adjustedQuantity / item.totalQuantity : 0;
-      const finalAdjustedCalories = Math.round(item.totalCalories * quantityRatio);
+      const adjustedCalories = Math.round(item.totalCalories * quantityRatio);
 
       return {
         ...item,
         adjustedQuantity,
-        adjustedCalories: finalAdjustedCalories,
-        newServingSizeString: formatServingString(adjustedQuantity, item.unit, item.name)
+        adjustedCalories,
+        newServingSizeString: formatServingString(adjustedQuantity, item.unit, item.name),
+        calcRaw
       };
     });
 
-    const newTotalCaloriesWeighted = adjustedItemsWeighted.reduce((s, i) => s + i.adjustedCalories, 0);
+    // ⚙️ Step 3: Calculate totals
+    const totalAdjustedCalories = adjustedItems.reduce((sum, i) => sum + i.adjustedCalories, 0);
 
-    res.status(200).json({
-      status: "adjusted_down",
-      message: "Portions adjusted down to meet calorie target.",
+    return res.status(200).json({
+      status: "adjusted_custom_plate",
+      message: "Meal portions adjusted according to custom plate logic.",
       alert: alertMessage,
-      originalTotalCalories: totalSelectedCalories,
-      newTotalCalories: newTotalCaloriesWeighted,
-      targetCalories: recommendedCalories,
       totalPercentage: totalAdjustmentWeight,
-      adjustedItems: adjustedItemsWeighted,
-      isBelowTarget: false
+      effectiveTotalWeight,
+      recommendedCalories,
+      newTotalCalories: totalAdjustedCalories,
+      adjustedItems
     });
 
   } catch (error) {
@@ -336,6 +282,7 @@ async function adjustMealPortions(req, res) {
   }
 }
 
+// ✅ Export as object containing functions (so Express can use them directly)
 module.exports = {
   getBuilderItems,
   adjustMealPortions
