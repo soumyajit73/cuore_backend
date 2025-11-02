@@ -96,10 +96,12 @@ exports.getNourishmentPlan = async (req, res) => {
     (mealTime == "Lunch" && $meal_time == "Lunch/Dinner") ||
     (mealTime == "Dinner" && $meal_time == "Lunch/Dinner")
   ) &&
-  calorieRange match $calorie_range + '*' &&
+  calorieRange match $calorie_range + "*" &&
   (
     (defined(dietTag) && lower(dietTag) in lower($tags_for_user)) ||
-    (defined(dietTags) && count(array::intersect(lower(dietTags), lower($tags_for_user))) > 0)
+    (defined(dietTags) && count(
+      dietTags[@ in $tags_for_user]
+    ) > 0)
   )
 ] {
   _id, name, calories, dietTag, dietTags, components,
