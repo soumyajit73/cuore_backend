@@ -57,15 +57,20 @@ function MROUND(number, multiple) {
 }
 
 function formatServingString(finalAdjustedQuantity, unit, itemName) {
-  const unspecifiedUnits = ['unit', 'units', 'unit(s)', '', null, undefined];
+  const unspecifiedUnits = ['unit', 'units', 'piece', 'pieces', 'unit(s)', '', null, undefined];
   const lowerUnit = (unit || '').toLowerCase().trim();
-  const nameHasLeadingNumber = /^\d/.test(itemName?.trim() || '');
+  const nameLower = (itemName || '').toLowerCase().trim();
 
-  if (unspecifiedUnits.includes(lowerUnit)) {
-    return `${finalAdjustedQuantity} unit of ${itemName}`;
+  // if unit is generic → say "5 Boiled Egg White(s)"
+  if (unspecifiedUnits.includes(lowerUnit) || nameLower.includes(lowerUnit)) {
+    const plural = finalAdjustedQuantity > 1 ? `${itemName}s` : itemName;
+    return `${finalAdjustedQuantity} ${plural}`;
   }
-  return `${finalAdjustedQuantity} ${unit}`;
+
+  // otherwise → "0.5 cup of Oats"
+  return `${finalAdjustedQuantity} ${unit} of ${itemName}`;
 }
+
 
 // --- Constants ---
 const MEAL_CALORIE_DISTRIBUTION = {
