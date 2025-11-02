@@ -89,27 +89,33 @@ exports.getNourishmentPlan = async (req, res) => {
     // ----------------------
 
     // --- Fetch from Sanity ---
-    const queryRefined = `
-*[_type == "nourishPlanItem" &&
-  (
-    mealTime == $meal_time ||
-    (mealTime == "Lunch" && $meal_time == "Lunch/Dinner") ||
-    (mealTime == "Dinner" && $meal_time == "Lunch/Dinner")
-  ) &&
-  calorieRange match $calorie_range + "*" &&
-  (
-    (defined(dietTag) && lower(dietTag) in lower($tags_for_user)) ||
-    (defined(dietTags) && count(
-      dietTags[@ in $tags_for_user]
-    ) > 0)
-  )
-] {
-  _id, name, calories, dietTag, dietTags, components,
-  mealTime, calorieRange,
-  "recipeLink": recipeLink->{_id, name}
-}
-`;
-
+    const query = `
+      *[_type == "nourishPlanItem" &&
+        mealTime == $meal_time &&
+        calorieRange == $calorie_range &&
+        dietTag in $tags_for_user] {
+          _id, name, calories, dietTag,
+          components[]{ // Fetch components array
+             _key, // Include the key Sanity adds automatically
+             _type, // Should be 'string'
+             value // Assuming Sanity stores simple strings like this, adjust if needed
+          },
+          mealTime, calorieRange,
+          "recipeLink": recipeLink->{_id, name}
+      }
+    `;
+     // Refined query to directly fetch array of strings
+     const queryRefined = `
+      *[_type == "nourishPlanItem" &&
+        mealTime == $meal_time &&
+        calorieRange == $calorie_range &&
+        dietTag in $tags_for_user] {
+          _id, name, calories, dietTag,
+          components, // Directly fetch the array of strings
+          mealTime, calorieRange,
+          "recipeLink": recipeLink->{_id, name}
+      }
+    `;
     const params = { meal_time, calorie_range: calorieRange, tags_for_user: tagsForUser };
     const allMatchingItems = await client.fetch(queryRefined, params); // Use refined query
     // -------------------------
