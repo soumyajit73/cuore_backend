@@ -518,51 +518,56 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       );
     }
 
-    // --- 1️⃣ MERGE PAYLOAD WITH EXISTING DATA SAFELY ---
-// --- 1️⃣ MERGE PAYLOAD WITH EXISTING DATA SAFELY ---
-const existingData = existingDoc ? existingDoc.toObject() : {};
+    // --- 1️⃣ DEFINE SAFE MERGE HELPER ---
+    const safeMerge = (existing = {}, incoming = {}) => {
+      const result = { ...existing };
+      for (const [key, value] of Object.entries(incoming)) {
+        if (
+          value === undefined ||
+          value === null ||
+          value === "" ||
+          (typeof value === "boolean" && value === false)
+        ) {
+          continue; // skip blanks, nulls, or false values
+        }
+        result[key] = value;
+      }
+      return result;
+    };
 
-// Smart merge for O3 data (bug fix)
-const existingO3 = existingData.o3Data || {};
-const incomingO3 = payload.o3Data || {};
-const mergedO3 = { ...existingO3 };
+    // --- 2️⃣ FETCH EXISTING DATA ---
+    const existingData = existingDoc ? existingDoc.toObject() : {};
 
-['q1', 'q2', 'q3', 'q4', 'q5', 'q6', 'other_conditions', 'hasHypertension', 'hasDiabetes'].forEach(field => {
-  if (incomingO3[field] !== undefined && incomingO3[field] !== null) {
-    mergedO3[field] = incomingO3[field];
-  }
-});
+    // --- 3️⃣ SMART MERGE FOR O3 DATA (PERSISTENCE FIX) ---
+    const existingO3 = existingData.o3Data || {};
+    const incomingO3 = payload.o3Data || {};
+    const mergedO3 = { ...existingO3 };
 
-if (Array.isArray(incomingO3.selectedOptions)) {
-  mergedO3.selectedOptions = incomingO3.selectedOptions;
-}
+    ["q1", "q2", "q3", "q4", "q5", "q6", "other_conditions", "hasHypertension", "hasDiabetes"].forEach(
+      (field) => {
+        if (incomingO3[field] !== undefined && incomingO3[field] !== null) {
+          mergedO3[field] = incomingO3[field];
+        }
+      }
+    );
 
-// Build mergedData safely
-const mergedData = {
-  ...existingData,        // start from existing
-  ...payload,             // merge new payload
-  o2Data: { ...(existingData.o2Data || {}), ...(payload.o2Data || {}) },
-  o4Data: { ...(existingData.o4Data || {}), ...(payload.o4Data || {}) },
-  o5Data: { ...(existingData.o5Data || {}), ...(payload.o5Data || {}) },
-  o6Data: { ...(existingData.o6Data || {}), ...(payload.o6Data || {}) },
-  o7Data: Object.entries({
-    ...(existingData.o7Data || {}),
-    ...(payload.o7Data || {})
-  }).reduce((acc, [key, value]) => {
-    if (payload.o7Data && Object.prototype.hasOwnProperty.call(payload.o7Data, key)) {
-      acc[key] = value === null || value === undefined ? null : value;
-    } else {
-      acc[key] = value;
+    if (Array.isArray(incomingO3.selectedOptions)) {
+      mergedO3.selectedOptions = incomingO3.selectedOptions;
     }
-    return acc;
-  }, {}),
-};
 
-// finally force merged O3 data so it overrides payload blank one
-mergedData.o3Data = mergedO3;
+    // --- 4️⃣ BUILD MERGED DATA SAFELY ---
+    const mergedData = {
+      ...existingData,
+      ...payload,
+      o2Data: safeMerge(existingData.o2Data, payload.o2Data),
+      o3Data: mergedO3, // force overwrite with safe-merged o3
+      o4Data: safeMerge(existingData.o4Data, payload.o4Data),
+      o5Data: safeMerge(existingData.o5Data, payload.o5Data),
+      o6Data: safeMerge(existingData.o6Data, payload.o6Data),
+      o7Data: safeMerge(existingData.o7Data, payload.o7Data),
+    };
 
-
-    // --- 2️⃣ CALCULATE METRICS & SCORES ---
+    // --- 5️⃣ CALCULATE METRICS & SCORES ---
     const o2Metrics = validateAndCalculateScores(mergedData.o2Data);
     const o3Metrics = processO3Data(mergedData.o3Data);
     const o4Metrics = processO4Data(mergedData.o4Data);
@@ -572,15 +577,15 @@ mergedData.o3Data = mergedO3;
     let processedO7Data;
     const o7Payload = mergedData.o7Data || {};
     const manuallyEnteredFields = Object.keys(o7Payload).filter(
-      key => o7Payload[key] !== null && o7Payload[key] !== undefined && key !== 'auto_filled'
+      (key) => o7Payload[key] !== null && o7Payload[key] !== undefined && key !== "auto_filled"
     );
 
     if (manuallyEnteredFields.length > 0) {
       processedO7Data = {
         ...getAutofillData(0),
-        ...Object.fromEntries(manuallyEnteredFields.map(field => [field, o7Payload[field]])),
+        ...Object.fromEntries(manuallyEnteredFields.map((field) => [field, o7Payload[field]])),
         manual_fields: manuallyEnteredFields,
-        auto_filled: false
+        auto_filled: false,
       };
 
       if (processedO7Data.bs_f && processedO7Data.bs_am && !processedO7Data.A1C) {
@@ -602,24 +607,25 @@ mergedData.o3Data = mergedO3;
       };
 
       const totalScoreBeforeO7 = Object.values(tempScores)
-        .filter(s => typeof s === "number")
+        .filter((s) => typeof s === "number")
         .reduce((a, b) => a + b, 0);
 
       processedO7Data = {
         ...getAutofillData(totalScoreBeforeO7),
         manual_fields: [],
-        auto_filled: true
+        auto_filled: true,
       };
     }
 
-    // --- 3️⃣ O7 SCORE CALCULATION ---
+    // --- 6️⃣ O7 SCORE CALCULATION ---
     const o7Score =
       score_o2_sat(processedO7Data.o2_sat) +
       score_hr(processedO7Data.pulse) +
       (score_bp_upper(processedO7Data.bp_upper) + score_bp_lower(processedO7Data.bp_lower)) / 2 +
       (score_bs_f(processedO7Data.bs_f) +
         score_bs_am(processedO7Data.bs_am) +
-        score_a1c(processedO7Data.A1C)) / 3 +
+        score_a1c(processedO7Data.A1C)) /
+        3 +
       score_hdl(processedO7Data.HDL) +
       score_ldl(processedO7Data.LDL) +
       score_trig(processedO7Data.Trig) +
@@ -635,7 +641,7 @@ mergedData.o3Data = mergedO3;
       o7Score,
     };
 
-    // --- 4️⃣ BUILD FINAL DATA TO SAVE ---
+    // --- 7️⃣ BUILD FINAL DATA TO SAVE ---
     const finalDataToSave = {
       userId,
       onboardingVersion: "7",
@@ -648,10 +654,20 @@ mergedData.o3Data = mergedO3;
       timestamp: new Date(),
     };
 
-    // ⚙️ Preserve structure but only fill manually entered O7 values
+    // Preserve structure but only fill manually entered O7 values
     const allO7Keys = [
-      'o2_sat', 'pulse', 'bp_upper', 'bp_lower', 'bs_f', 'bs_am',
-      'A1C', 'HDL', 'LDL', 'Trig', 'HsCRP', 'trig_hdl_ratio'
+      "o2_sat",
+      "pulse",
+      "bp_upper",
+      "bp_lower",
+      "bs_f",
+      "bs_am",
+      "A1C",
+      "HDL",
+      "LDL",
+      "Trig",
+      "HsCRP",
+      "trig_hdl_ratio",
     ];
 
     const { manual_fields } = processedO7Data;
@@ -664,13 +680,12 @@ mergedData.o3Data = mergedO3;
     finalDataToSave.o7Data.manual_fields = manual_fields;
     finalDataToSave.o7Data.auto_filled = false;
 
-    // --- 5️⃣ CUORE SCORE ---
+    // --- 8️⃣ CUORE SCORE ---
     allScores.cuoreScore = calculateCuoreScore(finalDataToSave, allScores);
     finalDataToSave.scores = allScores;
 
-    // --- 6️⃣ HISTORY SNAPSHOTS ---
+    // --- 9️⃣ HISTORY SNAPSHOTS ---
     const submissionTimestamp = finalDataToSave.timestamp;
-
     const o2Snapshot = {
       data: {
         weight_kg: finalDataToSave.o2Data.weight_kg,
@@ -678,22 +693,39 @@ mergedData.o3Data = mergedO3;
       },
       timestamp: submissionTimestamp,
     };
-    const o5Snapshot = { data: { o5Score: finalDataToSave.scores.o5Score }, timestamp: submissionTimestamp };
-    const o6Snapshot = { data: { o6Score: finalDataToSave.scores.o6Score }, timestamp: submissionTimestamp };
-    const o7Snapshot = { data: { ...finalDataToSave.o7Data }, timestamp: submissionTimestamp };
-    const scoreSnapshot = { data: { cuoreScore: finalDataToSave.scores.cuoreScore }, timestamp: submissionTimestamp };
+    const o5Snapshot = {
+      data: { o5Score: finalDataToSave.scores.o5Score },
+      timestamp: submissionTimestamp,
+    };
+    const o6Snapshot = {
+      data: { o6Score: finalDataToSave.scores.o6Score },
+      timestamp: submissionTimestamp,
+    };
+    const o7Snapshot = {
+      data: { ...finalDataToSave.o7Data },
+      timestamp: submissionTimestamp,
+    };
+    const scoreSnapshot = {
+      data: { cuoreScore: finalDataToSave.scores.cuoreScore },
+      timestamp: submissionTimestamp,
+    };
 
-    // --- 7️⃣ UPDATE DB ---
+    // --- 🔟 UPDATE DB ---
     const updateOperation = { $set: finalDataToSave };
     const pushOperations = {};
 
-    if (payload.o2Data && Object.keys(payload.o2Data).length > 0) pushOperations.o2History = o2Snapshot;
-    if (payload.o5Data && Object.keys(payload.o5Data).length > 0) pushOperations.o5History = o5Snapshot;
-    if (payload.o6Data && Object.keys(payload.o6Data).length > 0) pushOperations.o6History = o6Snapshot;
-    if (payload.o7Data && Object.keys(payload.o7Data).length > 0) pushOperations.o7History = o7Snapshot;
+    if (payload.o2Data && Object.keys(payload.o2Data).length > 0)
+      pushOperations.o2History = o2Snapshot;
+    if (payload.o5Data && Object.keys(payload.o5Data).length > 0)
+      pushOperations.o5History = o5Snapshot;
+    if (payload.o6Data && Object.keys(payload.o6Data).length > 0)
+      pushOperations.o6History = o6Snapshot;
+    if (payload.o7Data && Object.keys(payload.o7Data).length > 0)
+      pushOperations.o7History = o7Snapshot;
 
     pushOperations.scoreHistory = scoreSnapshot;
-    if (Object.keys(pushOperations).length > 0) updateOperation.$push = pushOperations;
+    if (Object.keys(pushOperations).length > 0)
+      updateOperation.$push = pushOperations;
 
     const finalOnboardingDoc = await OnboardingModel.findOneAndUpdate(
       { userId },
