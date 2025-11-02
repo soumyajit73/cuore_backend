@@ -61,21 +61,15 @@ function formatServingString(finalAdjustedQuantity, unit, itemName) {
   const lowerUnit = (unit || '').toLowerCase().trim();
   const cleanName = itemName?.trim() || '';
 
-  // 🔹 Step 1: Remove any leading quantity/unit text from the name
-  // e.g. "1 Boiled Egg White" → "Boiled Egg White"
+  // Remove leading quantity/unit text (e.g. "1 Boiled Egg White" → "Boiled Egg White")
   const nameWithoutQty = cleanName.replace(/^[\d/.\s]*(cup|cups|katori|bowl|bowls|slice|slices|unit|units)?\s*/i, '').trim();
 
-  // 🔹 Step 2: Build a readable string
-  // Handle unit-less cases (like eggs)
   if (unspecifiedUnits.includes(lowerUnit)) {
     return `${finalAdjustedQuantity} ${nameWithoutQty}${finalAdjustedQuantity > 1 ? 's' : ''}`;
   }
 
-  // Handle known units like cups, katoris, bowls, etc.
   return `${finalAdjustedQuantity} ${lowerUnit} ${nameWithoutQty}`;
 }
-
-
 
 // --- Constants ---
 const MEAL_CALORIE_DISTRIBUTION = {
@@ -178,7 +172,7 @@ async function getBuilderItems(req, res) {
       return acc;
     }, {});
 
-    // Sort sections according to Excel order
+    // Sort according to Excel order
     const orderKey = (meal_time === 'Breakfast') ? 'Breakfast' : 'LunchDinner';
     const orderedSections = SECTION_ORDER[cuisine][orderKey];
     const orderedGroupedItems = {};
@@ -189,7 +183,7 @@ async function getBuilderItems(req, res) {
       }
     });
 
-    // Include any leftover sections
+    // Include leftover sections
     Object.keys(groupedItems).forEach(section => {
       if (!orderedGroupedItems[section]) {
         orderedGroupedItems[section] = groupedItems[section];
@@ -243,9 +237,11 @@ async function adjustMealPortions(req, res) {
       };
     });
 
-    // ⚙️ Step 1: Compute totals
+    // ⚙️ Step 1: Compute totals (% of recommended calories)
     const totalAdjustmentWeight = processedCartItems.reduce((sum, i) => sum + i.adjustmentWeight, 0);
-    const effectiveTotalWeight = totalAdjustmentWeight < 100 && totalAdjustmentWeight > 0 ? 100 : totalAdjustmentWeight;
+
+    // ✅ Fix: Use 100% if total < 100
+    const effectiveTotalWeight = (totalAdjustmentWeight < 100 && totalAdjustmentWeight > 0) ? 100 : totalAdjustmentWeight;
 
     const alertMessage =
       totalAdjustmentWeight < 100 && totalAdjustmentWeight > 0
@@ -292,7 +288,7 @@ async function adjustMealPortions(req, res) {
   }
 }
 
-// ✅ Export as object containing functions (so Express can use them directly)
+// ✅ Export
 module.exports = {
   getBuilderItems,
   adjustMealPortions
