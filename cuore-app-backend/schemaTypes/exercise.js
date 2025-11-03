@@ -58,11 +58,12 @@ export default {
       description: 'Link to the exercise video snippet.',
     },
     {
-      name: 'instructions',
-      title: 'Instructions',
-      type: 'text', // Or 'blockContent' for rich text editor
-      description: 'Text instructions for the exercise (from Word files).',
-    },
+  name: 'instructions',
+  title: 'Instructions',
+  type: 'string', // change from "text" to "string"
+  description: 'HTML instructions for the exercise (from Word files).',
+},
+
     {
       name: 'ageGroup',
       title: 'Age Group',
