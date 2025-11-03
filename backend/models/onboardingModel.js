@@ -528,7 +528,7 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
           value === "" ||
           (typeof value === "boolean" && value === false)
         ) {
-          continue; // skip blanks, nulls, or false values
+          continue;
         }
         result[key] = value;
       }
@@ -560,12 +560,37 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       ...existingData,
       ...payload,
       o2Data: safeMerge(existingData.o2Data, payload.o2Data),
-      o3Data: mergedO3, // force overwrite with safe-merged o3
+      o3Data: mergedO3,
       o4Data: safeMerge(existingData.o4Data, payload.o4Data),
       o5Data: safeMerge(existingData.o5Data, payload.o5Data),
       o6Data: safeMerge(existingData.o6Data, payload.o6Data),
-      o7Data: safeMerge(existingData.o7Data, payload.o7Data),
+      o7Data: { ...existingData.o7Data },
     };
+
+    // ✅ Overwrite all O7 fields: clear old data if missing or blank
+    const allO7Keys = [
+      "o2_sat",
+      "pulse",
+      "bp_upper",
+      "bp_lower",
+      "bs_f",
+      "bs_am",
+      "A1C",
+      "HDL",
+      "LDL",
+      "Trig",
+      "HsCRP",
+      "trig_hdl_ratio",
+    ];
+
+    for (const key of allO7Keys) {
+      if (payload.o7Data && key in payload.o7Data) {
+        mergedData.o7Data[key] =
+          payload.o7Data[key] === "" ? null : payload.o7Data[key];
+      } else {
+        mergedData.o7Data[key] = null;
+      }
+    }
 
     // --- 5️⃣ CALCULATE METRICS & SCORES ---
     const o2Metrics = validateAndCalculateScores(mergedData.o2Data);
@@ -577,13 +602,18 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     let processedO7Data;
     const o7Payload = mergedData.o7Data || {};
     const manuallyEnteredFields = Object.keys(o7Payload).filter(
-      (key) => o7Payload[key] !== null && o7Payload[key] !== undefined && key !== "auto_filled"
+      (key) =>
+        o7Payload[key] !== null &&
+        o7Payload[key] !== undefined &&
+        key !== "auto_filled"
     );
 
     if (manuallyEnteredFields.length > 0) {
       processedO7Data = {
         ...getAutofillData(0),
-        ...Object.fromEntries(manuallyEnteredFields.map((field) => [field, o7Payload[field]])),
+        ...Object.fromEntries(
+          manuallyEnteredFields.map((field) => [field, o7Payload[field]])
+        ),
         manual_fields: manuallyEnteredFields,
         auto_filled: false,
       };
@@ -595,7 +625,10 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
         );
       }
       if (processedO7Data.Trig && processedO7Data.HDL && !processedO7Data.trig_hdl_ratio) {
-        processedO7Data.trig_hdl_ratio = roundTo(processedO7Data.Trig / processedO7Data.HDL, 2);
+        processedO7Data.trig_hdl_ratio = roundTo(
+          processedO7Data.Trig / processedO7Data.HDL,
+          2
+        );
       }
     } else {
       const tempScores = {
@@ -621,7 +654,9 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     const o7Score =
       score_o2_sat(processedO7Data.o2_sat) +
       score_hr(processedO7Data.pulse) +
-      (score_bp_upper(processedO7Data.bp_upper) + score_bp_lower(processedO7Data.bp_lower)) / 2 +
+      (score_bp_upper(processedO7Data.bp_upper) +
+        score_bp_lower(processedO7Data.bp_lower)) /
+        2 +
       (score_bs_f(processedO7Data.bs_f) +
         score_bs_am(processedO7Data.bs_am) +
         score_a1c(processedO7Data.A1C)) /
@@ -653,22 +688,6 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       o6Data: o6Metrics.o6Data,
       timestamp: new Date(),
     };
-
-    // Preserve structure but only fill manually entered O7 values
-    const allO7Keys = [
-      "o2_sat",
-      "pulse",
-      "bp_upper",
-      "bp_lower",
-      "bs_f",
-      "bs_am",
-      "A1C",
-      "HDL",
-      "LDL",
-      "Trig",
-      "HsCRP",
-      "trig_hdl_ratio",
-    ];
 
     const { manual_fields } = processedO7Data;
     finalDataToSave.o7Data = {};
@@ -738,11 +757,18 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
 
     return finalOnboardingDoc;
   } catch (error) {
-    console.error("Error in processAndSaveFinalSubmission:", error.name, error.message);
+    console.error(
+      "Error in processAndSaveFinalSubmission:",
+      error.name,
+      error.message
+    );
     if (error.name === "ValidationError") throw error;
     throw new Error("Internal Server Error");
   }
 };
+
+
+
 
 
 // ... (Your other model functions: calculateAllMetrics, getOnboardingDataByUserId, helpers, etc.) ...
