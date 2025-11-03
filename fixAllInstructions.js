@@ -16,7 +16,7 @@ const client = createClient({
   dataset: 'production',
   apiVersion: '2023-08-01',
   useCdn: false, // Must be false to see drafts
- token: 'ski7OSxHCDxGrcmalQJHYrGoBYj3FO2gDyKcNR8PkpKcTTlnzFyzG4gAsUKuTRdz5FIXbGcQWS4AzLeROTXh0kUXkBNa4o5uroRmCkZAXgf7gxEbe20dWsDfO45iVYSuMKdbkO9jKWzWDBgBU879Qe0QTOHwKLdknAxX7a6rCmJmFgnmDG3j', // <-- This reads your .env token
+ token: process.env.SANITY_READ_TOKEN
 });
 
 async function fixAllInstructions() {

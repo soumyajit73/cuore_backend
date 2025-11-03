@@ -6,7 +6,7 @@ const client = createClient({
   dataset: 'production',
   apiVersion: '2021-10-21',
   useCdn: false, // Must be false for mutations
-  token: 'ski7OSxHCDxGrcmalQJHYrGoBYj3FO2gDyKcNR8PkpKcTTlnzFyzG4gAsUKuTRdz5FIXbGcQWS4AzLeROTXh0kUXkBNa4o5uroRmCkZAXgf7gxEbe20dWsDfO45iVYSuMKdbkO9jKWzWDBgBU879Qe0QTOHwKLdknAxX7a6rCmJmFgnmDG3j', // Use same Editor token
+token: process.env.SANITY_READ_TOKEN, // Use same Editor token
 });
 
 async function deleteAll() {

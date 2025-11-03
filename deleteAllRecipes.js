@@ -8,7 +8,7 @@ const client = createClient({
   dataset: 'production',
   apiVersion: '2021-10-21', // Use a recent API version date
   useCdn: false, // Must be false to perform mutations (deletions)
-  token: 'ski7OSxHCDxGrcmalQJHYrGoBYj3FO2gDyKcNR8PkpKcTTlnzFyzG4gAsUKuTRdz5FIXbGcQWS4AzLeROTXh0kUXkBNa4o5uroRmCkZAXgf7gxEbe20dWsDfO45iVYSuMKdbkO9jKWzWDBgBU879Qe0QTOHwKLdknAxX7a6rCmJmFgnmDG3j', // Use token with write permissions
+  token: process.env.SANITY_READ_TOKEN, // Use token with write permissions
 });
 // --------------------
 
