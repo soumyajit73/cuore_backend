@@ -18,10 +18,16 @@ function calculateStats(profile, age) {
 
   const yearsLost = (cigarettesPerDay * safeYears * 11) / (60 * 24);
   const moneySpent = 12 * cigarettesPerDay * 365 * safeYears;
-  const yearsSaved = (cigarettesPerDay * (70 - safeAge) * 11) / (60 * 24);
-  const moneySaved = 15 * cigarettesPerDay * 365 * (70 - safeAge);
 
-  const formatNum = (num) => num.toFixed(1); // <-- now shows 1 decimal
+  // --- THE FIX IS HERE ---
+  // Use Math.max to prevent negative numbers if age > 70
+  const remainingYears = Math.max(0, 70 - safeAge);
+
+  const yearsSaved = (cigarettesPerDay * remainingYears * 11) / (60 * 24);
+  const moneySaved = 15 * cigarettesPerDay * 365 * remainingYears;
+  // --- END OF FIX ---
+
+  const formatNum = (num) => num.toFixed(1);
   const formatCurrency = (num) => Math.round(num).toLocaleString('en-IN');
 
   return {
