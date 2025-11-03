@@ -1185,7 +1185,7 @@ exports.getCuoreScoreDetails = async (req, res) => {
     const bs_f = safeNum(o7.bs_f ?? metrics?.bloodSugar?.fasting?.current);
     const bs_am = safeNum(o7.bs_am ?? metrics?.bloodSugar?.afterMeal?.current);
     const A1C = safeNum(o7.A1C ?? metrics?.bloodSugar?.A1C?.current);
-    const tg_hdl_ratio = safeNum(o7.trig_hdl_ratio ?? metrics?.trigHDLRatio?.current);
+    const tg_hdl_ratio = safeNum(metrics?.trigHDLRatio?.current);
     const body_fat = safeNum(o7.body_fat ?? metrics?.bodyFat?.current);
 
     // 🧠 BP Status logic
