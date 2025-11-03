@@ -161,6 +161,7 @@ exports.getUserFitnessPlan = async (req, res) => {
       return res.status(404).json({ message: "Onboarding data not found." });
 
     // 2️⃣ Calculate metrics and derive age + recommended time
+    // ... (all your existing metric calculations) ...
     const metrics = calculateAllMetrics(onboardingData);
     const age = metrics.age;
     if (typeof age !== "number" || age <= 0)
@@ -187,7 +188,7 @@ exports.getUserFitnessPlan = async (req, res) => {
           message: "No predefined exercise schedule found for your age group.",
         });
 
-    // 3️⃣ Fetch all exercises from Sanity for this age group
+    // 3️⃣ Fetch all exercises from Sanity
     const exercises = await client.fetch(
       `*[_type=="exercise" && ageGroup == $ageGroup]{
         name,
@@ -207,7 +208,8 @@ exports.getUserFitnessPlan = async (req, res) => {
         .status(404)
         .json({ message: "No exercises found for your age group." });
 
-    // 4️⃣ Create a lookup map (code → exercise details)
+    // 4️⃣ Create a lookup map
+    // ... (your existing lookup map logic) ...
     const exerciseMap = {};
     exercises.forEach((ex) => {
       const codeKey =
@@ -215,7 +217,8 @@ exports.getUserFitnessPlan = async (req, res) => {
       if (codeKey) exerciseMap[codeKey] = ex;
     });
 
-    // 5️⃣ Build weekly plan based on rest day
+    // 5️⃣ Build weekly plan
+    // ... (your existing schedule/day logic) ...
     const restDayNormalized = String(restDayRaw)
       .slice(0, 3)
       .replace(/^[a-z]/, (c) => c.toUpperCase());
@@ -227,9 +230,9 @@ exports.getUserFitnessPlan = async (req, res) => {
     }
 
     const finalSchedule = {};
-    finalSchedule[restDayNormalized] = []; // Rest day is blank
+    finalSchedule[restDayNormalized] = []; 
 
-    // 6️⃣ Assign exercises per day based on Excel mapping
+    // 6️⃣ Assign exercises per day
     let dayIndex = 0;
     for (const [templateDay, codes] of Object.entries(userScheduleTemplate)) {
       if (dayIndex >= scheduleDays.length) break;
@@ -247,54 +250,56 @@ exports.getUserFitnessPlan = async (req, res) => {
 
         // --- START: UPDATED LOGIC ---
 
-        // 🧠 Parse HTML instructions to extract info
         let instructionsText = ex.instructions || "";
-        let equipment = "None";
+        let equipment = "None"; // Default
         let steps = [];
 
         if (instructionsText) {
-          // 1. --- Extract Equipment ---
-          // This regex will only work if your HTML contains "Equipment:".
-          // Based on your sample, it doesn't, so 'equipment' will remain "None".
-          const eqMatch =
-            instructionsText.match(/Equipment:\s*<\/strong>([^<]*)/i) ||
-            instructionsText.match(/Equipment:\s*([A-Za-z ]+)/i);
-          if (eqMatch) equipment = eqMatch[1].trim();
+          
+          // --- 1. Extract Equipment (NEW, HTML-BASED FIX) ---
+          // This regex looks for "Equipment" (with or without <strong>)
+          // and captures everything after the colon until the next HTML tag (like </p>)
+          const eqMatch = instructionsText.match(/(?:<strong>)?Equipment(?:<\/strong>)?:\s*([^<]+)/i);
+          // --------------------------------------------------
 
-          // 2. --- Extract Steps ---
-          // First, split the HTML to isolate *only* the instructions list.
-          // We split by the "Instructions:" heading.
+          if (eqMatch && eqMatch[1]) {
+            let foundEquipment = eqMatch[1].trim();
+            // Make sure it's not "None" or an empty string
+            if (foundEquipment && foundEquipment.toLowerCase() !== 'none' && foundEquipment.length > 0) {
+              equipment = foundEquipment; // This will set it to "Dumbbell"
+            }
+          }
+          
+          // --- 2. Extract Steps (Same logic as before) ---
+          // This splits the HTML at the "Instructions:" heading
           const splitHtml = instructionsText.split(
             /<p><strong>Instructions:<\/strong><\/p>/i
           );
 
           let instructionHtml = "";
           if (splitHtml.length > 1) {
-            // If the split worked, the instructions are in the second part
             instructionHtml = splitHtml[1];
           } else {
-            // Fallback: If "Instructions:" heading wasn't found,
-            // just use the whole text (this may grab "Avoid if" steps)
             instructionHtml = instructionsText;
           }
 
-          // Now, find <li> tags ONLY within the instructionHtml part
+          // This finds all <li> tags, (which works for <ol> and <ul>)
           const listMatches = [...instructionHtml.matchAll(/<li>(.*?)<\/li>/g)];
           if (listMatches.length > 0) {
             steps = listMatches.map((m) =>
               m[1].replace(/<\/?[^>]+(>|$)/g, "").trim()
-            );
+            ).filter(s => s.length > 0); // Filter out empty steps
           } else {
-            // Fallback: If no <li> tags, try to get <p> tags
+            // Fallback just in case
             const paragraphs = [
               ...instructionHtml.matchAll(/<p>(.*?)<\/p>/g),
             ];
             steps = paragraphs.map((p) =>
               p[1].replace(/<\/?[^>]+(>|$)/g, "").trim()
-            );
+            ).filter(s => s.length > 0);
           }
         }
-
+        
         // --- END: UPDATED LOGIC ---
 
         const color = colorMap[ex.exerciseType] || colorMap.default;
@@ -309,10 +314,10 @@ exports.getUserFitnessPlan = async (req, res) => {
           color,
           instructions: {
             duration: ex.repsDuration || "",
-            equipment,
+            equipment, // <-- This will now be "Dumbbell"
             sets: ex.sets || 1,
             steps,
-            instructionsText, // full HTML preserved
+            instructionsText, 
           },
           _id: ex._id,
         });
