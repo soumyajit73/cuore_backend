@@ -226,7 +226,7 @@ const { series: stressSeries, historyCount: stressHist } = generatePredictionSer
         formatGraphData('Cholesterol', [
             { label: 'HDL', ...splitData(hdlSeries, hdlHist), color: '#3498db', limit: METRIC_LIMITS.hdl },
             { label: 'LDL', ...splitData(ldlSeries, ldlHist), color: '#e74c3c', limit: METRIC_LIMITS.ldl },
-            { label: 'Triglycerides', ...splitData(trigSeries, trigHist), color: '#bf00ffff', limit: METRIC_LIMITS.triglyceride }
+            { label: 'Triglycerides', ...splitData(trigSeries, trigHist), color: '#8C00FF', limit: METRIC_LIMITS.triglyceride }
         ]),
         formatGraphData('Lifestyle Metrics', [
             { label: 'Nutrition', ...splitData(nutritionSeries, nutritionHist), color: '#f1c40f', limit: METRIC_LIMITS.nutrition },
