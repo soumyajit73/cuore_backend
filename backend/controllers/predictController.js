@@ -94,18 +94,31 @@ const generatePredictionSeries = (history, X, initialBFormula, direction, limit,
 
 // --- DATA FETCHING (Unchanged) ---
 const fetchHistory = (onboarding, metricKey) => {
-    let historyArray = [];
-    switch (metricKey) {
-        case 'cuoreScore': historyArray = onboarding.scoreHistory || []; return historyArray.map(h => h.data?.cuoreScore);
-        case 'weight_kg': historyArray = onboarding.o2History || []; return historyArray.map(h => h.data?.weight_kg);
-        case 'bmi': historyArray = onboarding.o2History || []; return historyArray.map(h => h.data?.bmi);
-        case 'o5Score': historyArray = onboarding.o5History || []; return historyArray.map(h => h.data?.o5Score);
-        case 'o6Score': historyArray = onboarding.o6History || []; return historyArray.map(h => h.data?.o6Score);
-        default: // o7 keys
-            historyArray = onboarding.o7History || [];
-            // Return raw values including null/undefined for skipped inputs
-            return historyArray.map(h => h.data ? h.data[metricKey] : undefined);
-    }
+  let historyArray = [];
+  switch (metricKey) {
+    case 'cuoreScore': historyArray = onboarding.scoreHistory || []; return historyArray.map(h => h.data?.cuoreScore);
+    case 'weight_kg': historyArray = onboarding.o2History || []; return historyArray.map(h => h.data?.weight_kg);
+    case 'bmi': historyArray = onboarding.o2History || []; return historyArray.map(h => h.data?.bmi);
+      
+    // --- THIS WILL NOW WORK ---
+    case 'nutrition': // This is the 'key' from generateArgs
+        historyArray = onboarding.o5History || []; 
+        return historyArray.map(h => h.data?.foodScore); // Fetches the 'foodScore'
+    case 'fitness': // This is the 'key' from generateArgs
+        historyArray = onboarding.o5History || []; 
+        return historyArray.map(h => h.data?.exerciseScore); // Fetches the 'exerciseScore'
+    case 'sleep': // This is the 'key' from generateArgs
+        historyArray = onboarding.o6History || []; 
+        return historyArray.map(h => h.data?.sleepScore); // Fetches the 'sleepScore'
+    case 'stress': // This is the 'key' from generateArgs
+        historyArray = onboarding.o6History || []; 
+        return historyArray.map(h => h.data?.stressScore); // Fetches the 'stressScore'
+    // --- END FIX ---
+
+    default: // o7 keys
+        historyArray = onboarding.o7History || [];
+        return historyArray.map(h => h.data ? h.data[metricKey] : undefined);
+  }
 };
 
 // --- RESPONSE FORMATTING (Unchanged) ---
@@ -187,10 +200,10 @@ const getPredictionData = async (req, res) => {
     const { series: ldlSeries, historyCount: ldlHist } = generatePredictionSeries(...generateArgs('ldl', 'LDL', true));
     const { series: trigSeries, historyCount: trigHist } = generatePredictionSeries(...generateArgs('triglyceride', 'Trig', true));
 
-    const { series: nutritionSeries, historyCount: nutritionHist } = generatePredictionSeries(...generateArgs('nutrition', 'o5Score'));
-    const { series: fitnessSeries, historyCount: fitnessHist } = generatePredictionSeries(...generateArgs('fitness', 'o5Score'));
-    const { series: sleepSeries, historyCount: sleepHist } = generatePredictionSeries(...generateArgs('sleep', 'o6Score'));
-    const { series: stressSeries, historyCount: stressHist } = generatePredictionSeries(...generateArgs('stress', 'o6Score'));
+    const { series: nutritionSeries, historyCount: nutritionHist } = generatePredictionSeries(...generateArgs('nutrition', 'nutrition'));
+const { series: fitnessSeries, historyCount: fitnessHist } = generatePredictionSeries(...generateArgs('fitness', 'fitness'));
+const { series: sleepSeries, historyCount: sleepHist } = generatePredictionSeries(...generateArgs('sleep', 'sleep'));
+const { series: stressSeries, historyCount: stressHist } = generatePredictionSeries(...generateArgs('stress', 'stress'));
 
     // --- Assemble final response (Added labels) ---
     const healthGraphs = [

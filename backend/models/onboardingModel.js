@@ -108,23 +108,32 @@ const onboardingSchema = new mongoose.Schema({
     }
   ],
   // History for Nutrition & Fitness scores
-  o5History: [
-    {
-      data: {
-        o5Score: { type: Number }, // This is the 'o5Score' from the 'scores' object
-      },
-      timestamp: { type: Date, default: Date.now },
-    }
-  ],
-  // History for Sleep & Stress scores
-  o6History: [
-    {
-      data: {
-        o6Score: { type: Number }, // This is the 'o6Score' from the 'scores' object
-      },
-      timestamp: { type: Date, default: Date.now },
-    }
-  ],
+ // History for Nutrition & Fitness scores
+o5History: [
+  {
+    data: {
+      o5Score: { type: Number },
+      // --- ADD THESE ---
+      foodScore: { type: Number },     // Use the key you provided
+      exerciseScore: { type: Number }, // Use the key you provided
+      // ---------------
+    },
+    timestamp: { type: Date, default: Date.now },
+  }
+],
+// History for Sleep & Stress scores
+o6History: [
+  {
+    data: {
+      o6Score: { type: Number },
+      // --- ADD THESE ---
+      sleepScore: { type: Number },    // Use the key you provided
+      stressScore: { type: Number },   // Use the key you provided
+      // ---------------
+    },
+    timestamp: { type: Date, default: Date.now },
+  }
+],
   // History for the main Cuore Score
   scoreHistory: [
     {
@@ -326,54 +335,70 @@ const processO4Data = (o4Data) => {
 };
 
 const processO5Data = (o5Data) => {
-  const { min_exercise_per_week, fruits_veg, processed_food, high_fiber } =
-    o5Data;
-  if (!EXERCISE_SCORE_MAP.hasOwnProperty(min_exercise_per_week)) {
-    throw new ValidationError(
-      `Invalid value for min_exercise_per_week: ${min_exercise_per_week}.`
-    );
-  }
-  if (
-    !FOODS_SCORE_MAP.hasOwnProperty(fruits_veg) ||
-    !FOODS_SCORE_MAP.hasOwnProperty(processed_food) ||
-    !FOODS_SCORE_MAP.hasOwnProperty(high_fiber)
-  ) {
-    throw new ValidationError(
-      "Invalid value for one of the food-related fields."
-    );
-  }
-  const exerciseScore = EXERCISE_SCORE_MAP[min_exercise_per_week];
-  const foodsScore =
-    FOODS_SCORE_MAP[fruits_veg] +
-    FOODS_SCORE_MAP[processed_food] +
-    FOODS_SCORE_MAP[high_fiber];
-  const o5Score = exerciseScore + foodsScore;
-  return { o5Data, o5Score };
+  const { min_exercise_per_week, fruits_veg, processed_food, high_fiber } =
+    o5Data;
+  if (!EXERCISE_SCORE_MAP.hasOwnProperty(min_exercise_per_week)) {
+    throw new ValidationError(
+      `Invalid value for min_exercise_per_week: ${min_exercise_per_week}.`
+    );
+  }
+  if (
+    !FOODS_SCORE_MAP.hasOwnProperty(fruits_veg) ||
+    !FOODS_SCORE_MAP.hasOwnProperty(processed_food) ||
+    !FOODS_SCORE_MAP.hasOwnProperty(high_fiber)
+  ) {
+    throw new ValidationError(
+      "Invalid value for one of the food-related fields."
+    );
+  }
+  const exerciseScore = EXERCISE_SCORE_MAP[min_exercise_per_week];
+  const foodsScore =
+    FOODS_SCORE_MAP[fruits_veg] +
+    FOODS_SCORE_MAP[processed_food] +
+    FOODS_SCORE_MAP[high_fiber];
+  const o5Score = exerciseScore + foodsScore;
+  
+  // --- START OF FIX ---
+  return { 
+    o5Data, 
+    o5Score, 
+    foodScore: foodsScore,     // Pass the sub-score out
+    exerciseScore: exerciseScore // Pass the sub-score out
+  };
+  // --- END OF FIX ---
 };
 
 const processO6Data = (o6Data) => {
-  const { sleep_hours, problems_overwhelming, enjoyable, felt_nervous } =
-    o6Data;
-  if (!SLEEP_MAP.hasOwnProperty(sleep_hours)) {
-    throw new ValidationError(`Invalid sleep_hours value: ${sleep_hours}.`);
-  }
-  if (
-    !STRESS_MAP.hasOwnProperty(problems_overwhelming) ||
-    !STRESS_MAP.hasOwnProperty(enjoyable) ||
-    !STRESS_MAP.hasOwnProperty(felt_nervous)
-  ) {
-    throw new ValidationError(
-      "Invalid value for one of the stress-related fields."
-    );
-  }
-  const sleepScore = SLEEP_MAP[sleep_hours];
-  const stress_avg =
-    (STRESS_MAP[problems_overwhelming] +
-      STRESS_MAP[enjoyable] +
-      STRESS_MAP[felt_nervous]) /
-    3;
-  const o6Score = sleepScore + stress_avg;
-  return { o6Data, o6Score };
+  const { sleep_hours, problems_overwhelming, enjoyable, felt_nervous } =
+    o6Data;
+  if (!SLEEP_MAP.hasOwnProperty(sleep_hours)) {
+    throw new ValidationError(`Invalid sleep_hours value: ${sleep_hours}.`);
+  }
+  if (
+    !STRESS_MAP.hasOwnProperty(problems_overwhelming) ||
+    !STRESS_MAP.hasOwnProperty(enjoyable) ||
+    !STRESS_MAP.hasOwnProperty(felt_nervous)
+  ) {
+    throw new ValidationError(
+      "Invalid value for one of the stress-related fields."
+    );
+  }
+  const sleepScore = SLEEP_MAP[sleep_hours];
+  const stress_avg =
+    (STRESS_MAP[problems_overwhelming] +
+      STRESS_MAP[enjoyable] +
+      STRESS_MAP[felt_nervous]) /
+    3;
+  const o6Score = sleepScore + stress_avg;
+
+  // --- START OF FIX ---
+  return { 
+    o6Data, 
+    o6Score,
+    sleepScore: sleepScore,     // Pass the sub-score out
+    stressScore: stress_avg     // Pass the sub-score out (we rename it stressScore)
+  };
+  // --- END OF FIX ---
 };
 
 const score_o2_sat = (value_pct) =>
@@ -509,264 +534,277 @@ const calculateCuoreScore = (allData, allScores) => {
 // ... (Make sure OnboardingModel is imported/defined)
 
 exports.processAndSaveFinalSubmission = async (userId, payload) => {
-  try {
-    const existingDoc = await OnboardingModel.findOne({ userId });
+  try {
+    const existingDoc = await OnboardingModel.findOne({ userId });
 
-    if (!existingDoc && !payload.o2Data) {
-      throw new ValidationError(
-        "A full submission (starting with o2Data) is required for the first onboarding."
-      );
-    }
+    if (!existingDoc && !payload.o2Data) {
+      throw new ValidationError(
+        "A full submission (starting with o2Data) is required for the first onboarding."
+      );
+    }
 
-    // --- 1️⃣ DEFINE SAFE MERGE HELPER ---
-    const safeMerge = (existing = {}, incoming = {}) => {
-      const result = { ...existing };
-      for (const [key, value] of Object.entries(incoming)) {
-        if (
-          value === undefined ||
-          value === null ||
-          value === "" ||
-          (typeof value === "boolean" && value === false)
-        ) {
-          continue;
-        }
-        result[key] = value;
-      }
-      return result;
-    };
+    // --- 1️⃣ DEFINE SAFE MERGE HELPER ---
+    const safeMerge = (existing = {}, incoming = {}) => {
+      const result = { ...existing };
+      for (const [key, value] of Object.entries(incoming)) {
+        if (
+          value === undefined ||
+          value === null ||
+          value === "" ||
+          (typeof value === "boolean" && value === false)
+        ) {
+          continue;
+        }
+        result[key] = value;
+      }
+      return result;
+    };
 
-    // --- 2️⃣ FETCH EXISTING DATA ---
-    const existingData = existingDoc ? existingDoc.toObject() : {};
+    // --- 2️⃣ FETCH EXISTING DATA ---
+    const existingData = existingDoc ? existingDoc.toObject() : {};
 
-    // --- 3️⃣ SMART MERGE FOR O3 DATA (PERSISTENCE FIX) ---
-    const existingO3 = existingData.o3Data || {};
-    const incomingO3 = payload.o3Data || {};
-    const mergedO3 = { ...existingO3 };
+    // --- 3️⃣ SMART MERGE FOR O3 DATA (PERSISTENCE FIX) ---
+    const existingO3 = existingData.o3Data || {};
+    const incomingO3 = payload.o3Data || {};
+    const mergedO3 = { ...existingO3 };
 
-    ["q1", "q2", "q3", "q4", "q5", "q6", "other_conditions", "hasHypertension", "hasDiabetes"].forEach(
-      (field) => {
-        if (incomingO3[field] !== undefined && incomingO3[field] !== null) {
-          mergedO3[field] = incomingO3[field];
-        }
-      }
-    );
+    ["q1", "q2", "q3", "q4", "q5", "q6", "other_conditions", "hasHypertension", "hasDiabetes"].forEach(
+      (field) => {
+        if (incomingO3[field] !== undefined && incomingO3[field] !== null) {
+          mergedO3[field] = incomingO3[field];
+        }
+      }
+    );
 
-    if (Array.isArray(incomingO3.selectedOptions)) {
-      mergedO3.selectedOptions = incomingO3.selectedOptions;
-    }
+    if (Array.isArray(incomingO3.selectedOptions)) {
+      mergedO3.selectedOptions = incomingO3.selectedOptions;
+    }
 
-    // --- 4️⃣ BUILD MERGED DATA SAFELY ---
-    const mergedData = {
-      ...existingData,
-      ...payload,
-      o2Data: safeMerge(existingData.o2Data, payload.o2Data),
-      o3Data: mergedO3,
-      o4Data: safeMerge(existingData.o4Data, payload.o4Data),
-      o5Data: safeMerge(existingData.o5Data, payload.o5Data),
-      o6Data: safeMerge(existingData.o6Data, payload.o6Data),
-      o7Data: { ...existingData.o7Data },
-    };
+    // --- 4️⃣ BUILD MERGED DATA SAFELY ---
+    const mergedData = {
+      ...existingData,
+      ...payload,
+      o2Data: safeMerge(existingData.o2Data, payload.o2Data),
+      o3Data: mergedO3,
+      o4Data: safeMerge(existingData.o4Data, payload.o4Data),
+      o5Data: safeMerge(existingData.o5Data, payload.o5Data),
+      o6Data: safeMerge(existingData.o6Data, payload.o6Data),
+      o7Data: { ...existingData.o7Data },
+    };
 
-    // ✅ Overwrite all O7 fields: clear old data if missing or blank
-    const allO7Keys = [
-      "o2_sat",
-      "pulse",
-      "bp_upper",
-      "bp_lower",
-      "bs_f",
-      "bs_am",
-      "A1C",
-      "HDL",
-      "LDL",
-      "Trig",
-      "HsCRP",
-      "trig_hdl_ratio",
-    ];
+    // ✅ Overwrite all O7 fields: clear old data if missing or blank
+    const allO7Keys = [
+      "o2_sat",
+      "pulse",
+      "bp_upper",
+      "bp_lower",
+      "bs_f",
+      "bs_am",
+      "A1C",
+      "HDL",
+      "LDL",
+      "Trig",
+      "HsCRP",
+      "trig_hdl_ratio",
+    ];
 
-    for (const key of allO7Keys) {
-      if (payload.o7Data && key in payload.o7Data) {
-        mergedData.o7Data[key] =
-          payload.o7Data[key] === "" ? null : payload.o7Data[key];
-      } else {
-        mergedData.o7Data[key] = null;
-      }
-    }
+    for (const key of allO7Keys) {
+      if (payload.o7Data && key in payload.o7Data) {
+        mergedData.o7Data[key] =
+          payload.o7Data[key] === "" ? null : payload.o7Data[key];
+      } else {
+        mergedData.o7Data[key] = null;
+      }
+    }
 
-    // --- 5️⃣ CALCULATE METRICS & SCORES ---
-    const o2Metrics = validateAndCalculateScores(mergedData.o2Data);
-    const o3Metrics = processO3Data(mergedData.o3Data);
-    const o4Metrics = processO4Data(mergedData.o4Data);
-    const o5Metrics = processO5Data(mergedData.o5Data);
-    const o6Metrics = processO6Data(mergedData.o6Data);
+    // --- 5️⃣ CALCULATE METRICS & SCORES ---
+    // These objects (o5Metrics, o6Metrics) now contain the sub-scores
+    const o2Metrics = validateAndCalculateScores(mergedData.o2Data);
+    const o3Metrics = processO3Data(mergedData.o3Data);
+    const o4Metrics = processO4Data(mergedData.o4Data);
+    const o5Metrics = processO5Data(mergedData.o5Data);
+    const o6Metrics = processO6Data(mergedData.o6Data);
 
-    let processedO7Data;
-    const o7Payload = mergedData.o7Data || {};
-    const manuallyEnteredFields = Object.keys(o7Payload).filter(
-      (key) =>
-        o7Payload[key] !== null &&
-        o7Payload[key] !== undefined &&
-        key !== "auto_filled"
-    );
+    let processedO7Data;
+    const o7Payload = mergedData.o7Data || {};
+    const manuallyEnteredFields = Object.keys(o7Payload).filter(
+      (key) =>
+        o7Payload[key] !== null &&
+        o7Payload[key] !== undefined &&
+        key !== "auto_filled"
+    );
 
-    if (manuallyEnteredFields.length > 0) {
-      processedO7Data = {
-        ...getAutofillData(0),
-        ...Object.fromEntries(
-          manuallyEnteredFields.map((field) => [field, o7Payload[field]])
-        ),
-        manual_fields: manuallyEnteredFields,
-        auto_filled: false,
-      };
+    if (manuallyEnteredFields.length > 0) {
+      processedO7Data = {
+        ...getAutofillData(0),
+        ...Object.fromEntries(
+          manuallyEnteredFields.map((field) => [field, o7Payload[field]])
+        ),
+        manual_fields: manuallyEnteredFields,
+        auto_filled: false,
+      };
 
-      if (processedO7Data.bs_f && processedO7Data.bs_am && !processedO7Data.A1C) {
-        processedO7Data.A1C = roundTo(
-          ((processedO7Data.bs_f + processedO7Data.bs_am) / 2 + 46.7) / 28.7,
-          2
-        );
-      }
-      if (processedO7Data.Trig && processedO7Data.HDL && !processedO7Data.trig_hdl_ratio) {
-        processedO7Data.trig_hdl_ratio = roundTo(
-          processedO7Data.Trig / processedO7Data.HDL,
-          2
-        );
-      }
-    } else {
-      const tempScores = {
-        ...o2Metrics.scores,
-        o3Score: o3Metrics.o3Score,
-        o4Score: o4Metrics.o4Score,
-        o5Score: o5Metrics.o5Score,
-        o6Score: o6Metrics.o6Score,
-      };
+      if (processedO7Data.bs_f && processedO7Data.bs_am && !processedO7Data.A1C) {
+        processedO7Data.A1C = roundTo(
+          ((processedO7Data.bs_f + processedO7Data.bs_am) / 2 + 46.7) / 28.7,
+          2
+        );
+      }
+      if (processedO7Data.Trig && processedO7Data.HDL && !processedO7Data.trig_hdl_ratio) {
+        processedO7Data.trig_hdl_ratio = roundTo(
+          processedO7Data.Trig / processedO7Data.HDL,
+          2
+        );
+      }
+    } else {
+      const tempScores = {
+        ...o2Metrics.scores,
+        o3Score: o3Metrics.o3Score,
+        o4Score: o4Metrics.o4Score,
+        o5Score: o5Metrics.o5Score,
+        o6Score: o6Metrics.o6Score,
+      };
 
-      const totalScoreBeforeO7 = Object.values(tempScores)
-        .filter((s) => typeof s === "number")
-        .reduce((a, b) => a + b, 0);
+      const totalScoreBeforeO7 = Object.values(tempScores)
+        .filter((s) => typeof s === "number")
+        .reduce((a, b) => a + b, 0);
 
-      processedO7Data = {
-        ...getAutofillData(totalScoreBeforeO7),
-        manual_fields: [],
-        auto_filled: true,
-      };
-    }
+      processedO7Data = {
+        ...getAutofillData(totalScoreBeforeO7),
+        manual_fields: [],
+        auto_filled: true,
+      };
+    }
 
-    // --- 6️⃣ O7 SCORE CALCULATION ---
-    const o7Score =
-      score_o2_sat(processedO7Data.o2_sat) +
-      score_hr(processedO7Data.pulse) +
-      (score_bp_upper(processedO7Data.bp_upper) +
-        score_bp_lower(processedO7Data.bp_lower)) /
-        2 +
-      (score_bs_f(processedO7Data.bs_f) +
-        score_bs_am(processedO7Data.bs_am) +
-        score_a1c(processedO7Data.A1C)) /
-        3 +
-      score_hdl(processedO7Data.HDL) +
-      score_ldl(processedO7Data.LDL) +
-      score_trig(processedO7Data.Trig) +
-      score_hscrp(processedO7Data.HsCRP) +
-      score_trig_hdl_ratio(processedO7Data.trig_hdl_ratio);
+    // --- 6️⃣ O7 SCORE CALCULATION ---
+    const o7Score =
+      score_o2_sat(processedO7Data.o2_sat) +
+      score_hr(processedO7Data.pulse) +
+      (score_bp_upper(processedO7Data.bp_upper) +
+        score_bp_lower(processedO7Data.bp_lower)) /
+        2 +
+      (score_bs_f(processedO7Data.bs_f) +
+        score_bs_am(processedO7Data.bs_am) +
+        score_a1c(processedO7Data.A1C)) /
+        3 +
+      score_hdl(processedO7Data.HDL) +
+      score_ldl(processedO7Data.LDL) +
+      score_trig(processedO7Data.Trig) +
+      score_hscrp(processedO7Data.HsCRP) +
+      score_trig_hdl_ratio(processedO7Data.trig_hdl_ratio);
 
-    const allScores = {
-      ...o2Metrics.scores,
-      o3Score: o3Metrics.o3Score,
-      o4Score: o4Metrics.o4Score,
-      o5Score: o5Metrics.o5Score,
-      o6Score: o6Metrics.o6Score,
-      o7Score,
-    };
+    const allScores = {
+      ...o2Metrics.scores,
+      o3Score: o3Metrics.o3Score,
+      o4Score: o4Metrics.o4Score,
+      o5Score: o5Metrics.o5Score,
+      o6Score: o6Metrics.o6Score,
+      o7Score,
+    };
 
-    // --- 7️⃣ BUILD FINAL DATA TO SAVE ---
-    const finalDataToSave = {
-      userId,
-      onboardingVersion: "7",
-      o2Data: o2Metrics.o2Data,
-      derivedMetrics: o2Metrics.derivedMetrics,
-      o3Data: o3Metrics.o3Data,
-      o4Data: o4Metrics.o4Data,
-      o5Data: o5Metrics.o5Data,
-      o6Data: o6Metrics.o6Data,
-      timestamp: new Date(),
-    };
+    // --- 7️⃣ BUILD FINAL DATA TO SAVE ---
+    const finalDataToSave = {
+      userId,
+      onboardingVersion: "7",
+      o2Data: o2Metrics.o2Data,
+      derivedMetrics: o2Metrics.derivedMetrics,
+      o3Data: o3Metrics.o3Data,
+      o4Data: o4Metrics.o4Data,
+      o5Data: o5Metrics.o5Data,
+      o6Data: o6Metrics.o6Data,
+      timestamp: new Date(),
+    };
 
-    const { manual_fields } = processedO7Data;
-    finalDataToSave.o7Data = {};
-    for (const key of allO7Keys) {
-      finalDataToSave.o7Data[key] = manual_fields.includes(key)
-        ? processedO7Data[key] ?? null
-        : null;
-    }
-    finalDataToSave.o7Data.manual_fields = manual_fields;
-    finalDataToSave.o7Data.auto_filled = false;
+    const { manual_fields } = processedO7Data;
+    finalDataToSave.o7Data = {};
+    for (const key of allO7Keys) {
+      finalDataToSave.o7Data[key] = manual_fields.includes(key)
+        ? processedO7Data[key] ?? null
+        : null;
+    }
+    finalDataToSave.o7Data.manual_fields = manual_fields;
+    finalDataToSave.o7Data.auto_filled = false;
 
-    // --- 8️⃣ CUORE SCORE ---
-    allScores.cuoreScore = calculateCuoreScore(finalDataToSave, allScores);
-    finalDataToSave.scores = allScores;
+    // --- 8️⃣ CUORE SCORE ---
+    allScores.cuoreScore = calculateCuoreScore(finalDataToSave, allScores);
+     finalDataToSave.scores = allScores;
 
-    // --- 9️⃣ HISTORY SNAPSHOTS ---
-    const submissionTimestamp = finalDataToSave.timestamp;
-    const o2Snapshot = {
-      data: {
-        weight_kg: finalDataToSave.o2Data.weight_kg,
-        bmi: finalDataToSave.derivedMetrics.bmi,
-      },
-      timestamp: submissionTimestamp,
-    };
-    const o5Snapshot = {
-      data: { o5Score: finalDataToSave.scores.o5Score },
-      timestamp: submissionTimestamp,
-    };
-    const o6Snapshot = {
-      data: { o6Score: finalDataToSave.scores.o6Score },
-      timestamp: submissionTimestamp,
-    };
-    const o7Snapshot = {
-      data: { ...finalDataToSave.o7Data },
-      timestamp: submissionTimestamp,
-    };
-    const scoreSnapshot = {
-      data: { cuoreScore: finalDataToSave.scores.cuoreScore },
-      timestamp: submissionTimestamp,
-    };
+    // --- 9️⃣ HISTORY SNAPSHOTS ---
+    const submissionTimestamp = finalDataToSave.timestamp;
+    const o2Snapshot = {
+      data: {
+        weight_kg: finalDataToSave.o2Data.weight_kg,
+        bmi: finalDataToSave.derivedMetrics.bmi,
+      },
+      timestamp: submissionTimestamp,
+    };
 
-    // --- 🔟 UPDATE DB ---
-    const updateOperation = { $set: finalDataToSave };
-    const pushOperations = {};
+    // --- START OF FIX ---
+    // We now add the individual sub-scores to the snapshot
+    const o5Snapshot = {
+      data: { 
+        o5Score: finalDataToSave.scores.o5Score,
+        foodScore: o5Metrics.foodScore,         // Assumes o5Metrics has foodScore
+        exerciseScore: o5Metrics.exerciseScore  // Assumes o5Metrics has exerciseScore
+     },
+      timestamp: submissionTimestamp,
+    };
+    const o6Snapshot = {
+      data: { 
+        o6Score: finalDataToSave.scores.o6Score,
+        sleepScore: o6Metrics.sleepScore,       // Assumes o6Metrics has sleepScore
+        stressScore: o6Metrics.stressScore      // Assumes o6Metrics has stressScore
+      },
+      timestamp: submissionTimestamp,
+    };
+    // --- END OF FIX ---
 
-    if (payload.o2Data && Object.keys(payload.o2Data).length > 0)
-      pushOperations.o2History = o2Snapshot;
-    if (payload.o5Data && Object.keys(payload.o5Data).length > 0)
-      pushOperations.o5History = o5Snapshot;
-    if (payload.o6Data && Object.keys(payload.o6Data).length > 0)
-      pushOperations.o6History = o6Snapshot;
-    if (payload.o7Data && Object.keys(payload.o7Data).length > 0)
-      pushOperations.o7History = o7Snapshot;
+    const o7Snapshot = {
+      data: { ...finalDataToSave.o7Data },
+      timestamp: submissionTimestamp,
+    };
+    const scoreSnapshot = {
+      data: { cuoreScore: finalDataToSave.scores.cuoreScore },
+      timestamp: submissionTimestamp,
+    };
 
-    pushOperations.scoreHistory = scoreSnapshot;
-    if (Object.keys(pushOperations).length > 0)
-      updateOperation.$push = pushOperations;
+    // --- 🔟 UPDATE DB ---
+    const updateOperation = { $set: finalDataToSave };
+    const pushOperations = {};
 
-    const finalOnboardingDoc = await OnboardingModel.findOneAndUpdate(
-      { userId },
-      updateOperation,
-      { new: true, upsert: true, runValidators: true }
-    );
+    if (payload.o2Data && Object.keys(payload.o2Data).length > 0)
+     pushOperations.o2History = o2Snapshot;
+    if (payload.o5Data && Object.keys(payload.o5Data).length > 0)
+      pushOperations.o5History = o5Snapshot;
+    if (payload.o6Data && Object.keys(payload.o6Data).length > 0)
+      pushOperations.o6History = o6Snapshot;
+    if (payload.o7Data && Object.keys(payload.o7Data).length > 0)
+      pushOperations.o7History = o7Snapshot;
 
-    if (!finalOnboardingDoc)
-      throw new ValidationError("Failed to save onboarding data.");
+    pushOperations.scoreHistory = scoreSnapshot;
+    if (Object.keys(pushOperations).length > 0)
+      updateOperation.$push = pushOperations;
 
-    return finalOnboardingDoc;
-  } catch (error) {
-    console.error(
-      "Error in processAndSaveFinalSubmission:",
-      error.name,
-      error.message
-    );
-    if (error.name === "ValidationError") throw error;
-    throw new Error("Internal Server Error");
-  }
+    const finalOnboardingDoc = await OnboardingModel.findOneAndUpdate(
+      { userId },
+      updateOperation,
+      { new: true, upsert: true, runValidators: true }
+   );
+
+    if (!finalOnboardingDoc)
+      throw new ValidationError("Failed to save onboarding data.");
+
+    return finalOnboardingDoc;
+  } catch (error) {
+    console.error(
+      "Error in processAndSaveFinalSubmission:",
+      error.name,
+      error.message
+    );
+    if (error.name === "ValidationError") throw error;
+   throw new Error("Internal Server Error");
+  }
 };
-
 
 
 
