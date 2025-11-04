@@ -628,181 +628,83 @@ const getTimelineData = async (userId, dateString) => {
 
   // --- Fetch onboarding data ---
   const onboarding = await Onboarding.findOne({ userId })
-    .select('o4Data.smoking o5Data.preferred_ex_time o6Data.wake_time') // 'smoking' is what's in your doc
+    // --- 1. START: THE FIX ---
+    // Select the new 24-hour field you are saving
+    .select('o4Data.smoking o5Data.preferred_ex_time_24 o6Data.wake_time') 
     .lean();
+    // --- END: THE FIX ---
 
-  // --- START: UPDATED TIMING LOGIC ---
-
-  // 🕖 --- 1. Define Key Time Anchors based on Word Doc ---
+  // --- 2. Define Key Time Anchors (using doc logic) ---
   const preferredWake = convertTo24Hour(onboarding?.o6Data?.wake_time) || '07:00';
   const [wakeHour, wakeMinute] = preferredWake.split(':').map(Number);
   let wakeUpAnchor = localDay.hour(wakeHour).minute(wakeMinute);
   if (!wakeUpAnchor.isValid()) wakeUpAnchor = localDay.hour(7).minute(0);
 
-  // Per Doc: Breakfast = Wake + 1h 45m (105 min)
   const breakfastTime = calculateScheduledTime(wakeUpAnchor, 105); 
-  
-  // Per Doc: Lunch = Wake + 6h 30m (390 min)
   const lunchTime = calculateScheduledTime(wakeUpAnchor, 390);
-
-  // Per Doc: Dinner = Lunch + 6h 30m (390 min)
   const dinnerTime = calculateScheduledTime(lunchTime, 390);
-
-  // Per Doc: Sleep = Wake + 16h (960 min)
   const sleepTime = calculateScheduledTime(wakeUpAnchor, 960);
 
-  // 🏃 Fitness time (from O5 if available)
+  // --- 3. START: THE FIX (Reading the correct time) ---
   let fitnessTime = null;
-  if (onboarding?.o5Data?.preferred_ex_time) {
-    const fitnessTimeStr = convertTo24Hour(onboarding.o5Data.preferred_ex_time);
-    fitnessTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${fitnessTimeStr}`, 'YYYY-MM-DD HH:mm', TZ);
+  // Read the 24-hour time (e.g., "14:30") your update function saves
+  const fitnessTimeStr24 = onboarding?.o5Data?.preferred_ex_time_24; 
+
+  if (fitnessTimeStr24) {
+    // Create the time object directly from the 24-hour string
+    fitnessTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${fitnessTimeStr24}`, 'YYYY-MM-DD HH:mm', TZ);
   } else {
-    // Doc fallback is "7:15:00 AM", which is Wake + 30m if wake is 6:45
-    // Your old fallback was Wake + 360. Let's use the doc's example:
+    // Fallback logic from the doc
     fitnessTime = calculateScheduledTime(wakeUpAnchor, 30); 
   }
+  // --- END: THE FIX ---
 
-  // 🚬 Check if user is a smoker (o4Data.smoking, not o4Data.smoking_status)
   const smokingStatus = onboarding?.o4Data?.smoking?.trim().toLowerCase();
   const isSmoker = smokingStatus === 'daily' || smokingStatus === 'occasionally';
 
-  // --- 2. Build System Cards with NEW timings ---
+  // --- 4. Build System Cards (with corrected timings) ---
   const systemCards = [
-    {
-      time: wakeUpAnchor,
-      icon: '🌞',
-      title: 'Wake Up',
-      description: 'Ease into your day with Morning Calm',
-      type: 'SYSTEM_WAKEUP'
-    },
+    { time: wakeUpAnchor, icon: '🌞', title: 'Wake Up', description: 'Ease into your day with Morning Calm', type: 'SYSTEM_WAKEUP' },
     ...(isSmoker
-      ? [{
-          time: calculateScheduledTime(wakeUpAnchor, 10), // wake + 10 mins
-          icon: '🚭',
-          title: 'Your Daily Health Win',
-          description: 'Skip the smoke, feel the difference',
-          type: 'SYSTEM_TOBACCO'
-        }]
+      ? [{ time: calculateScheduledTime(wakeUpAnchor, 10), icon: '🚭', title: 'Your Daily Health Win', description: 'Skip the smoke, feel the difference', type: 'SYSTEM_TOBACCO' }]
       : []),
-    {
-      time: calculateScheduledTime(wakeUpAnchor, 15), // wake + 15 mins
-      icon: '🔥',
-      title: 'Calorie Ignite',
-      description: 'Jumpstart your metabolism',
-      type: 'SYSTEM_CALORIE_IGNITE'
-    },
-    {
-      time: fitnessTime, // User preferred or fallback
-      icon: '🏃',
-      title: 'Fitness',
-      description: 'Cardio & strength training',
-      type: 'SYSTEM_FITNESS'
-    },
-    {
-      time: breakfastTime, // wake + 1h 45m
-      icon: '🍳',
-      title: 'Breakfast',
-      description: 'Boost your energy',
-      type: 'SYSTEM_NUTRITION'
-    },
-    {
-      time: calculateScheduledTime(breakfastTime, 150), // Breakfast + 2h 30m
-      icon: '🥤',
-      title: 'Mid-Morning Boost',
-      description: 'A handful of fruit',
-      type: 'SYSTEM_SNACK'
-    },
-    {
-      time: calculateScheduledTime(lunchTime, -60), // Lunch - 1h
-      icon: '💧',
-      title: 'Hydration Check',
-      description: 'You should have had 3-4 glasses of water by now.',
-      type: 'SYSTEM_HYDRATION'
-    },
-    {
-      time: lunchTime, // wake + 6h 30m
-      icon: '🍽️',
-      title: 'Lunch',
-      description: 'Re-energize yourself',
-      type: 'SYSTEM_NUTRITION'
-    },
-    {
-      time: calculateScheduledTime(lunchTime, 60), // Lunch + 1h
-      icon: '😴',
-      title: 'Short Nap or Walk',
-      description: 'Defeat the midday slump',
-      type: 'SYSTEM_REST'
-    },
-    {
-      time: calculateScheduledTime(lunchTime, 180), // Lunch + 3h
-      icon: '🥗',
-      title: 'Refresh & Refuel',
-      description: 'Evening snacks',
-      type: 'SYSTEM_SNACK'
-    },
-    {
-      time: calculateScheduledTime(dinnerTime, -60), // Dinner - 1h
-      icon: '💧',
-      title: 'Hydration Check',
-      description: 'You should have had 7-8 glasses of water by now.',
-      type: 'SYSTEM_HYDRATION'
-    },
-    {
-      time: dinnerTime, // Lunch + 6h 30m
-      icon: '🌙',
-      title: 'Dinner',
-      description: 'Balanced and light',
-      type: 'SYSTEM_NUTRITION'
-    },
-    {
-      time: calculateScheduledTime(dinnerTime, 30), // Dinner + 30m
-      icon: '🚶',
-      title: 'After-Dinner Walk',
-      description: '10-15 min',
-      type: 'SYSTEM_REST'
-    },
-    {
-      time: calculateScheduledTime(sleepTime, -30), // Sleep - 30m
-      icon: '🥛',
-      title: 'Optional Snack',
-      description: 'A small cup of milk, or 2 Marie biscuits',
-      type: 'SYSTEM_SNACK'
-    },
-    {
-      time: sleepTime, // wake + 16h
-      icon: '🛌',
-      title: 'Sleep',
-      description: 'Unwind gently with Restful Night',
-      type: 'SYSTEM_REST'
-    }
+    { time: calculateScheduledTime(wakeUpAnchor, 15), icon: '🔥', title: 'Calorie Ignite', description: 'Jumpstart your metabolism', type: 'SYSTEM_CALORIE_IGNITE' },
+    { time: fitnessTime, icon: '🏃', title: 'Fitness', description: 'Cardio & strength training', type: 'SYSTEM_FITNESS' },
+    { time: breakfastTime, icon: '🍳', title: 'Breakfast', description: 'Boost your energy', type: 'SYSTEM_NUTRITION' },
+    { time: calculateScheduledTime(breakfastTime, 150), icon: '🥤', title: 'Mid-Morning Boost', description: 'A handful of fruit', type: 'SYSTEM_SNACK' },
+    { time: calculateScheduledTime(lunchTime, -60), icon: '💧', title: 'Hydration Check', description: 'You should have had 3-4 glasses of water by now.', type: 'SYSTEM_HYDRATION' },
+    { time: lunchTime, icon: '🍽️', title: 'Lunch', description: 'Re-energize yourself', type: 'SYSTEM_NUTRITION' },
+    { time: calculateScheduledTime(lunchTime, 60), icon: '😴', title: 'Short Nap or Walk', description: 'Defeat the midday slump', type: 'SYSTEM_REST' },
+    { time: calculateScheduledTime(lunchTime, 180), icon: '🥗', title: 'Refresh & Refuel', description: 'Evening snacks', type: 'SYSTEM_SNACK' },
+    { time: calculateScheduledTime(dinnerTime, -60), icon: '💧', title: 'Hydration Check', description: 'You should have had 7-8 glasses of water by now.', type: 'SYSTEM_HYDRATION' },
+    { time: dinnerTime, icon: '🌙', title: 'Dinner', description: 'Balanced and light', type: 'SYSTEM_NUTRITION' },
+    { time: calculateScheduledTime(dinnerTime, 30), icon: '🚶', title: 'After-Dinner Walk', description: '10-15 min', type: 'SYSTEM_REST' },
+    { time: calculateScheduledTime(sleepTime, -30), icon: '🥛', title: 'Optional Snack', description: 'A small cup of milk, or 2 Marie biscuits', type: 'SYSTEM_SNACK' },
+    { time: sleepTime, icon: '🛌', title: 'Sleep', description: 'Unwind gently with Restful Night', type: 'SYSTEM_REST' }
   ].map(card => ({
     ...card,
     completed: dayjs().tz(TZ).isAfter(card.time),
     reminder: true,
-    editable: card.type === 'SYSTEM_WAKEUP' // all others not editable
+    editable: card.type === 'SYSTEM_WAKEUP'
   }));
-  // --- END: UPDATED TIMING LOGIC ---
 
-
-  // --- Fetch user-created reminder cards ---
+  // --- 5. Fetch user-created reminder cards ---
   const rawCards = await TimelineCard.find({
     userId,
     scheduleDate: { $gte: utcStart, $lte: utcEnd }
- });
+  });
 
   const userCards = rawCards
     .map(card => {
       if (!card.scheduledTime) return null;
-
       const parsedTime = dayjs.tz(
         `${localDay.format('YYYY-MM-DD')} ${convertTo24Hour(card.scheduledTime)}`,
         'YYYY-MM-DD HH:mm',
         TZ
       );
-
       if (!parsedTime.isValid()) return null;
 
-      return {
+       return {
         time: parsedTime,
         icon: card.type === 'USER_MEDICATION' ? '💊' : '🔔',
         title: card.title,
@@ -817,42 +719,43 @@ const getTimelineData = async (userId, dateString) => {
     })
     .filter(Boolean);
 
-  // --- Combine & sort all cards ---
+  // --- 6. Combine & sort all cards ---
   const allCards = [...systemCards, ...userCards]
     .sort((a, b) => a.time.valueOf() - b.time.valueOf())
-    .map(card => ({ ...card, time: dayjs(card.time).tz(TZ).format('h:mm A') }));
+   .map(card => ({ ...card, time: dayjs(card.time).tz(TZ).format('h:mm A') }));
 
-  // --- Missed task tracking ---
+  // --- 7. Missed task tracking & NEW ALERT LOGIC ---
   const missedTasks = allCards.filter(task =>
     !task.completed &&
     dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${task.time}`, 'YYYY-MM-DD h:mm A', TZ)
       .isBefore(dayjs().tz(TZ))
   ).length;
 
-  // --- NEW: Alert Logic ---
   const alerts = [];
   if (missedTasks > 0) {
     alerts.push({
       type: 'warning',
       text: 'Reassess to keep your plan aligned',
-      action: 'Check Plan'
+       action: 'Check Plan'
     });
   }
 
-  // Per Doc: Check if fitness is too close to a meal
+  // --- START: 90-MINUTE MEAL CONFLICT ALERT (FIXED) ---
   const checkMealConflict = (mealTime) => {
-    const diff = fitnessTime.diff(mealTime, 'minutes');
-    return diff > 0 && diff < 90; // Fitness is AFTER meal but WITHIN 90 mins
+    // Check for conflicts 90 mins *before* or *after* the meal
+    const diff = Math.abs(fitnessTime.diff(mealTime, 'minutes'));
+    // diff < 90 means it's within the 90-minute window
+    return diff < 90; 
   };
 
   if (checkMealConflict(breakfastTime) || checkMealConflict(lunchTime) || checkMealConflict(dinnerTime)) {
     alerts.push({
       type: 'warning', // Or 'info'
-      text: 'Avoid exercising within 90 minutes of eating a meal.',
-      action: 'Adjust Plan' // Or some other action
+      text: 'Avoid exercising within 90 minutes of a meal.',
+      action: 'Adjust Plan'
     });
   }
-  // --- END: Alert Logic ---
+  // --- END: NEW ALERT LOGIC ---
 
   return { dailySchedule: allCards, missed: missedTasks, alerts };
 };
