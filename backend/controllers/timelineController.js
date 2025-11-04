@@ -599,7 +599,9 @@ exports.getHomeScreenData = async (req, res) => {
             // **MODIFIED**: This message is now dynamic based on your nudge logic
             motivationalMessage: motivationalMessage,
             alerts: alerts,
-            dailySchedule: timelineData.dailySchedule
+            dailySchedule: timelineData.dailySchedule,
+             streak: timelineData.streak
+            
         };
 
         res.status(200).json(payload);
@@ -613,156 +615,169 @@ exports.getHomeScreenData = async (req, res) => {
 // Timeline Helper
 // -----------------------------------------------------
 const getTimelineData = async (userId, dateString) => {
-  let localDay = dayjs.tz(dateString, TZ);
-  if (!localDay.isValid()) {
-    console.warn(`Invalid dateString received in getTimelineData: "${dateString}". Falling back to today.`);
-    localDay = dayjs().tz(TZ);
-  }
-  localDay = localDay.startOf('day');
+  let localDay = dayjs.tz(dateString, TZ);
+  if (!localDay.isValid()) {
+    console.warn(`Invalid dateString received in getTimelineData: "${dateString}". Falling back to today.`);
+    localDay = dayjs().tz(TZ);
+  }
+  localDay = localDay.startOf('day');
 
-  const utcStart = localDay.utc().toDate();
-  const utcEnd = localDay.endOf('day').utc().toDate();
+  const utcStart = localDay.utc().toDate();
+  const utcEnd = localDay.endOf('day').utc().toDate();
 
-  // --- Fetch onboarding data ---
-  const onboarding = await Onboarding.findOne({ userId })
-    // --- 1. START: THE FIX ---
-    // Select the new 24-hour field you are saving
-    .select('o4Data.smoking o5Data.preferred_ex_time o6Data.wake_time') 
-    .lean();
-    // --- END: THE FIX ---
+  // --- Fetch onboarding data ---
+  const onboarding = await Onboarding.findOne({ userId })
+    .select('o4Data.smoking o5Data.preferred_ex_time o6Data.wake_time streakCount lastStreakDate')
+    .lean();
 
-  // --- 2. Define Key Time Anchors (using doc logic) ---
-  const preferredWake = convertTo24Hour(onboarding?.o6Data?.wake_time) || '07:00';
-  const [wakeHour, wakeMinute] = preferredWake.split(':').map(Number);
-  let wakeUpAnchor = localDay.hour(wakeHour).minute(wakeMinute);
-  if (!wakeUpAnchor.isValid()) wakeUpAnchor = localDay.hour(7).minute(0);
+  if (!onboarding) return { dailySchedule: [], missed: 0, alerts: [], streak: 0 };
 
-  const breakfastTime = calculateScheduledTime(wakeUpAnchor, 105); 
+  // ✅ --- STREAK LOGIC START ---
+  const today = dayjs().startOf("day");
+  const lastStreakDate = onboarding.lastStreakDate ? dayjs(onboarding.lastStreakDate).startOf("day") : null;
+
+  let streakCount = onboarding.streakCount || 0;
+
+  if (!lastStreakDate) {
+    streakCount = 1;
+  } else if (today.diff(lastStreakDate, "day") === 1) {
+    streakCount += 1;
+  } else if (today.diff(lastStreakDate, "day") > 1) {
+    streakCount = 1;
+  }
+
+  if (!lastStreakDate || today.isAfter(lastStreakDate)) {
+    await Onboarding.updateOne(
+      { userId },
+      { streakCount, lastStreakDate: new Date() }
+    );
+  }
+  console.log("✅ STREAK:", onboarding.streakCount, onboarding.lastStreakDate);
+
+  // ✅ --- STREAK LOGIC END ---
+
+  // --- Time Anchors ---
+  const preferredWake = convertTo24Hour(onboarding?.o6Data?.wake_time) || '07:00';
+  const [wakeHour, wakeMinute] = preferredWake.split(':').map(Number);
+  let wakeUpAnchor = localDay.hour(wakeHour).minute(wakeMinute);
+  if (!wakeUpAnchor.isValid()) wakeUpAnchor = localDay.hour(7).minute(0);
+
+  const breakfastTime = calculateScheduledTime(wakeUpAnchor, 105);
   const lunchTime = calculateScheduledTime(wakeUpAnchor, 390);
   const dinnerTime = calculateScheduledTime(lunchTime, 390);
   const sleepTime = calculateScheduledTime(wakeUpAnchor, 960);
 
-  // --- 3. START: THE FIX (Reading the correct time) ---
-  // replace the whole fitnessTime block with:
-let fitnessTime;
-const fitnessTimeStr12 = onboarding?.o5Data?.preferred_ex_time?.trim(); // e.g., "9:05 PM"
+  // --- Fitness Time ---
+  let fitnessTime;
+  const fitnessTimeStr12 = onboarding?.o5Data?.preferred_ex_time?.trim();
+  if (fitnessTimeStr12) {
+    const fitnessTimeStr24 = convertTo24Hour(fitnessTimeStr12);
+    fitnessTime = dayjs.tz(
+      `${localDay.format('YYYY-MM-DD')} ${fitnessTimeStr24}`,
+      'YYYY-MM-DD HH:mm',
+      TZ
+    );
+  } else {
+    fitnessTime = calculateScheduledTime(wakeUpAnchor, 30);
+  }
 
-if (fitnessTimeStr12) {
-  // reuse your existing converter to avoid AM/PM parse issues
-  const fitnessTimeStr24 = convertTo24Hour(fitnessTimeStr12); // -> "21:05"
-  fitnessTime = dayjs.tz(
-    `${localDay.format('YYYY-MM-DD')} ${fitnessTimeStr24}`,
-    'YYYY-MM-DD HH:mm',
-    TZ
-  );
-} else {
-  fitnessTime = calculateScheduledTime(wakeUpAnchor, 30);
-}
-// console.log("Fitness Time from DB:", onboarding?.o5Data?.preferred_ex_time);
+  const smokingStatus = onboarding?.o4Data?.smoking?.trim().toLowerCase();
+  const isSmoker = smokingStatus === 'daily' || smokingStatus === 'occasionally';
 
-
-  // --- END: THE FIX ---
-
-  const smokingStatus = onboarding?.o4Data?.smoking?.trim().toLowerCase();
-  const isSmoker = smokingStatus === 'daily' || smokingStatus === 'occasionally';
-
-  // --- 4. Build System Cards (with corrected timings) ---
-  const systemCards = [
-    { time: wakeUpAnchor, icon: '🌞', title: 'Wake Up', description: 'Ease into your day with Morning Calm', type: 'SYSTEM_WAKEUP' },
-    ...(isSmoker
-      ? [{ time: calculateScheduledTime(wakeUpAnchor, 10), icon: '🚭', title: 'Your Daily Health Win', description: 'Skip the smoke, feel the difference', type: 'SYSTEM_TOBACCO' }]
-      : []),
-    { time: calculateScheduledTime(wakeUpAnchor, 15), icon: '🔥', title: 'Calorie Ignite', description: 'Jumpstart your metabolism', type: 'SYSTEM_CALORIE_IGNITE' },
-    { time: fitnessTime, icon: '🏃', title: 'Fitness', description: 'Cardio & strength training', type: 'SYSTEM_FITNESS' },
-    { time: breakfastTime, icon: '🍳', title: 'Breakfast', description: 'Boost your energy', type: 'SYSTEM_NUTRITION' },
+  // --- System Cards ---
+  const systemCards = [
+    { time: wakeUpAnchor, icon: '🌞', title: 'Wake Up', description: 'Ease into your day with Morning Calm', type: 'SYSTEM_WAKEUP' },
+    ...(isSmoker
+      ? [{ time: calculateScheduledTime(wakeUpAnchor, 10), icon: '🚭', title: 'Your Daily Health Win', description: 'Skip the smoke, feel the difference', type: 'SYSTEM_TOBACCO' }]
+      : []),
+    { time: calculateScheduledTime(wakeUpAnchor, 15), icon: '🔥', title: 'Calorie Ignite', description: 'Jumpstart your metabolism', type: 'SYSTEM_CALORIE_IGNITE' },
+    { time: fitnessTime, icon: '🏃', title: 'Fitness', description: 'Cardio & strength training', type: 'SYSTEM_FITNESS' },
+    { time: breakfastTime, icon: '🍳', title: 'Breakfast', description: 'Boost your energy', type: 'SYSTEM_NUTRITION' },
     { time: calculateScheduledTime(breakfastTime, 150), icon: '🥤', title: 'Mid-Morning Boost', description: 'A handful of fruit', type: 'SYSTEM_SNACK' },
     { time: calculateScheduledTime(lunchTime, -60), icon: '💧', title: 'Hydration Check', description: 'You should have had 3-4 glasses of water by now.', type: 'SYSTEM_HYDRATION' },
-    { time: lunchTime, icon: '🍽️', title: 'Lunch', description: 'Re-energize yourself', type: 'SYSTEM_NUTRITION' },
-    { time: calculateScheduledTime(lunchTime, 60), icon: '😴', title: 'Short Nap or Walk', description: 'Defeat the midday slump', type: 'SYSTEM_REST' },
-    { time: calculateScheduledTime(lunchTime, 180), icon: '🥗', title: 'Refresh & Refuel', description: 'Evening snacks', type: 'SYSTEM_SNACK' },
+    { time: lunchTime, icon: '🍽️', title: 'Lunch', description: 'Re-energize yourself', type: 'SYSTEM_NUTRITION' },
+    { time: calculateScheduledTime(lunchTime, 60), icon: '😴', title: 'Short Nap or Walk', description: 'Defeat the midday slump', type: 'SYSTEM_REST' },
+    { time: calculateScheduledTime(lunchTime, 180), icon: '🥗', title: 'Refresh & Refuel', description: 'Evening snacks', type: 'SYSTEM_SNACK' },
     { time: calculateScheduledTime(dinnerTime, -60), icon: '💧', title: 'Hydration Check', description: 'You should have had 7-8 glasses of water by now.', type: 'SYSTEM_HYDRATION' },
-    { time: dinnerTime, icon: '🌙', title: 'Dinner', description: 'Balanced and light', type: 'SYSTEM_NUTRITION' },
-    { time: calculateScheduledTime(dinnerTime, 30), icon: '🚶', title: 'After-Dinner Walk', description: '10-15 min', type: 'SYSTEM_REST' },
+    { time: dinnerTime, icon: '🌙', title: 'Dinner', description: 'Balanced and light', type: 'SYSTEM_NUTRITION' },
+    { time: calculateScheduledTime(dinnerTime, 30), icon: '🚶', title: 'After-Dinner Walk', description: '10-15 min', type: 'SYSTEM_REST' },
     { time: calculateScheduledTime(sleepTime, -30), icon: '🥛', title: 'Optional Snack', description: 'A small cup of milk, or 2 Marie biscuits', type: 'SYSTEM_SNACK' },
-    { time: sleepTime, icon: '🛌', title: 'Sleep', description: 'Unwind gently with Restful Night', type: 'SYSTEM_REST' }
-  ].map(card => ({
-    ...card,
-    completed: dayjs().tz(TZ).isAfter(card.time),
-    reminder: true,
-    editable: card.type === 'SYSTEM_WAKEUP'
-  }));
+    { time: sleepTime, icon: '🛌', title: 'Sleep', description: 'Unwind gently with Restful Night', type: 'SYSTEM_REST' }
+  ].map(card => ({
+    ...card,
+    completed: dayjs().tz(TZ).isAfter(card.time),
+    reminder: true,
+    editable: card.type === 'SYSTEM_WAKEUP'
+  }));
 
-  // --- 5. Fetch user-created reminder cards ---
-  const rawCards = await TimelineCard.find({
-    userId,
-    scheduleDate: { $gte: utcStart, $lte: utcEnd }
-  });
+  // --- User Cards ---
+  const rawCards = await TimelineCard.find({
+    userId,
+    scheduleDate: { $gte: utcStart, $lte: utcEnd }
+  });
 
-  const userCards = rawCards
-    .map(card => {
-      if (!card.scheduledTime) return null;
-      const parsedTime = dayjs.tz(
-        `${localDay.format('YYYY-MM-DD')} ${convertTo24Hour(card.scheduledTime)}`,
-        'YYYY-MM-DD HH:mm',
-        TZ
-      );
-      if (!parsedTime.isValid()) return null;
+  const userCards = rawCards
+    .map(card => {
+      if (!card.scheduledTime) return null;
+      const parsedTime = dayjs.tz(
+        `${localDay.format('YYYY-MM-DD')} ${convertTo24Hour(card.scheduledTime)}`,
+        'YYYY-MM-DD HH:mm',
+        TZ
+      );
+      if (!parsedTime.isValid()) return null;
 
-       return {
-        time: parsedTime,
-        icon: card.type === 'USER_MEDICATION' ? '💊' : '🔔',
-        title: card.title,
-        description: card.description,
-        completed: card.isCompleted,
-        reminder: true,
-        editable: card.type === 'USER_MEDICATION', 
-        type: card.type,
-        id: card._id.toString(),
-        sourceId: card.sourceId?.toString()
-      };
-    })
-    .filter(Boolean);
+      return {
+        time: parsedTime,
+        icon: card.type === 'USER_MEDICATION' ? '💊' : '🔔',
+        title: card.title,
+        description: card.description,
+        completed: card.isCompleted,
+        reminder: true,
+        editable: true,
+        type: card.type,
+        id: card._id.toString(),
+        sourceId: card.sourceId?.toString()
+      };
+    })
+    .filter(Boolean);
 
-  // --- 6. Combine & sort all cards ---
-  const allCards = [...systemCards, ...userCards]
-    .sort((a, b) => a.time.valueOf() - b.time.valueOf())
-   .map(card => ({ ...card, time: dayjs(card.time).tz(TZ).format('h:mm A') }));
+  const allCards = [...systemCards, ...userCards]
+    .sort((a, b) => a.time.valueOf() - b.time.valueOf())
+    .map(card => ({ ...card, time: dayjs(card.time).tz(TZ).format('h:mm A') }));
 
-  // --- 7. Missed task tracking & NEW ALERT LOGIC ---
-  const missedTasks = allCards.filter(task =>
-    !task.completed &&
-    dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${task.time}`, 'YYYY-MM-DD h:mm A', TZ)
-      .isBefore(dayjs().tz(TZ))
-  ).length;
+  const missedTasks = allCards.filter(task =>
+    !task.completed &&
+    dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${task.time}`, 'YYYY-MM-DD h:mm A', TZ)
+      .isBefore(dayjs().tz(TZ))
+  ).length;
 
-  const alerts = [];
-  if (missedTasks > 0) {
-    alerts.push({
-      type: 'warning',
-      text: 'Reassess to keep your plan aligned',
-       action: 'Check Plan'
-    });
-  }
+  const alerts = [];
+  if (missedTasks > 0) {
+    alerts.push({
+      type: 'warning',
+      text: 'Reassess to keep your plan aligned',
+      action: 'Check Plan'
+    });
+  }
 
-  // --- START: 90-MINUTE MEAL CONFLICT ALERT (FIXED) ---
-  const checkMealConflict = (mealTime) => {
-    // Check for conflicts 90 mins *before* or *after* the meal
-    const diff = Math.abs(fitnessTime.diff(mealTime, 'minutes'));
-    // diff < 90 means it's within the 90-minute window
-    return diff < 90; 
-  };
+  const checkMealConflict = (mealTime) => Math.abs(fitnessTime.diff(mealTime, 'minutes')) < 90;
 
   if (checkMealConflict(breakfastTime) || checkMealConflict(lunchTime) || checkMealConflict(dinnerTime)) {
     alerts.push({
-      type: 'warning', // Or 'info'
+      type: 'warning',
       text: 'Avoid exercising within 90 minutes of a meal.',
       action: 'Adjust Plan'
     });
   }
-  // --- END: NEW ALERT LOGIC ---
 
-  return { dailySchedule: allCards, missed: missedTasks, alerts };
+  return { 
+    dailySchedule: allCards, 
+    missed: missedTasks, 
+    alerts,
+    streak: streakCount   // ✅ return streak for UI
+  };
 };
+
 
 
 

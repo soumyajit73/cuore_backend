@@ -142,7 +142,10 @@ o6History: [
       },
       timestamp: { type: Date, default: Date.now },
     }
-  ]
+  ],
+  streakCount: { type: Number, default: 0 },
+  lastStreakDate: { type: Date, default: null }
+
   // --- END OF HISTORY FIELDS ---
 });
 
