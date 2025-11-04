@@ -646,17 +646,23 @@ const getTimelineData = async (userId, dateString) => {
   const sleepTime = calculateScheduledTime(wakeUpAnchor, 960);
 
   // --- 3. START: THE FIX (Reading the correct time) ---
-  let fitnessTime = null;
-  // Read the 24-hour time (e.g., "14:30") your update function saves
-  const fitnessTimeStr24 = onboarding?.o5Data?.preferred_ex_time_24; 
+  let fitnessTimeStr24 = onboarding?.o5Data?.preferred_ex_time_24;
 
-  if (fitnessTimeStr24) {
-    // Create the time object directly from the 24-hour string
-    fitnessTime = dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${fitnessTimeStr24}`, 'YYYY-MM-DD HH:mm', TZ);
-  } else {
-    // Fallback logic from the doc
-    fitnessTime = calculateScheduledTime(wakeUpAnchor, 30); 
-  }
+if (!fitnessTimeStr24) {
+  const twelveHr = onboarding?.o5Data?.preferred_ex_time;
+  fitnessTimeStr24 = convertTo24Hour(twelveHr);
+}
+
+if (fitnessTimeStr24) {
+  fitnessTime = dayjs.tz(
+    `${localDay.format('YYYY-MM-DD')} ${fitnessTimeStr24}`,
+    'YYYY-MM-DD HH:mm',
+    TZ
+  );
+} else {
+  fitnessTime = calculateScheduledTime(wakeUpAnchor, 30);
+}
+
   // --- END: THE FIX ---
 
   const smokingStatus = onboarding?.o4Data?.smoking?.trim().toLowerCase();
