@@ -15,6 +15,7 @@ const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const timelineRoutes = require('./routes/timelineRoutes');
 const predictRoutes = require('./routes/predictRoutes');
+const cuoreHealthRoutes=require('./routes/cuoreHealthRoutes.js');
 
 // --- NEW/UPDATED IMPORTS ---
 const nourishmentRoutes = require('./routes/nourishmentRoutes'); 
@@ -57,6 +58,7 @@ app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/onboarding', onboardingRoutes);
 app.use('/api/v1/onboarding', finalSubmissionRoutes);
 app.use('/api/v1/predict', predictRoutes); 
+app.use('/api/v1/cuorehealth', require('./routes/cuoreHealthRoutes.js'));
 
 // User & Timeline (Mounted separately to avoid conflict)
 app.use('/api/v1/users', userRoutes);
