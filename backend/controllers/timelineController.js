@@ -374,106 +374,103 @@ const calculateHealthMetrics = (onboardingDoc) => {
 
 // Alerts function
 const getAlerts = async (userId) => {
-    const alerts = [];
-    const onboarding = await Onboarding.findOne({ userId }).lean();
-    if (!onboarding) return [];
+  const alerts = [];
+  const onboarding = await Onboarding.findOne({ userId }).lean();
+  if (!onboarding) return [];
 
-    const { scores, o3Data, o7Data } = onboarding;
-    const now = dayjs();
+  const { scores, o3Data, o7Data } = onboarding;
+  const now = dayjs();
 
-    // --- Red Alerts (Critical) ---
-    // Rule 225: SOB or chest discomfort in Onboarding 3
-    if (o3Data.q5) {
-        alerts.push({ type: 'red', text: 'Consult your doctor promptly.', action: 'Consult' });
-    }
-    // Rule 234, 244: High/low BP
-    if (o7Data.bp_upper > 170 || o7Data.bp_upper < 90 || o7Data.bp_lower > 110 || o7Data.bp_lower < 60) {
-        alerts.push({ type: 'red', text: 'Consult your doctor for BP.', action: 'Consult' });
-    }
-    // Rule 254: High/low pulse rate
-    if (o7Data.pulse < 50 || o7Data.pulse > 120) {
-        alerts.push({ type: 'red', text: 'Consult your doctor for heart rate.', action: 'Consult' });
-    }
-    // Rule 287: O2 Saturation
-    if (o7Data.o2_sat < 91) {
-        alerts.push({ type: 'red', text: 'Consult your doctor for O2 Sat.', action: 'Consult' });
-    }
-    // Rule 223: Check-in requested by doctor (Requires a flag from Veyra/doctor app)
-    // if (onboarding.doctorCheckinRequested) {
-    //     alerts.push({ type: 'red', text: 'Check-in requested by doctor.' });
-    // }
+  // --- Red Alerts (Critical) ---
+  if (o3Data.q5) {
+    alerts.push({ type: 'red', text: 'Consult your doctor promptly.', action: 'Consult' });
+  }
+  if (o7Data.bp_upper > 170 || o7Data.bp_upper < 90 || o7Data.bp_lower > 110 || o7Data.bp_lower < 60) {
+    alerts.push({ type: 'red', text: 'Consult your doctor for BP.', action: 'Consult' });
+  }
+  if (o7Data.pulse < 50 || o7Data.pulse > 120) {
+    alerts.push({ type: 'red', text: 'Consult your doctor for heart rate.', action: 'Consult' });
+  }
+  if (o7Data.o2_sat < 91) {
+    alerts.push({ type: 'red', text: 'Consult your doctor for O2 Sat.', action: 'Consult' });
+  }
 
-    // --- Orange Alerts (Important) ---
-    // Rule 224: Cuore score low and last consultation is old
-    // NOTE: Requires a last_consultation_date field in the Onboarding model
-    // if (scores.cuoreScore < 55 && dayjs(onboarding.lastConsultationDate).isBefore(now.subtract(100, 'days'))) {
-    //     alerts.push({ type: 'orange', text: 'It’s time to check in with your doctor.' });
-    // }
-    // Rule 227: Diabetes symptoms in Onboarding 3
-    if (o3Data.q6) {
-        alerts.push({ type: 'orange', text: 'Consult your doctor for diabetes.', action: 'Consult' });
-    }
-    // Rule 228: Reassessment not done
-    // NOTE: Requires a last_reassessment_date field in Onboarding model
-    // if (dayjs(onboarding.lastReassessmentDate).isBefore(now.subtract(55, 'days'))) {
-    //     alerts.push({ type: 'orange', text: 'Reassess now to keep your plan aligned.', action: 'Reassess' });
-    // }
-    // Rule 235, 245: Borderline BP
-    if ((o7Data.bp_upper >= 150 && o7Data.bp_upper <= 170) || (o7Data.bp_upper >= 90 && o7Data.bp_upper <= 100) ||
-        (o7Data.bp_lower >= 100 && o7Data.bp_lower <= 110) || (o7Data.bp_lower >= 60 && o7Data.bp_lower <= 66)) {
-        alerts.push({ type: 'orange', text: 'Consult your doctor for BP.', action: 'Consult' });
-    }
-    // Rule 261, 268: Borderline blood sugar
-    if (o7Data.bs_f > 240 || o7Data.bs_f < 100 || o7Data.bs_am > 260 || o7Data.bs_am < 120) {
-        alerts.push({ type: 'orange', text: 'Monitor sugar & consult your doctor.', action: 'Monitor' });
-    }
-    // Rule 295: Cholesterol
-    if (o7Data.HDL < 45 || o7Data.LDL > 180 || o7Data.Trig > 200) {
-        alerts.push({ type: 'orange', text: 'Consult your doctor for Cholesterol.', action: 'Consult' });
-    }
+  // --- Orange Alerts (Important) ---
+  if (o3Data.q6) {
+    alerts.push({ type: 'orange', text: 'Consult your doctor for diabetes.', action: 'Consult' });
+  }
+  if ((o7Data.bp_upper >= 150 && o7Data.bp_upper <= 170) || (o7Data.bp_upper >= 90 && o7Data.bp_upper <= 100) ||
+      (o7Data.bp_lower >= 100 && o7Data.bp_lower <= 110) || (o7Data.bp_lower >= 60 && o7Data.bp_lower <= 66)) {
+    alerts.push({ type: 'orange', text: 'Consult your doctor for BP.', action: 'Consult' });
+  }
+  if (o7Data.bs_f > 240 || o7Data.bs_f < 100 || o7Data.bs_am > 260 || o7Data.bs_am < 120) {
+    alerts.push({ type: 'orange', text: 'Monitor sugar & consult your doctor.', action: 'Monitor' });
+  }
+  if (o7Data.HDL < 45 || o7Data.LDL > 180 || o7Data.Trig > 200) {
+    alerts.push({ type: 'orange', text: 'Consult your doctor for Cholesterol.', action: 'Consult' });
+  }
 
-    // --- Yellow Alerts (Warning) ---
-    // Rule 236, 246: Monitor BP
-    if ((o7Data.bp_upper >= 140 && o7Data.bp_upper <= 150) || (o7Data.bp_upper >= 100 && o7Data.bp_upper <= 110) ||
-        (o7Data.bp_lower >= 88 && o7Data.bp_lower <= 100) || (o7Data.bp_lower >= 66 && o7Data.bp_lower <= 74)) {
-        alerts.push({ type: 'yellow', text: 'Monitor BP.', action: 'Monitor' });
-    }
-    // Rule 262, 269: Monitor sugar
-    if ((o7Data.bs_f >= 200 && o7Data.bs_f <= 240) || (o7Data.bs_f >= 100 && o7Data.bs_f <= 140) ||
-        (o7Data.bs_am >= 220 && o7Data.bs_am <= 260) || (o7Data.bs_am >= 120 && o7Data.bs_am <= 160)) {
-        alerts.push({ type: 'yellow', text: 'Monitor sugar.', action: 'Monitor' });
-    }
-    // Rule 237, 247: BP spike (Requires previous readings)
-    // if (o7Data.bp_upper - previous_bp_upper > 20 || o7Data.bp_lower - previous_bp_lower > 10) {
-    //     alerts.push({ type: 'yellow', text: 'BP spike! Try deep breathing.', action: 'Breathing' });
-    // }
-    // Rule 293: Exercise timing
-    // NOTE: This requires knowing meal times, a complex check
-    // if (exerciseTime is within 60 mins of a meal) {
-    //     alerts.push({ type: 'yellow', text: 'Avoid exercising within 60 minutes of eating.' });
-    // }
+  // --- Yellow Alerts (Warning) ---
+  if ((o7Data.bp_upper >= 140 && o7Data.bp_upper <= 150) || (o7Data.bp_upper >= 100 && o7Data.bp_upper <= 110) ||
+      (o7Data.bp_lower >= 88 && o7Data.bp_lower <= 100) || (o7Data.bp_lower >= 66 && o7Data.bp_lower <= 74)) {
+    alerts.push({ type: 'yellow', text: 'Monitor BP.', action: 'Monitor' });
+  }
+  if ((o7Data.bs_f >= 200 && o7Data.bs_f <= 240) || (o7Data.bs_f >= 100 && o7Data.bs_f <= 140) ||
+      (o7Data.bs_am >= 220 && o7Data.bs_am <= 260) || (o7Data.bs_am >= 120 && o7Data.bs_am <= 160)) {
+    alerts.push({ type: 'yellow', text: 'Monitor sugar.', action: 'Monitor' });
+  }
 
-    // --- Pale Yellow Alerts (Advisory) ---
-    // Rule 232: Update blood reports
-    // NOTE: Requires last_report_date fields
-    // if (dayjs(onboarding.lastBloodReportDate).isBefore(now.subtract(12, 'months'))) {
-    //     alerts.push({ type: 'pale_yellow', text: 'Update blood reports.', action: 'Update' });
-    // }
-    // Rule 294: Connect to a doctor
-    if (!onboarding.doctor_code) {
-        alerts.push({ type: 'yellow', text: 'Connect to a doctor for alert monitoring.', action: 'Connect' });
-    }
+  // 🟡 Exercise-Meal Timing Alert (within ±90 mins)
+  try {
+    const day = dayjs().startOf('day');
 
-    // Sort alerts by severity (Red > Orange > Yellow > Pale Yellow)
-    const severityOrder = { 'red': 1, 'orange': 2, 'yellow': 3 };
-    if (alerts.length > 0) {
-        alerts.sort((a, b) => severityOrder[a.type] - severityOrder[b.type]);
-        // Return only the most critical alert
-        return alerts;
-    }
+    // exercise time from onboarding
+    const ex12 = onboarding?.o5Data?.preferred_ex_time;
+    const wake12 = onboarding?.o6Data?.wake_time || "07:00 AM";
 
-    return [];
+    const ex24 = ex12 ? convertTo24Hour(ex12) : null;
+    const wake24 = convertTo24Hour(wake12);
+
+    const exerciseTime = ex24 ? dayjs(`${day.format('YYYY-MM-DD')} ${ex24}`) : null;
+    const wakeTime = dayjs(`${day.format('YYYY-MM-DD')} ${wake24}`);
+
+    const breakfast = wakeTime.add(105, "minute");
+    const lunch = wakeTime.add(390, "minute");
+    const dinner = lunch.add(390, "minute");
+
+    const within90 = (meal, exercise) =>
+      Math.abs(meal.diff(exercise, "minute")) < 90;
+
+    if (exerciseTime && (
+        within90(breakfast, exerciseTime) ||
+        within90(lunch, exerciseTime) ||
+        within90(dinner, exerciseTime)
+    )) {
+      alerts.push({
+        type: "yellow",
+        text: "Avoid exercising within 90 minutes of a meal.",
+        action: "Adjust Time"
+      });
+    }
+  } catch (e) {
+    console.error("Error checking exercise-meal alert:", e);
+  }
+
+  // --- Pale Yellow Alerts (Advisory) ---
+  if (!onboarding.doctor_code) {
+    alerts.push({ type: 'yellow', text: 'Connect to a doctor for alert monitoring.', action: 'Connect' });
+  }
+
+  // Sort & return highest severity first
+  const severityOrder = { 'red': 1, 'orange': 2, 'yellow': 3 };
+  if (alerts.length > 0) {
+    alerts.sort((a, b) => severityOrder[a.type] - severityOrder[b.type]);
+    return alerts;
+  }
+
+  return [];
 };
+
 // -----------------------------------------------------
 // Generate Timeline Cards
 // -----------------------------------------------------
@@ -630,7 +627,7 @@ const getTimelineData = async (userId, dateString) => {
   const onboarding = await Onboarding.findOne({ userId })
     // --- 1. START: THE FIX ---
     // Select the new 24-hour field you are saving
-    .select('o4Data.smoking o5Data.preferred_ex_time_24 o6Data.wake_time') 
+    .select('o4Data.smoking o5Data.preferred_ex_time o6Data.wake_time') 
     .lean();
     // --- END: THE FIX ---
 
@@ -646,14 +643,13 @@ const getTimelineData = async (userId, dateString) => {
   const sleepTime = calculateScheduledTime(wakeUpAnchor, 960);
 
   // --- 3. START: THE FIX (Reading the correct time) ---
-  let fitnessTimeStr24 = onboarding?.o5Data?.preferred_ex_time_24;
+  // replace the whole fitnessTime block with:
+let fitnessTime;
+const fitnessTimeStr12 = onboarding?.o5Data?.preferred_ex_time?.trim(); // e.g., "9:05 PM"
 
-if (!fitnessTimeStr24) {
-  const twelveHr = onboarding?.o5Data?.preferred_ex_time;
-  fitnessTimeStr24 = convertTo24Hour(twelveHr);
-}
-
-if (fitnessTimeStr24) {
+if (fitnessTimeStr12) {
+  // reuse your existing converter to avoid AM/PM parse issues
+  const fitnessTimeStr24 = convertTo24Hour(fitnessTimeStr12); // -> "21:05"
   fitnessTime = dayjs.tz(
     `${localDay.format('YYYY-MM-DD')} ${fitnessTimeStr24}`,
     'YYYY-MM-DD HH:mm',
@@ -662,6 +658,8 @@ if (fitnessTimeStr24) {
 } else {
   fitnessTime = calculateScheduledTime(wakeUpAnchor, 30);
 }
+// console.log("Fitness Time from DB:", onboarding?.o5Data?.preferred_ex_time);
+
 
   // --- END: THE FIX ---
 
@@ -717,7 +715,7 @@ if (fitnessTimeStr24) {
         description: card.description,
         completed: card.isCompleted,
         reminder: true,
-        editable: card.type !== 'USER_MEDICATION', 
+        editable: card.type === 'USER_MEDICATION', 
         type: card.type,
         id: card._id.toString(),
         sourceId: card.sourceId?.toString()
