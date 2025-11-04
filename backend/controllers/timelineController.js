@@ -1057,22 +1057,36 @@ exports.deleteReminder = async (req, res) => {
 
 
 exports.getEntries = async (req, res) => {
-    const userId = req.user.userId;
-    const isMedicationPath = req.originalUrl.includes('/medications');
+    const userId = req.user.userId;
+    const isMedicationPath = req.originalUrl.includes('/medications');
 
-    try {
-        let entries;
-        if (isMedicationPath) {
-            entries = await Medication.find({ userId, isActive: true }).select('-__v -userId');
-            return res.status(200).json({ type: 'medications', data: entries });
-        } else {
-            entries = await Reminder.find({ userId, isActive: true }).select('-__v -userId');
-            return res.status(200).json({ type: 'reminders', data: entries });
-        }
-    } catch (error) {
-        console.error('Error getting user entries:', error);
-        return res.status(500).json({ error: "Internal server error: Could not fetch entries." });
-    }
+    try {
+        let entries;
+        if (isMedicationPath) {
+            // --- FIX 1 ---
+            // Query the Reminder model for items flagged as medication
+            entries = await Reminder.find({ 
+                userId, 
+                isActive: true, 
+                isMedication: true 
+            }).select('-__v -userId');
+            
+            return res.status(200).json({ type: 'medications', data: entries });
+        } else {
+            // --- FIX 2 ---
+            // Query the Reminder model and EXCLUDE items flagged as medication
+            entries = await Reminder.find({ 
+                userId, 
+                isActive: true, 
+                isMedication: { $ne: true } // $ne: true means "not equal to true"
+            }).select('-__v -userId');
+            
+            return res.status(200).json({ type: 'reminders', data: entries });
+        }
+    } catch (error) {
+        console.error('Error getting user entries:', error);
+        return res.status(500).json({ error: "Internal server error: Could not fetch entries." });
+    }
 };
 
 exports.updateEntry = async (req, res) => {
