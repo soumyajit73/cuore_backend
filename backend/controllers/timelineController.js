@@ -478,81 +478,83 @@ const getAlerts = async (userId) => {
 // Generate Timeline Cards
 // -----------------------------------------------------
 const generateTimelineCardsForDay = async (userId, targetDate) => {
-  try {
-    const localDay = dayjs(targetDate).tz(TZ).startOf("day");
-    const startOfDayUTC = localDay.utc().toDate();
-    const endOfDayUTC = localDay.endOf("day").utc().toDate();
+  try {
+    const localDay = dayjs(targetDate).tz(TZ).startOf("day");
 
-    // 🧩 Fetch active medications and reminders only
-    const medications = await Medication.find({
-      userId,
-      isActive: true,
-      startDate: { $lte: localDay.endOf("day").toDate() },
-      $or: [{ endDate: null }, { endDate: { $gte: localDay.startOf("day").toDate() } }],
-    }).lean();
+    // --- START: THE FIX ---
+    // 1. Fetch ALL active reminders (meds and normal) for the user in ONE query
+    // We no longer query the 'Medication' model at all.
+    const allEntries = await Reminder.find({
+      userId,
+      isActive: true,
+      startDate: { $lte: localDay.endOf("day").toDate() },
+      $or: [{ endDate: null }, { endDate: { $gte: localDay.startOf("day").toDate() } }],
+    }).lean();
 
-    const reminders = await Reminder.find({
-      userId,
-      isActive: true,
-      startDate: { $lte: localDay.endOf("day").toDate() },
-      $or: [{ endDate: null }, { endDate: { $gte: localDay.startOf("day").toDate() } }],
-    }).lean();
+    // 2. 🧱 Collect cards using an if/else loop
+    const newCards = [];
 
-    // 🧱 Collect all valid timeline entries
-    const newCards = [];
+    allEntries.forEach((entry) => {
+      const timeStr = convertTo24Hour(entry.time) || "00:00";
 
-    medications.forEach((med) => {
-      const timeStr = convertTo24Hour(med.time) || "00:00";
-      newCards.push({
-        userId,
-        scheduleDate: med.startDate,
-        scheduledTime: timeStr,
-        title: "Medication",
-        description: `${med.name} ${med.dosage || ""}`.trim(),
-        type: "USER_MEDICATION",
-        sourceId: med._id,
-      });
-    });
+      // This 'if/else' block is the entire fix.
+      // It ensures ONLY ONE card is created for each database entry.
+      if (entry.isMedication === true) {
+        // It's a medication, so ONLY create a USER_MEDICATION card
+        newCards.push({
+          userId,
+          scheduleDate: entry.startDate,
+          scheduledTime: timeStr,
+          title: "Medication", // Use the generic "Medication" title
+          description: entry.title, // Use the user's title (e.g., "Meds 2") as the description
+          type: "USER_MEDICATION",
+          sourceId: entry._id,
+        });
+      } else {
+        // It's a normal reminder, so ONLY create a USER_REMINDER card
+        newCards.push({
+          userId,
+          scheduleDate: entry.startDate,
+          scheduledTime: timeStr,
+          title: entry.title,
+          description: entry.description || null,
+          type: "USER_REMINDER",
+          sourceId: entry._id,
+        });
+      }
+    });
+    // --- END: THE FIX ---
 
-    reminders.forEach((rem) => {
-      const timeStr = convertTo24Hour(rem.time) || "00:00";
-      newCards.push({
-        userId,
-        scheduleDate: rem.startDate,
-        scheduledTime: timeStr,
-        title: rem.title,
-        description: rem.description || null,
-        type: "USER_REMINDER",
-        sourceId: rem._id,
-      });
-    });
+    // 3. Upsert the new cards
+    for (const card of newCards) {
+      await TimelineCard.findOneAndUpdate(
+        {
+          userId,
+          sourceId: card.sourceId,
+         // We query by sourceId only. This way, if a reminder
+          // is changed to a medication (or vice-versa),
+          // the $set below will just update its type.
+        },
+        { $set: card },
+        { upsert: true, new: true }
+      );
+    }
 
-    // ✅ 1️⃣ Upsert instead of full delete-insert (idempotent)
-    for (const card of newCards) {
-      await TimelineCard.findOneAndUpdate(
-        {
-          userId,
-          sourceId: card.sourceId,
-          type: card.type,
-        },
-        { $set: card },
-        { upsert: true, new: true }
-      );
-    }
+    // 4. Delete orphaned cards (this logic is correct)
+    const validSourceIds = newCards.map((c) => c.sourceId.toString());
+    await TimelineCard.deleteMany({
+      userId,
+      type: { $in: ["USER_REMINDER", "USER_MEDICATION"] },
+      sourceId: { $nin: validSourceIds },
+    });
 
-    // ✅ 2️⃣ Delete orphaned cards (reminders or meds that no longer exist)
-    const validSourceIds = newCards.map((c) => c.sourceId.toString());
-    await TimelineCard.deleteMany({
-      userId,
-      type: { $in: ["USER_REMINDER", "USER_MEDICATION"] },
-      sourceId: { $nin: validSourceIds },
-    });
-
-    console.log(`✅ Timeline regenerated safely for user ${userId}.`);
-  } catch (error) {
-    console.error(`❌ Error generating timeline for ${userId}:`, error);
-  }
+    console.log(`✅ Timeline regenerated safely for user ${userId}.`);
+  } catch (error) {
+    console.error(`❌ Error generating timeline for ${userId}:`, error);
+  }
 };
+
+
 
 
 // -----------------------------------------------------
