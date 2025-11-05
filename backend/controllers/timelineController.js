@@ -567,7 +567,7 @@ exports.getHomeScreenData = async (req, res) => {
 
         // **MODIFIED**: Added getNudge back into the Promise.all
         const [userData, timelineData, cuoreScoreData, alerts, motivationalMessage] = await Promise.all([
-            User.findById(userId).select('name profileImage').lean(),
+            User.findById(userId).select('display_name profileImage').lean(),
             getTimelineData(userId, dateString),
             getCuoreScoreData(userId),
             getAlerts(userId),
@@ -579,7 +579,7 @@ exports.getHomeScreenData = async (req, res) => {
         const payload = {
     user: {
         id: userId,
-        name: userData.name,
+        name: userData.display_name,
         profileImage: userData.profileImage || 'https://example.com/images/mjohnson.png'
     },
     date: dateString,
