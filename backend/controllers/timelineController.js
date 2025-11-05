@@ -577,32 +577,40 @@ exports.getHomeScreenData = async (req, res) => {
         if (!userData) return res.status(404).json({ message: 'User data not found.' });
 
         const payload = {
-            user: {
-                id: userId,
-                name: userData.name,
-                profileImage: userData.profileImage || 'https://example.com/images/mjohnson.png'
-            },
-            date: dateString,
-            summary: {
-                missedTasks: timelineData.missed,
-                message: `${timelineData.missed} ${timelineData.missed === 1 ? 'task' : 'tasks'} missed`,
-            },
-            progress: {
-                periods: cuoreScoreData.history.map((score, i, arr) => ({
-                    month: dayjs(score.date).format("MMM 'YY"),
-                    value: score.cuoreScore,
-                    userImage: i === arr.length - 1 ? (userData.profileImage || 'https://example.com/images/mjohnson.png') : undefined
-                })),
-                goal: '>75%',
-                buttonText: 'Update Biomarkers'
-            },
-            // **MODIFIED**: This message is now dynamic based on your nudge logic
-            motivationalMessage: motivationalMessage,
-            alerts: alerts,
-            dailySchedule: timelineData.dailySchedule,
-             streak: timelineData.streak
-            
-        };
+    user: {
+        id: userId,
+        name: userData.name,
+        profileImage: userData.profileImage || 'https://example.com/images/mjohnson.png'
+    },
+    date: dateString,
+
+    summary: {
+        missedTasks: timelineData.missed,
+        totalTasks: timelineData.totalTasks,                               // ✅ total tasks
+        display: `${timelineData.missed}/${timelineData.totalTasks}`,      // ✅ UI friendly "missed/total"
+        message: `${timelineData.missed} ${timelineData.missed === 1 ? 'task' : 'tasks'} missed`,
+    },
+
+    progress: {
+        periods: cuoreScoreData.history.map((score, i, arr) => ({
+            month: dayjs(score.date).format("MMM 'YY"),
+            value: score.cuoreScore,
+            userImage: i === arr.length - 1
+                ? (userData.profileImage || 'https://example.com/images/mjohnson.png')
+                : undefined
+        })),
+        goal: '>75%',
+        buttonText: 'Update Biomarkers'
+    },
+
+    motivationalMessage: motivationalMessage,
+    alerts: alerts,
+
+    dailySchedule: timelineData.dailySchedule,
+
+    streak: timelineData.streak   // ✅ streak stays
+};
+
 
         res.status(200).json(payload);
     } catch (error) {
@@ -770,12 +778,15 @@ const getTimelineData = async (userId, dateString) => {
     });
   }
 
-  return { 
-    dailySchedule: allCards, 
-    missed: missedTasks, 
-    alerts,
-    streak: streakCount   // ✅ return streak for UI
-  };
+  return {
+  dailySchedule: allCards,
+  missed: missedTasks,                 // number missed
+  totalTasks: allCards.length,         // total tasks today
+  missedDisplay: `${missedTasks}/${allCards.length}`,  // ✅ nice UI string
+  alerts,
+  streak: streakCount
+};
+
 };
 
 
@@ -1146,8 +1157,111 @@ exports.getTimeline = async (req, res) => {
 };
 
 exports.completeCard = async (req, res) => {
-    res.status(501).json({ message: "Not Implemented Yet. This will mark a task as complete." });
+  try {
+    req.body = req.body || {};
+
+    const userId = req.params.userId;
+    const cardId = req.params.reminderId;
+    const completeAll = req.body.completeAll || false;
+    const markComplete = req.body.complete !== false; // ✅ default true, false = undo
+
+    if (!userId) return res.status(400).json({ message: "User ID missing" });
+
+    const { ObjectId } = mongoose.Types;
+
+    /** ✅ If complete all tasks */
+    if (completeAll) {
+      await TimelineCard.updateMany(
+        { userId },
+        { 
+          $set: { 
+            isCompleted: true, 
+            isMissed: false,
+            completionTime: new Date() 
+          } 
+        }
+      );
+
+      return res.status(200).json({
+        status: "success",
+        message: "All tasks completed",
+        missedTasks: 0
+      });
+    }
+
+    if (!cardId)
+      return res.status(400).json({ message: "Card ID required" });
+
+    // ✅ Attempt timeline card match first
+    let timelineCard = await TimelineCard.findOneAndUpdate(
+      { _id: new ObjectId(cardId), userId },
+      { 
+        $set: { 
+          isCompleted: markComplete,
+          isMissed: false,
+          completionTime: markComplete ? new Date() : null 
+        } 
+      },
+      { new: true }
+    );
+
+    // ✅ If not timeline id, try sourceId (reminder id)
+    if (!timelineCard) {
+      timelineCard = await TimelineCard.findOneAndUpdate(
+        { userId, sourceId: new ObjectId(cardId) },
+        { 
+          $set: { 
+            isCompleted: markComplete,
+            isMissed: false,
+            completionTime: markComplete ? new Date() : null 
+          } 
+        },
+        { new: true }
+      );
+    }
+
+    if (!timelineCard) {
+      return res.status(404).json({
+        status: "error",
+        message: "No matching card found"
+      });
+    }
+
+    /** ✅ Recalculate missed tasks now */
+    const now = dayjs().tz(TZ);
+    const todayStart = now.startOf("day").toDate();
+    const todayEnd = now.endOf("day").toDate();
+
+    const allCards = await TimelineCard.find({
+      userId,
+      scheduleDate: { $gte: todayStart, $lte: todayEnd }
+    });
+
+    const missed = allCards.filter(card =>
+      !card.isCompleted &&
+      dayjs(card.scheduleDate).tz(TZ).isBefore(now)
+    ).length;
+
+    return res.status(200).json({
+      status: "success",
+      message: markComplete ? "Task marked completed" : "Task marked incomplete",
+      card: {
+        id: timelineCard._id,
+        sourceId: timelineCard.sourceId,
+        completed: timelineCard.isCompleted
+      },
+      missedTasks: missed
+    });
+
+  } catch (err) {
+    console.error("Complete card error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
 };
+
+
+
+
 const safeNum = (v) =>
   typeof v === "number" && !Number.isNaN(v) && v !== 0 ? v : null;
 
