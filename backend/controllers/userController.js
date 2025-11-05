@@ -7,6 +7,7 @@ exports.updateProfile = async (req, res) => {
 
     // 2. Safely get the request body data
     const { 
+        phone,
         display_name, 
         dob, 
         gender, 
@@ -18,8 +19,8 @@ exports.updateProfile = async (req, res) => {
     } = req.body;
 
     // Basic validation
-    if (!display_name || !consent_flags || !consent_flags.tos) {
-        return res.status(400).json({ error: "Display name and Terms of Service consent are required." });
+    if (!display_name || !phone) {
+        return res.status(400).json({ error: "Display name and Phone number are required." });
     }
 
     try {
@@ -30,6 +31,7 @@ exports.updateProfile = async (req, res) => {
             { _id: userIdObject }, // Query Mongoose using the correct ObjectId type
             {
                 $set: {
+                    phone,
                     display_name,
                     dob,
                     gender,
@@ -54,6 +56,7 @@ exports.updateProfile = async (req, res) => {
             user_id: updatedUser._id,
             profile: { 
                 display_name: updatedUser.display_name, 
+                phone: updatedUser.phone,
                 gender: updatedUser.gender 
             }
         });
@@ -63,4 +66,54 @@ exports.updateProfile = async (req, res) => {
         // This catch block will now often show the true error, if it's not a JWT failure.
         return res.status(500).json({ error: "Internal server error during profile update." });
     }
+};
+
+exports.getProfile = async (req, res) => {
+  try {
+    const userIdFromToken = req.user.userId;
+
+    const user = await User.findById(userIdFromToken).lean();
+
+    if (!user) {
+      return res.status(404).json({ status: "error", message: "User not found" });
+    }
+
+    return res.status(200).json({
+      status: "success",
+      data: {
+        user: {
+          phone: user.phone,
+          display_name: user.display_name || "",
+          isPhoneVerified: user.isPhoneVerified,
+          consent_flags: user.consent_flags || {},
+
+          dob: user.dob || null,
+          gender: user.gender || null,
+          preferred_time_zone: user.preferred_time_zone || null,
+
+          caregiver_mobile: user.caregiver_mobile || null,
+          doctor_code: user.doctor_code || null,
+          corporate_code: user.corporate_code || null,
+
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt
+        },
+
+        // Hardcoded doctor & caregiver data (not editable)
+        doctor: {
+          name: "Dr. Sharma",
+          mobile: "+919999999999",
+          doctorCode: user.doctor_code || "DOC123"
+        },
+        caregiver: {
+          name: "Primary Caregiver",
+          mobile: user.caregiver_mobile || "+918888888888"
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error("GET Profile Error:", error);
+    return res.status(500).json({ status: "error", message: "Internal Server Error" });
+  }
 };
