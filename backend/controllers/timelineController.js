@@ -258,11 +258,20 @@ function calculateScheduledTime(baseTime, minutesToAdd) {
 }
 
 function getModelAndId(req) {
-    const isMedication = req.originalUrl.includes('/medications');
-    const model = isMedication ? Medication : Reminder;
-    const docId = isMedication ? req.params.medId : req.params.reminderId;
-    return { model, docId };
+  const { reminderId, medicationId, id } = req.params;
+
+  // Pick whichever exists in params
+  const docId = reminderId || medicationId || id;
+
+  // Infer model from URL path
+  let model;
+  if (req.originalUrl.includes('reminders')) model = Reminder;
+  else if (req.originalUrl.includes('medications')) model = Medication;
+  else model = Reminder; // fallback default
+
+  return { model, docId };
 }
+
 
 function getColorStatus(value, greenThreshold, yellowThreshold, redThreshold) {
     if (value > greenThreshold) return 'green';
