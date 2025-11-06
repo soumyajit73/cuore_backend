@@ -4,33 +4,37 @@ const mongoose = require('mongoose'); // <-- MUST BE ADDED
 exports.updateProfile = async (req, res) => {
   const userIdFromToken = req.user.userId;
 
-  // ✅ Extract fields safely
+  // ✅ Extract only potential fields from request
   const {
     phone,
     display_name,
     consent_flags,
+    caregiver_name,
     caregiver_mobile,
-    doctor_code
+    doctor_name,
+    doctor_code,
+    doctor_phone
   } = req.body;
-
-  // ✅ Basic validation
-  if (!display_name || !phone) {
-    return res.status(400).json({ error: "Display name and phone number are required." });
-  }
 
   try {
     const userIdObject = new mongoose.Types.ObjectId(userIdFromToken);
 
-    // ✅ Build update object dynamically
-    const updateFields = {
-      phone,
-      display_name,
-      consent_flags: consent_flags || {},
-    };
+    // ✅ Build update object dynamically (only add fields user sent)
+    const updateFields = {};
 
-    // Add caregiver/doctor details only if provided
+    if (display_name) updateFields.display_name = display_name;
+    if (phone) updateFields.phone = phone;
+    if (consent_flags) updateFields.consent_flags = consent_flags;
+    if (caregiver_name) updateFields.caregiver_name = caregiver_name;
     if (caregiver_mobile) updateFields.caregiver_mobile = caregiver_mobile;
+    if (doctor_name) updateFields.doctor_name = doctor_name;
+    if (doctor_phone) updateFields.doctor_phone = doctor_phone;
     if (doctor_code) updateFields.doctor_code = doctor_code;
+
+    // ✅ If no fields provided, throw an error
+    if (Object.keys(updateFields).length === 0) {
+      return res.status(400).json({ error: "No valid fields provided to update." });
+    }
 
     // ✅ Perform the update
     const updatedUser = await User.findOneAndUpdate(
@@ -43,23 +47,35 @@ exports.updateProfile = async (req, res) => {
       return res.status(404).json({ error: "User not found." });
     }
 
-    // ✅ Response payload
+    // ✅ Return clean payload
     return res.status(200).json({
       message: "Profile updated successfully.",
       user_id: updatedUser._id,
       profile: {
-        display_name: updatedUser.display_name,
-        phone: updatedUser.phone,
+        display_name: updatedUser.display_name || null,
+        phone: updatedUser.phone || null,
+        caregiver_name: updatedUser.caregiver_name || null,
         caregiver_mobile: updatedUser.caregiver_mobile || null,
+        doctor_name: updatedUser.doctor_name || null,
+        doctor_phone: updatedUser.doctor_phone || null,
         doctor_code: updatedUser.doctor_code || null,
       },
     });
 
   } catch (error) {
     console.error("Profile Update Error:", error);
+
+    // ✅ Handle duplicate phone gracefully
+    if (error.code === 11000 && error.keyPattern?.phone) {
+      return res.status(400).json({
+        error: "This phone number is already registered with another account."
+      });
+    }
+
     return res.status(500).json({ error: "Internal server error during profile update." });
   }
 };
+
 
 exports.getProfile = async (req, res) => {
   try {
