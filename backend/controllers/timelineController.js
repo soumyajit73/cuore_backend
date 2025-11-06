@@ -636,7 +636,7 @@ const getTimelineData = async (userId, dateString) => {
   const utcStart = localDay.utc().toDate();
   const utcEnd = localDay.endOf("day").utc().toDate();
 
-  // --- Fetch onboarding data ---
+  // --- Fetch latest onboarding data ---
   const onboarding = await Onboarding.findOne({ userId })
     .select("o4Data.smoking o5Data.preferred_ex_time o6Data.wake_time streakCount lastStreakDate")
     .lean();
@@ -646,36 +646,37 @@ const getTimelineData = async (userId, dateString) => {
   // ✅ Ensure system cards exist
   await ensureSystemCardsExist(userId, onboarding, localDay);
 
-  // ✅ Unconditionally resync system cards based on current wake time
+  // ✅ Recalculate system cards dynamically (wake-based)
   const currentWakeTime = convertTo24Hour(onboarding?.o6Data?.wake_time) || "07:00";
   await updateSystemCardsAfterWakeChange(userId, currentWakeTime, localDay);
 
-  // ✅ --- STREAK LOGIC START ---
+  // ✅ Extract latest exercise time (user-customized)
+  const preferredExTime =
+    onboarding?.o5Data?.preferred_ex_time &&
+    convertTo24Hour(onboarding.o5Data.preferred_ex_time);
+
+  // --- STREAK LOGIC ---
   const today = dayjs().startOf("day");
-  const lastStreakDate = onboarding.lastStreakDate ? dayjs(onboarding.lastStreakDate).startOf("day") : null;
+  const lastStreakDate = onboarding.lastStreakDate
+    ? dayjs(onboarding.lastStreakDate).startOf("day")
+    : null;
   let streakCount = onboarding.streakCount || 0;
 
-  if (!lastStreakDate) {
-    streakCount = 1;
-  } else if (today.diff(lastStreakDate, "day") === 1) {
-    streakCount += 1;
-  } else if (today.diff(lastStreakDate, "day") > 1) {
-    streakCount = 1;
-  }
+  if (!lastStreakDate) streakCount = 1;
+  else if (today.diff(lastStreakDate, "day") === 1) streakCount += 1;
+  else if (today.diff(lastStreakDate, "day") > 1) streakCount = 1;
 
   if (!lastStreakDate || today.isAfter(lastStreakDate)) {
     await Onboarding.updateOne({ userId }, { streakCount, lastStreakDate: new Date() });
   }
 
-  // ✅ --- STREAK LOGIC END ---
-
-  // --- Fetch all cards for the current date (SYSTEM + USER) ---
+  // --- Fetch all cards (SYSTEM + USER) ---
   const rawCards = await TimelineCard.find({
     userId,
     scheduleDate: { $gte: utcStart, $lte: utcEnd },
   }).lean();
 
-  // --- Map USER CARDS ---
+  // --- USER CARDS ---
   const userCards = rawCards
     .filter((card) => card.type !== "SYSTEM")
     .map((card) => {
@@ -701,24 +702,29 @@ const getTimelineData = async (userId, dateString) => {
     })
     .filter(Boolean);
 
-  // --- Map SYSTEM CARDS ---
+  // --- SYSTEM CARDS ---
   const systemCardsFromDb = rawCards
     .filter((card) => card.type === "SYSTEM")
     .map((card) => {
+      let scheduledTime = convertTo24Hour(card.scheduledTime);
+
+      // 🧠 Override the fitness card’s time with user’s latest preference
+      if (card.title.toLowerCase().includes("fitness") && preferredExTime) {
+        scheduledTime = preferredExTime;
+      }
+
       const parsedTime = dayjs.tz(
-        `${localDay.format("YYYY-MM-DD")} ${convertTo24Hour(card.scheduledTime)}`,
+        `${localDay.format("YYYY-MM-DD")} ${scheduledTime}`,
         "YYYY-MM-DD HH:mm",
         TZ
       );
       if (!parsedTime.isValid()) return null;
 
-      // 🎯 Accurate emoji mapping
+      // 🎯 Icon mapping
       const title = card.title.toLowerCase();
       let icon = "🔔";
       if (title.includes("wake")) icon = "🌞";
-      if (title.includes("wake")) icon = "🌞";
-else if (title.includes("tobacco") || title.includes("health win")) icon = "🚭"; 
-
+      else if (title.includes("tobacco") || title.includes("health win")) icon = "🚭";
       else if (title.includes("calorie") || title.includes("ignite")) icon = "🔥";
       else if (title.includes("fitness")) icon = "🏃";
       else if (title.includes("breakfast")) icon = "🍳";
@@ -739,14 +745,14 @@ else if (title.includes("tobacco") || title.includes("health win")) icon = "🚭
         description: card.description,
         completed: card.isCompleted,
         reminder: true,
-        editable: title.includes("wake"), // ✅ Only “Wake Up” editable
+        editable: title.includes("wake"), // Only “Wake Up” editable
         type: card.type,
         id: card._id.toString(),
       };
     })
     .filter(Boolean);
 
-  // --- Combine and sort all cards ---
+  // --- Combine and Sort ---
   const allCards = [...systemCardsFromDb, ...userCards]
     .sort((a, b) => a.time.valueOf() - b.time.valueOf())
     .map((card) => ({
@@ -754,7 +760,7 @@ else if (title.includes("tobacco") || title.includes("health win")) icon = "🚭
       time: dayjs(card.time).tz(TZ).format("h:mm A"),
     }));
 
-  // --- Calculate missed tasks ---
+  // --- Missed Tasks ---
   const missedTasks = allCards.filter(
     (task) =>
       !task.completed &&
@@ -773,7 +779,7 @@ else if (title.includes("tobacco") || title.includes("health win")) icon = "🚭
     });
   }
 
-  // ✅ Return structured response
+  // ✅ Return Final
   return {
     dailySchedule: allCards,
     missed: missedTasks,
@@ -783,6 +789,7 @@ else if (title.includes("tobacco") || title.includes("health win")) icon = "🚭
     streak: streakCount,
   };
 };
+
 
 
 
