@@ -59,6 +59,16 @@ async function ensureSystemCardsExist(userId, onboarding, localDay) {
     const isSmoker =
       onboarding?.o4Data?.smoking?.trim().toLowerCase() === "daily" ||
       onboarding?.o4Data?.smoking?.trim().toLowerCase() === "occasionally";
+      // --- Clean up Tobacco card if user is not a smoker ---
+if (!isSmoker) {
+  await TimelineCard.deleteMany({
+    userId,
+    type: "SYSTEM",
+    title: /tobacco|health win/i,
+  });
+  console.log(`🧹 Removed Tobacco card(s) for non-smoker user: ${userId}`);
+}
+
 
     // --- System card definitions ---
     const systemCards = [
