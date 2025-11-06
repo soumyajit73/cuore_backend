@@ -43,6 +43,11 @@ if (MONGO_URI) {
     console.warn('MONGO_URI not found in environment variables. Skipping MongoDB connection.');
 }
 
+mongoose.connection.once('open', async () => {
+  const TimelineCard = require('./models/TimelineCard');
+  const count = await TimelineCard.countDocuments();
+  console.log('✅ Total timeline cards in DB:', count);
+});
 
 // --- API Routes ---
 

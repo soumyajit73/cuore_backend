@@ -5,6 +5,8 @@ const TimelineCard = require('../models/TimelineCard');
 const User = require('../models/User');
 const { Onboarding,calculateRecommendedExercise,calculateAllMetrics } = require('../models/onboardingModel.js');
 const NudgeHistory = require('../models/NudgeHistory');
+const { ensureSystemCardsExist } = require('../utils/ensureSystemCardsExist');
+
 
 const dayjs = require('dayjs');
 const utc = require('dayjs/plugin/utc');
@@ -564,6 +566,7 @@ exports.getHomeScreenData = async (req, res) => {
 
     try {
         await generateTimelineCardsForDay(userId, todayDate);
+        
 
         // **MODIFIED**: Added getNudge back into the Promise.all
         const [userData, timelineData, cuoreScoreData, alerts, motivationalMessage] = await Promise.all([
@@ -628,22 +631,24 @@ const getTimelineData = async (userId, dateString) => {
     console.warn(`Invalid dateString received in getTimelineData: "${dateString}". Falling back to today.`);
     localDay = dayjs().tz(TZ);
   }
-  localDay = localDay.startOf('day');
+  localDay = localDay.startOf("day");
 
   const utcStart = localDay.utc().toDate();
-  const utcEnd = localDay.endOf('day').utc().toDate();
+  const utcEnd = localDay.endOf("day").utc().toDate();
 
   // --- Fetch onboarding data ---
   const onboarding = await Onboarding.findOne({ userId })
-    .select('o4Data.smoking o5Data.preferred_ex_time o6Data.wake_time streakCount lastStreakDate')
+    .select("o4Data.smoking o5Data.preferred_ex_time o6Data.wake_time streakCount lastStreakDate")
     .lean();
 
   if (!onboarding) return { dailySchedule: [], missed: 0, alerts: [], streak: 0 };
 
+  // ✅ Ensure system cards exist in DB before fetching
+  await ensureSystemCardsExist(userId, onboarding, localDay);
+
   // ✅ --- STREAK LOGIC START ---
   const today = dayjs().startOf("day");
   const lastStreakDate = onboarding.lastStreakDate ? dayjs(onboarding.lastStreakDate).startOf("day") : null;
-
   let streakCount = onboarding.streakCount || 0;
 
   if (!lastStreakDate) {
@@ -655,88 +660,31 @@ const getTimelineData = async (userId, dateString) => {
   }
 
   if (!lastStreakDate || today.isAfter(lastStreakDate)) {
-    await Onboarding.updateOne(
-      { userId },
-      { streakCount, lastStreakDate: new Date() }
-    );
+    await Onboarding.updateOne({ userId }, { streakCount, lastStreakDate: new Date() });
   }
   console.log("✅ STREAK:", onboarding.streakCount, onboarding.lastStreakDate);
-
   // ✅ --- STREAK LOGIC END ---
 
-  // --- Time Anchors ---
-  const preferredWake = convertTo24Hour(onboarding?.o6Data?.wake_time) || '07:00';
-  const [wakeHour, wakeMinute] = preferredWake.split(':').map(Number);
-  let wakeUpAnchor = localDay.hour(wakeHour).minute(wakeMinute);
-  if (!wakeUpAnchor.isValid()) wakeUpAnchor = localDay.hour(7).minute(0);
-
-  const breakfastTime = calculateScheduledTime(wakeUpAnchor, 105);
-  const lunchTime = calculateScheduledTime(wakeUpAnchor, 390);
-  const dinnerTime = calculateScheduledTime(lunchTime, 390);
-  const sleepTime = calculateScheduledTime(wakeUpAnchor, 960);
-
-  // --- Fitness Time ---
-  let fitnessTime;
-  const fitnessTimeStr12 = onboarding?.o5Data?.preferred_ex_time?.trim();
-  if (fitnessTimeStr12) {
-    const fitnessTimeStr24 = convertTo24Hour(fitnessTimeStr12);
-    fitnessTime = dayjs.tz(
-      `${localDay.format('YYYY-MM-DD')} ${fitnessTimeStr24}`,
-      'YYYY-MM-DD HH:mm',
-      TZ
-    );
-  } else {
-    fitnessTime = calculateScheduledTime(wakeUpAnchor, 30);
-  }
-
-  const smokingStatus = onboarding?.o4Data?.smoking?.trim().toLowerCase();
-  const isSmoker = smokingStatus === 'daily' || smokingStatus === 'occasionally';
-
-  // --- System Cards ---
-  const systemCards = [
-    { time: wakeUpAnchor, icon: '🌞', title: 'Wake Up', description: 'Ease into your day with Morning Calm', type: 'SYSTEM_WAKEUP' },
-    ...(isSmoker
-      ? [{ time: calculateScheduledTime(wakeUpAnchor, 10), icon: '🚭', title: 'Your Daily Health Win', description: 'Skip the smoke, feel the difference', type: 'SYSTEM_TOBACCO' }]
-      : []),
-    { time: calculateScheduledTime(wakeUpAnchor, 15), icon: '🔥', title: 'Calorie Ignite', description: 'Jumpstart your metabolism', type: 'SYSTEM_CALORIE_IGNITE' },
-    { time: fitnessTime, icon: '🏃', title: 'Fitness', description: 'Cardio & strength training', type: 'SYSTEM_FITNESS' },
-    { time: breakfastTime, icon: '🍳', title: 'Breakfast', description: 'Boost your energy', type: 'SYSTEM_NUTRITION' },
-    { time: calculateScheduledTime(breakfastTime, 150), icon: '🥤', title: 'Mid-Morning Boost', description: 'A handful of fruit', type: 'SYSTEM_SNACK' },
-    { time: calculateScheduledTime(lunchTime, -60), icon: '💧', title: 'Hydration Check', description: 'You should have had 3-4 glasses of water by now.', type: 'SYSTEM_HYDRATION' },
-    { time: lunchTime, icon: '🍽️', title: 'Lunch', description: 'Re-energize yourself', type: 'SYSTEM_NUTRITION' },
-    { time: calculateScheduledTime(lunchTime, 60), icon: '😴', title: 'Short Nap or Walk', description: 'Defeat the midday slump', type: 'SYSTEM_REST' },
-    { time: calculateScheduledTime(lunchTime, 180), icon: '🥗', title: 'Refresh & Refuel', description: 'Evening snacks', type: 'SYSTEM_SNACK' },
-    { time: calculateScheduledTime(dinnerTime, -60), icon: '💧', title: 'Hydration Check', description: 'You should have had 7-8 glasses of water by now.', type: 'SYSTEM_HYDRATION' },
-    { time: dinnerTime, icon: '🌙', title: 'Dinner', description: 'Balanced and light', type: 'SYSTEM_NUTRITION' },
-    { time: calculateScheduledTime(dinnerTime, 30), icon: '🚶', title: 'After-Dinner Walk', description: '10-15 min', type: 'SYSTEM_REST' },
-    { time: calculateScheduledTime(sleepTime, -30), icon: '🥛', title: 'Optional Snack', description: 'A small cup of milk, or 2 Marie biscuits', type: 'SYSTEM_SNACK' },
-    { time: sleepTime, icon: '🛌', title: 'Sleep', description: 'Unwind gently with Restful Night', type: 'SYSTEM_REST' }
-  ].map(card => ({
-    ...card,
-    completed: dayjs().tz(TZ).isAfter(card.time),
-    reminder: true,
-    editable: card.type === 'SYSTEM_WAKEUP'
-  }));
-
-  // --- User Cards ---
+  // --- Fetch all cards for the current date (SYSTEM + USER) ---
   const rawCards = await TimelineCard.find({
     userId,
-    scheduleDate: { $gte: utcStart, $lte: utcEnd }
-  });
+    scheduleDate: { $gte: utcStart, $lte: utcEnd },
+  }).lean();
 
+  // --- Map USER CARDS ---
   const userCards = rawCards
-    .map(card => {
-      if (!card.scheduledTime) return null;
+    .filter((card) => card.type !== "SYSTEM")
+    .map((card) => {
       const parsedTime = dayjs.tz(
-        `${localDay.format('YYYY-MM-DD')} ${convertTo24Hour(card.scheduledTime)}`,
-        'YYYY-MM-DD HH:mm',
+        `${localDay.format("YYYY-MM-DD")} ${convertTo24Hour(card.scheduledTime)}`,
+        "YYYY-MM-DD HH:mm",
         TZ
       );
       if (!parsedTime.isValid()) return null;
 
       return {
         time: parsedTime,
-        icon: card.type === 'USER_MEDICATION' ? '💊' : '🔔',
+        icon: card.type === "USER_MEDICATION" ? "💊" : "🔔",
         title: card.title,
         description: card.description,
         completed: card.isCompleted,
@@ -744,50 +692,73 @@ const getTimelineData = async (userId, dateString) => {
         editable: true,
         type: card.type,
         id: card._id.toString(),
-        sourceId: card.sourceId?.toString()
+        sourceId: card.sourceId?.toString(),
       };
     })
     .filter(Boolean);
 
-  const allCards = [...systemCards, ...userCards]
-    .sort((a, b) => a.time.valueOf() - b.time.valueOf())
-    .map(card => ({ ...card, time: dayjs(card.time).tz(TZ).format('h:mm A') }));
+  // --- Map SYSTEM CARDS from DB ---
+  const systemCardsFromDb = rawCards
+    .filter((card) => card.type === "SYSTEM")
+    .map((card) => {
+      const parsedTime = dayjs.tz(
+        `${localDay.format("YYYY-MM-DD")} ${convertTo24Hour(card.scheduledTime)}`,
+        "YYYY-MM-DD HH:mm",
+        TZ
+      );
+      if (!parsedTime.isValid()) return null;
 
-  const missedTasks = allCards.filter(task =>
-    !task.completed &&
-    dayjs.tz(`${localDay.format('YYYY-MM-DD')} ${task.time}`, 'YYYY-MM-DD h:mm A', TZ)
-      .isBefore(dayjs().tz(TZ))
+      return {
+        time: parsedTime,
+        icon: "🔔",
+        title: card.title,
+        description: card.description,
+        completed: card.isCompleted,
+        reminder: true,
+        editable: true,
+        type: card.type,
+        id: card._id.toString(),
+      };
+    })
+    .filter(Boolean);
+
+  // --- Combine and sort all cards ---
+  const allCards = [...systemCardsFromDb, ...userCards]
+    .sort((a, b) => a.time.valueOf() - b.time.valueOf())
+    .map((card) => ({
+      ...card,
+      time: dayjs(card.time).tz(TZ).format("h:mm A"),
+    }));
+
+  // --- Calculate missed tasks ---
+  const missedTasks = allCards.filter(
+    (task) =>
+      !task.completed &&
+      dayjs
+        .tz(`${localDay.format("YYYY-MM-DD")} ${task.time}`, "YYYY-MM-DD h:mm A", TZ)
+        .isBefore(dayjs().tz(TZ))
   ).length;
 
+  // --- Alerts ---
   const alerts = [];
   if (missedTasks > 0) {
     alerts.push({
-      type: 'warning',
-      text: 'Reassess to keep your plan aligned',
-      action: 'Check Plan'
-    });
-  }
-
-  const checkMealConflict = (mealTime) => Math.abs(fitnessTime.diff(mealTime, 'minutes')) < 90;
-
-  if (checkMealConflict(breakfastTime) || checkMealConflict(lunchTime) || checkMealConflict(dinnerTime)) {
-    alerts.push({
-      type: 'warning',
-      text: 'Avoid exercising within 90 minutes of a meal.',
-      action: 'Adjust Plan'
+      type: "warning",
+      text: "Reassess to keep your plan aligned",
+      action: "Check Plan",
     });
   }
 
   return {
-  dailySchedule: allCards,
-  missed: missedTasks,                 // number missed
-  totalTasks: allCards.length,         // total tasks today
-  missedDisplay: `${missedTasks}/${allCards.length}`,  // ✅ nice UI string
-  alerts,
-  streak: streakCount
+    dailySchedule: allCards,
+    missed: missedTasks, // number missed
+    totalTasks: allCards.length, // total tasks today
+    missedDisplay: `${missedTasks}/${allCards.length}`, // ✅ UI-friendly "x/y"
+    alerts,
+    streak: streakCount,
+  };
 };
 
-};
 
 
 
