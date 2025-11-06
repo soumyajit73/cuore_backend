@@ -288,8 +288,64 @@ async function adjustMealPortions(req, res) {
   }
 }
 
+async function searchRecipes(req, res) {
+  try {
+    const query = req.query.query?.trim();
+    if (!query) {
+      return res.status(400).json({ status: 'error', message: 'Search query is required.' });
+    }
+
+    const groqQuery = `
+      *[_type == "recipe" && (
+        name match "${query}*" ||
+        lower(name) match "${query.toLowerCase()}*" ||
+        "${query.toLowerCase()}" in array::join(ingredients[].name, " ") ||
+        cuisine match "${query}*" ||
+        dietPreference match "${query}*" ||
+        mealTime match "${query}*"
+      )]{
+        _id,
+        name,
+        cuisine,
+        mealTime,
+        dietPreference,
+        prepTime,
+        cookTime,
+        "imageUrl": image.asset->url,
+        ingredients[]{
+          quantity,
+          unit,
+          name,
+          notes
+        },
+        instructions[]{
+          heading,
+          steps
+        }
+      }
+    `;
+
+    const results = await client.fetch(groqQuery);
+
+    if (!results.length) {
+      return res.status(404).json({ status: 'error', message: 'No matching recipes found.' });
+    }
+
+    res.status(200).json({
+      status: 'success',
+      count: results.length,
+      recipes: results
+    });
+
+  } catch (error) {
+    console.error("❌ Error searching recipes:", error);
+    res.status(500).json({ status: 'error', message: 'Failed to fetch recipes.' });
+  }
+}
+
 // ✅ Export
 module.exports = {
   getBuilderItems,
-  adjustMealPortions
+  adjustMealPortions,
+    searchRecipes
 };
