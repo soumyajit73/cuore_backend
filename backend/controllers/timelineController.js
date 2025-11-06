@@ -628,7 +628,7 @@ exports.getHomeScreenData = async (req, res) => {
 const getTimelineData = async (userId, dateString) => {
   let localDay = dayjs.tz(dateString, TZ);
   if (!localDay.isValid()) {
-    console.warn(`Invalid dateString received in getTimelineData: "${dateString}". Falling back to today.`);
+    console.warn(`Invalid dateString in getTimelineData: "${dateString}". Falling back to today.`);
     localDay = dayjs().tz(TZ);
   }
   localDay = localDay.startOf("day");
@@ -643,8 +643,12 @@ const getTimelineData = async (userId, dateString) => {
 
   if (!onboarding) return { dailySchedule: [], missed: 0, alerts: [], streak: 0 };
 
-  // ✅ Ensure system cards exist in DB before fetching
+  // ✅ Ensure system cards exist
   await ensureSystemCardsExist(userId, onboarding, localDay);
+
+  // ✅ Unconditionally resync system cards based on current wake time
+  const currentWakeTime = convertTo24Hour(onboarding?.o6Data?.wake_time) || "07:00";
+  await updateSystemCardsAfterWakeChange(userId, currentWakeTime, localDay);
 
   // ✅ --- STREAK LOGIC START ---
   const today = dayjs().startOf("day");
@@ -662,7 +666,7 @@ const getTimelineData = async (userId, dateString) => {
   if (!lastStreakDate || today.isAfter(lastStreakDate)) {
     await Onboarding.updateOne({ userId }, { streakCount, lastStreakDate: new Date() });
   }
-  console.log("✅ STREAK:", onboarding.streakCount, onboarding.lastStreakDate);
+
   // ✅ --- STREAK LOGIC END ---
 
   // --- Fetch all cards for the current date (SYSTEM + USER) ---
@@ -697,7 +701,7 @@ const getTimelineData = async (userId, dateString) => {
     })
     .filter(Boolean);
 
-  // --- Map SYSTEM CARDS from DB ---
+  // --- Map SYSTEM CARDS ---
   const systemCardsFromDb = rawCards
     .filter((card) => card.type === "SYSTEM")
     .map((card) => {
@@ -708,14 +712,34 @@ const getTimelineData = async (userId, dateString) => {
       );
       if (!parsedTime.isValid()) return null;
 
+      // 🎯 Accurate emoji mapping
+      const title = card.title.toLowerCase();
+      let icon = "🔔";
+      if (title.includes("wake")) icon = "🌞";
+      if (title.includes("wake")) icon = "🌞";
+else if (title.includes("tobacco") || title.includes("health win")) icon = "🚭"; 
+
+      else if (title.includes("calorie") || title.includes("ignite")) icon = "🔥";
+      else if (title.includes("fitness")) icon = "🏃";
+      else if (title.includes("breakfast")) icon = "🍳";
+      else if (title.includes("boost") || title.includes("mid-morning")) icon = "🥤";
+      else if (title.includes("hydration")) icon = "💧";
+      else if (title.includes("lunch")) icon = "🍽️";
+      else if (title.includes("nap") || title.includes("rest")) icon = "😴";
+      else if (title.includes("refresh") || title.includes("refuel")) icon = "🥗";
+      else if (title.includes("dinner")) icon = "🌙";
+      else if (title.includes("walk")) icon = "🚶";
+      else if (title.includes("snack")) icon = "🥛";
+      else if (title.includes("sleep")) icon = "🛌";
+
       return {
         time: parsedTime,
-        icon: "🔔",
+        icon,
         title: card.title,
         description: card.description,
         completed: card.isCompleted,
         reminder: true,
-        editable: true,
+        editable: title.includes("wake"), // ✅ Only “Wake Up” editable
         type: card.type,
         id: card._id.toString(),
       };
@@ -749,11 +773,12 @@ const getTimelineData = async (userId, dateString) => {
     });
   }
 
+  // ✅ Return structured response
   return {
     dailySchedule: allCards,
-    missed: missedTasks, // number missed
-    totalTasks: allCards.length, // total tasks today
-    missedDisplay: `${missedTasks}/${allCards.length}`, // ✅ UI-friendly "x/y"
+    missed: missedTasks,
+    totalTasks: allCards.length,
+    missedDisplay: `${missedTasks}/${allCards.length}`,
     alerts,
     streak: streakCount,
   };
@@ -1053,19 +1078,74 @@ exports.getEntries = async (req, res) => {
     }
 };
 
+
+
+
+
+
+
+
+
+
+// 🔹 Main update function
 exports.updateEntry = async (req, res) => {
   const userId = req.user.userId;
   const { model, docId } = getModelAndId(req);
   const { title, startDate, endDate, time, repeatFrequency, name, dosage } = req.body;
 
   try {
-    // 1️⃣ Fetch the existing entry (before update)
-    const existingEntry = await model.findOne({ _id: docId, userId }).lean();
+    // 1️⃣ Try fetching entry from Reminder/Medication
+    let existingEntry = await model.findOne({ _id: docId, userId }).lean();
+
+    // ✅ If not found, check if it's a "Wake Up" system card
+    if (!existingEntry && model.modelName === "Reminder") {
+      const systemCard = await TimelineCard.findOne({
+        _id: docId,
+        userId,
+        type: "SYSTEM",
+        title: /wake up/i
+      });
+
+      if (systemCard) {
+        // Only allow time update
+        if (!time) {
+          return res.status(400).json({
+            error: "Only time updates are allowed for Wake Up system cards."
+          });
+        }
+
+        const newTime = convertTo24Hour(time);
+        const updatedSystemCard = await TimelineCard.findOneAndUpdate(
+          { _id: docId, userId },
+          { $set: { scheduledTime: newTime } },
+          { new: true }
+        );
+
+        // 🔥 Adjust dependent system cards dynamically
+        const localDay = dayjs().tz(TZ).startOf("day");
+        await updateSystemCardsAfterWakeChange(userId, newTime, localDay);
+
+        // 🔥 Persist new wake time in onboarding for future days
+        await Onboarding.updateOne(
+          { userId },
+          { "o6Data.wake_time": time },
+          { upsert: false }
+        );
+
+        return res.status(200).json({
+          message: "Wake Up time updated and system schedule adjusted.",
+          previousData: systemCard,
+          updatedData: updatedSystemCard
+        });
+      }
+    }
+
+    // ❌ If not found at all
     if (!existingEntry) {
       return res.status(404).json({ error: `${model.modelName} not found or access denied.` });
     }
 
-    // 2️⃣ Prepare update object (only provided fields)
+    // 2️⃣ Prepare update object dynamically
     const updateData = {};
     if (title !== undefined) updateData.title = title;
     if (startDate !== undefined) updateData.startDate = parseDate(startDate);
@@ -1073,32 +1153,68 @@ exports.updateEntry = async (req, res) => {
     if (time !== undefined) updateData.time = convertTo24Hour(time);
     if (repeatFrequency !== undefined) updateData.repeatFrequency = repeatFrequency;
 
-    if (model === Medication) {
+    if (model.modelName === "Medication") {
       if (name !== undefined) updateData.name = name;
       if (dosage !== undefined) updateData.dosage = dosage;
     }
 
-    // 3️⃣ Perform the update (partial update)
+    // 3️⃣ Update Reminder/Medication entry
     const updatedEntry = await model.findOneAndUpdate(
       { _id: docId, userId },
       { $set: updateData },
       { new: true, runValidators: true }
     );
 
-    // 4️⃣ Regenerate timeline safely
+    // 4️⃣ Regenerate today's timeline (to sync)
     await generateTimelineCardsForDay(userId, dayjs().toDate());
 
-    // 5️⃣ Return updated entry + previous entry (so frontend can pre-fill)
     return res.status(200).json({
       message: `${model.modelName} updated successfully.`,
       previousData: existingEntry,
-      updatedData: updatedEntry,
+      updatedData: updatedEntry
     });
   } catch (error) {
     console.error(`❌ Error updating ${model.modelName}:`, error);
     return res.status(500).json({ error: "Internal server error during update." });
   }
 };
+
+
+// ✅ Do NOT re-import dayjs here; it's already imported above
+
+async function updateSystemCardsAfterWakeChange(userId, newWakeTime, localDay) {
+  const wakeUpAnchor = dayjs.tz(`${localDay.format("YYYY-MM-DD")} ${newWakeTime}`, "YYYY-MM-DD HH:mm", TZ);
+
+  // ✅ Offsets relative to wake-up (in minutes)
+  const systemCardOffsets = [
+    { key: /tobacco|health win/i, offset: 10 },       // 🚭 New line added
+    { key: /calorie ignite/i, offset: 15 },           // 🔥
+    { key: /fitness/i, offset: 30 },                  // 🏃
+    { key: /breakfast/i, offset: 105 },               // 🍳
+    { key: /mid-morning|boost/i, offset: 255 },       // 🥤
+    { key: /hydration.*3-4/i, offset: 375 },          // 💧 Morning hydration
+    { key: /lunch/i, offset: 390 },                   // 🍽️
+    { key: /nap|walk/i, offset: 450 },                // 😴
+    { key: /refresh|refuel/i, offset: 570 },          // 🥗
+    { key: /hydration.*7-8/i, offset: 750 },          // 💧 Evening hydration
+    { key: /dinner/i, offset: 780 },                  // 🌙
+    { key: /after-dinner/i, offset: 810 },            // 🚶
+    { key: /optional snack/i, offset: 930 },          // 🥛
+    { key: /sleep/i, offset: 960 },                   // 🛌
+  ];
+
+  for (const entry of systemCardOffsets) {
+    const newTime = wakeUpAnchor.add(entry.offset, "minute").tz(TZ).format("HH:mm");
+    await TimelineCard.updateOne(
+      { userId, type: "SYSTEM", title: entry.key },
+      { $set: { scheduledTime: newTime } }
+    );
+  }
+
+  console.log(`✅ System cards rescheduled for ${userId} after wake time: ${newWakeTime}`);
+}
+
+
 
 
 exports.getCuoreScore = async (req, res) => {
