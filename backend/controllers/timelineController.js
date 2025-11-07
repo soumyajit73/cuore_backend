@@ -943,11 +943,17 @@ exports.addEntry = async (req, res) => {
       { upsert: true, new: true }
     );
 
+    // --- ✅ MODIFICATION ---
+    // The newEntry object is returned in 'data', but we also add
+    // newEntry._id as a top-level 'sourceId' for easy access.
     return res.status(201).json({
       message: `${isMedication ? "Medication" : "Reminder"} added successfully.`,
       type: isMedication ? "medication" : "reminder",
       data: newEntry,
+      sourceId: newEntry._id // <-- Here is the added field
     });
+    // --- END MODIFICATION ---
+
   } catch (error) {
     console.error("❌ Error adding new timeline entry:", error);
     return res.status(500).json({ error: "Internal server error." });
