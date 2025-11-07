@@ -574,7 +574,7 @@ exports.getHomeScreenData = async (req, res) => {
     const todayDate = dayjs.tz(dateString, TZ).toDate();
 
     try {
-        await generateTimelineCardsForDay(userId, todayDate);
+        // await generateTimelineCardsForDay(userId, todayDate);
         
 
         // **MODIFIED**: Added getNudge back into the Promise.all
@@ -652,14 +652,32 @@ const getTimelineData = async (userId, dateString) => {
 
   if (!onboarding) return { dailySchedule: [], missed: 0, alerts: [], streak: 0 };
 
-  // ✅ Ensure system cards exist
-  await ensureSystemCardsExist(userId, onboarding, localDay);
+  // --- Ensure system cards exist for the day (only if missing) ---
+  const systemCardsExist = await TimelineCard.exists({
+    userId,
+    type: "SYSTEM",
+    scheduleDate: { $gte: utcStart, $lte: utcEnd },
+  });
 
-  // ✅ Recalculate system cards dynamically (wake-based)
-  const currentWakeTime = convertTo24Hour(onboarding?.o6Data?.wake_time) || "07:00";
-  await updateSystemCardsAfterWakeChange(userId, currentWakeTime, localDay);
+  if (!systemCardsExist) {
+    // If helper ensureSystemCardsExist inserts cards, use that; otherwise resync from wake time
+    // prefer ensureSystemCardsExist to create missing cards
+    if (typeof ensureSystemCardsExist === "function") {
+      await ensureSystemCardsExist(userId, onboarding, localDay);
+    } else {
+      const currentWakeTime = convertTo24Hour(onboarding?.o6Data?.wake_time) || "07:00";
+      await updateSystemCardsAfterWakeChange(userId, currentWakeTime, localDay);
+    }
+  } else {
+    // If cards exist, still make sure their times respect the user's current wake/exercise preference:
+    const currentWakeTime = convertTo24Hour(onboarding?.o6Data?.wake_time) || "07:00";
+    // updateSystemCardsAfterWakeChange will update scheduledTime in DB to match current wake if needed
+    if (typeof updateSystemCardsAfterWakeChange === "function") {
+      await updateSystemCardsAfterWakeChange(userId, currentWakeTime, localDay);
+    }
+  }
 
-  // ✅ Extract latest exercise time (user-customized)
+  // ✅ Extract latest exercise time (user-customized) (24h)
   const preferredExTime =
     onboarding?.o5Data?.preferred_ex_time &&
     convertTo24Hour(onboarding.o5Data.preferred_ex_time);
@@ -679,18 +697,26 @@ const getTimelineData = async (userId, dateString) => {
     await Onboarding.updateOne({ userId }, { streakCount, lastStreakDate: new Date() });
   }
 
-  // --- Fetch all cards (SYSTEM + USER) ---
+  // --- Fetch all cards (SYSTEM + USER) from DB for that date ---
   const rawCards = await TimelineCard.find({
     userId,
     scheduleDate: { $gte: utcStart, $lte: utcEnd },
   }).lean();
 
+  // --- Sort rawCards by scheduledTime string (safeguard when times present) ---
+  rawCards.sort((a, b) => {
+    if (!a?.scheduledTime || !b?.scheduledTime) return 0;
+    // scheduledTime is "HH:mm" - lexicographic compare works
+    return a.scheduledTime.localeCompare(b.scheduledTime);
+  });
+
   // --- USER CARDS ---
   const userCards = rawCards
     .filter((card) => card.type !== "SYSTEM")
     .map((card) => {
+      const scheduled = convertTo24Hour(card.scheduledTime || card.time || "00:00");
       const parsedTime = dayjs.tz(
-        `${localDay.format("YYYY-MM-DD")} ${convertTo24Hour(card.scheduledTime)}`,
+        `${localDay.format("YYYY-MM-DD")} ${scheduled}`,
         "YYYY-MM-DD HH:mm",
         TZ
       );
@@ -700,8 +726,8 @@ const getTimelineData = async (userId, dateString) => {
         time: parsedTime,
         icon: card.type === "USER_MEDICATION" ? "💊" : "🔔",
         title: card.title,
-        description: card.description,
-        completed: card.isCompleted,
+        description: card.description || null,
+        completed: !!card.isCompleted,
         reminder: true,
         editable: true,
         type: card.type,
@@ -711,14 +737,13 @@ const getTimelineData = async (userId, dateString) => {
     })
     .filter(Boolean);
 
-  // --- SYSTEM CARDS ---
+  // --- SYSTEM CARDS (from DB) ---
   const systemCardsFromDb = rawCards
     .filter((card) => card.type === "SYSTEM")
     .map((card) => {
-      let scheduledTime = convertTo24Hour(card.scheduledTime);
-
-      // 🧠 Override the fitness card’s time with user’s latest preference
-      if (card.title.toLowerCase().includes("fitness") && preferredExTime) {
+      // Use DB scheduledTime but allow fitness override with user's preferred time
+      let scheduledTime = convertTo24Hour(card.scheduledTime || "07:00");
+      if (card.title && card.title.toLowerCase().includes("fitness") && preferredExTime) {
         scheduledTime = preferredExTime;
       }
 
@@ -729,39 +754,38 @@ const getTimelineData = async (userId, dateString) => {
       );
       if (!parsedTime.isValid()) return null;
 
-      // 🎯 Icon mapping
-      const title = card.title.toLowerCase();
+      const titleLower = (card.title || "").toLowerCase();
       let icon = "🔔";
-      if (title.includes("wake")) icon = "🌞";
-      else if (title.includes("tobacco") || title.includes("health win")) icon = "🚭";
-      else if (title.includes("calorie") || title.includes("ignite")) icon = "🔥";
-      else if (title.includes("fitness")) icon = "🏃";
-      else if (title.includes("breakfast")) icon = "🍳";
-      else if (title.includes("boost") || title.includes("mid-morning")) icon = "🥤";
-      else if (title.includes("hydration")) icon = "💧";
-      else if (title.includes("lunch")) icon = "🍽️";
-      else if (title.includes("nap") || title.includes("rest")) icon = "😴";
-      else if (title.includes("refresh") || title.includes("refuel")) icon = "🥗";
-      else if (title.includes("dinner")) icon = "🌙";
-      else if (title.includes("walk")) icon = "🚶";
-      else if (title.includes("snack")) icon = "🥛";
-      else if (title.includes("sleep")) icon = "🛌";
+      if (titleLower.includes("wake")) icon = "🌞";
+      else if (titleLower.includes("tobacco") || titleLower.includes("health win")) icon = "🚭";
+      else if (titleLower.includes("calorie") || titleLower.includes("ignite")) icon = "🔥";
+      else if (titleLower.includes("fitness")) icon = "🏃";
+      else if (titleLower.includes("breakfast")) icon = "🍳";
+      else if (titleLower.includes("boost") || titleLower.includes("mid-morning")) icon = "🥤";
+      else if (titleLower.includes("hydration")) icon = "💧";
+      else if (titleLower.includes("lunch")) icon = "🍽️";
+      else if (titleLower.includes("nap") || titleLower.includes("rest")) icon = "😴";
+      else if (titleLower.includes("refresh") || titleLower.includes("refuel")) icon = "🥗";
+      else if (titleLower.includes("dinner")) icon = "🌙";
+      else if (titleLower.includes("walk")) icon = "🚶";
+      else if (titleLower.includes("snack")) icon = "🥛";
+      else if (titleLower.includes("sleep")) icon = "🛌";
 
       return {
         time: parsedTime,
         icon,
         title: card.title,
-        description: card.description,
-        completed: card.isCompleted,
+        description: card.description || null,
+        completed: !!card.isCompleted,
         reminder: true,
-        editable: title.includes("wake"), // Only “Wake Up” editable
+        editable: titleLower.includes("wake"), // only Wake Up editable
         type: card.type,
         id: card._id.toString(),
       };
     })
     .filter(Boolean);
 
-  // --- Combine and Sort ---
+  // --- Combine and final sort by time ---
   const allCards = [...systemCardsFromDb, ...userCards]
     .sort((a, b) => a.time.valueOf() - b.time.valueOf())
     .map((card) => ({
@@ -769,7 +793,7 @@ const getTimelineData = async (userId, dateString) => {
       time: dayjs(card.time).tz(TZ).format("h:mm A"),
     }));
 
-  // --- Missed Tasks ---
+  // --- Missed tasks (incomplete and time before now) ---
   const missedTasks = allCards.filter(
     (task) =>
       !task.completed &&
@@ -798,6 +822,7 @@ const getTimelineData = async (userId, dateString) => {
     streak: streakCount,
   };
 };
+
 
 
 
@@ -1119,46 +1144,56 @@ exports.updateEntry = async (req, res) => {
         _id: docId,
         userId,
         type: "SYSTEM",
-        title: /wake up/i
+        title: /wake up/i,
       });
 
       if (systemCard) {
-        // Only allow time update
         if (!time) {
           return res.status(400).json({
-            error: "Only time updates are allowed for Wake Up system cards."
+            error: "Only time updates are allowed for Wake Up system cards.",
           });
         }
 
         const newTime = convertTo24Hour(time);
+        const localDay = dayjs().tz(TZ).startOf("day");
+
+        // ✅ Step 1: Update wake time in onboarding
+        await Onboarding.updateOne(
+          { userId },
+          { "o6Data.wake_time": newTime },
+          { upsert: false }
+        );
+
+        // ✅ Step 2: Update the wake-up card itself
         const updatedSystemCard = await TimelineCard.findOneAndUpdate(
           { _id: docId, userId },
           { $set: { scheduledTime: newTime } },
           { new: true }
         );
 
-        // 🔥 Adjust dependent system cards dynamically
-        const localDay = dayjs().tz(TZ).startOf("day");
+        // ✅ Step 3: Shift all system cards according to new wake-up time
         await updateSystemCardsAfterWakeChange(userId, newTime, localDay);
+        // 🕒 Ensure DB writes are complete before fetching timeline
+await new Promise(resolve => setTimeout(resolve, 1000));
 
-        // 🔥 Persist new wake time in onboarding for future days
-        await Onboarding.updateOne(
-          { userId },
-          { "o6Data.wake_time": time },
-          { upsert: false }
-        );
+
+        // ✅ Step 4: Fetch the latest timeline (without regenerating)
+        const updatedTimeline = await getTimelineData(userId, dayjs().format("YYYY-MM-DD"));
 
         return res.status(200).json({
-          message: "Wake Up time updated and system schedule adjusted.",
+          message: "Wake Up time updated — all system cards shifted correctly.",
           previousData: systemCard,
-          updatedData: updatedSystemCard
+          updatedData: updatedSystemCard,
+          updatedTimeline,
         });
       }
     }
 
-    // ❌ If not found at all
+    // ❌ Not found at all
     if (!existingEntry) {
-      return res.status(404).json({ error: `${model.modelName} not found or access denied.` });
+      return res
+        .status(404)
+        .json({ error: `${model.modelName} not found or access denied.` });
     }
 
     // 2️⃣ Prepare update object dynamically
@@ -1181,54 +1216,89 @@ exports.updateEntry = async (req, res) => {
       { new: true, runValidators: true }
     );
 
-    // 4️⃣ Regenerate today's timeline (to sync)
-    await generateTimelineCardsForDay(userId, dayjs().toDate());
+    // ✅ 4️⃣ Fetch updated timeline
+    const updatedTimeline = await getTimelineData(userId, dayjs().format("YYYY-MM-DD"));
 
     return res.status(200).json({
       message: `${model.modelName} updated successfully.`,
       previousData: existingEntry,
-      updatedData: updatedEntry
+      updatedData: updatedEntry,
+      updatedTimeline,
     });
   } catch (error) {
     console.error(`❌ Error updating ${model.modelName}:`, error);
-    return res.status(500).json({ error: "Internal server error during update." });
+    return res
+      .status(500)
+      .json({ error: "Internal server error during update." });
   }
 };
+
+
+
 
 
 // ✅ Do NOT re-import dayjs here; it's already imported above
 
 async function updateSystemCardsAfterWakeChange(userId, newWakeTime, localDay) {
-  const wakeUpAnchor = dayjs.tz(`${localDay.format("YYYY-MM-DD")} ${newWakeTime}`, "YYYY-MM-DD HH:mm", TZ);
+  const wakeUpAnchor = dayjs.tz(
+    `${localDay.format("YYYY-MM-DD")} ${newWakeTime}`,
+    "YYYY-MM-DD HH:mm",
+    TZ
+  );
 
-  // ✅ Offsets relative to wake-up (in minutes)
   const systemCardOffsets = [
-    { key: /tobacco|health win/i, offset: 10 },       // 🚭 New line added
-    { key: /calorie ignite/i, offset: 15 },           // 🔥
-    { key: /fitness/i, offset: 30 },                  // 🏃
-    { key: /breakfast/i, offset: 105 },               // 🍳
-    { key: /mid-morning|boost/i, offset: 255 },       // 🥤
-    { key: /hydration.*3-4/i, offset: 375 },          // 💧 Morning hydration
-    { key: /lunch/i, offset: 390 },                   // 🍽️
-    { key: /nap|walk/i, offset: 450 },                // 😴
-    { key: /refresh|refuel/i, offset: 570 },          // 🥗
-    { key: /hydration.*7-8/i, offset: 750 },          // 💧 Evening hydration
-    { key: /dinner/i, offset: 780 },                  // 🌙
-    { key: /after-dinner/i, offset: 810 },            // 🚶
-    { key: /optional snack/i, offset: 930 },          // 🥛
-    { key: /sleep/i, offset: 960 },                   // 🛌
+    { key: /tobacco|health win/i, offset: 10 },
+    { key: /calorie ignite/i, offset: 15 },
+    { key: /fitness/i, offset: 30 },
+    { key: /breakfast/i, offset: 105 },
+    { key: /mid-morning|boost/i, offset: 255 },
+    { key: /hydration.*3-4/i, offset: 375 },
+    { key: /lunch/i, offset: 390 },
+    { key: /nap|walk/i, offset: 450 },
+    { key: /refresh|refuel/i, offset: 570 },
+    { key: /hydration.*7-8/i, offset: 750 },
+    { key: /dinner/i, offset: 780 },
+    { key: /after-dinner/i, offset: 810 },
+    { key: /optional snack/i, offset: 930 },
+    { key: /sleep/i, offset: 960 },
   ];
 
+  // --- FIX ---
+  // Define the date range for the query
+  const utcStart = localDay.startOf("day").utc().toDate();
+  const utcEnd = localDay.endOf("day").utc().toDate();
+  // --- END FIX ---
+
   for (const entry of systemCardOffsets) {
-    const newTime = wakeUpAnchor.add(entry.offset, "minute").tz(TZ).format("HH:mm");
-    await TimelineCard.updateOne(
-      { userId, type: "SYSTEM", title: entry.key },
+    const newTime = wakeUpAnchor
+      .add(entry.offset, "minute")
+      .tz(TZ)
+      .format("HH:mm");
+
+    // --- FIX ---
+    // Add the scheduleDate filter to the query
+    // Use updateMany in case cards for the day were somehow duplicated
+    await TimelineCard.updateMany(
+      {
+        userId,
+        type: "SYSTEM",
+        title: entry.key,
+        scheduleDate: { $gte: utcStart, $lte: utcEnd } // Ensures we only update today's cards
+      },
       { $set: { scheduledTime: newTime } }
     );
+    // --- END FIX ---
+  }
+  
+  console.log("📅 Shifted cards:");
+  for (const entry of systemCardOffsets) {
+    const newTime = wakeUpAnchor.add(entry.offset, "minute").tz(TZ).format("HH:mm");
+    console.log(`${entry.key} → ${newTime}`);
   }
 
-  console.log(`✅ System cards rescheduled for ${userId} after wake time: ${newWakeTime}`);
+  console.log(`✅ SYSTEM cards shifted according to new wake-up time: ${newWakeTime}`);
 }
+
 
 
 
