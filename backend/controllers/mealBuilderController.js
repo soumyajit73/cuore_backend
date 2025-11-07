@@ -217,31 +217,48 @@ async function adjustMealPortions(req, res) {
     const processedCartItems = inputCartItems.map(item => {
       const servings = typeof item.numOfServings === 'number' && item.numOfServings > 0 ? item.numOfServings : 1;
       const baseCalories = typeof item.calories === 'number' && item.calories >= 0 ? item.calories : 0;
+      
+      // Use the helper to parse servingSize
       const { totalQuantity, unit } = calculateTotalQuantity(item.servingSize, servings);
+      
       const weight = typeof item.adjustmentWeight === 'number' && item.adjustmentWeight >= 0 ? item.adjustmentWeight : 0;
 
       return {
         _id: item._id,
         name: item.name,
-        baseCalories,
+        baseCalories, // Calories for the base serving size (e.g., 0.5 cup)
         numOfServings: servings,
         recipeLink: item.recipeLink,
         section: item.section,
         cuisine: item.cuisine,
         mealTime: item.mealTime,
         healthColor: item.healthColor,
-        totalCalories: baseCalories * servings,
-        totalQuantity,
+        // totalCalories is calories * numServings
+        totalCalories: baseCalories * servings, 
+        // totalQuantity is the base quantity * numServings (e.g., 0.5 * 1 = 0.5)
+        totalQuantity, 
         unit,
-        adjustmentWeight: weight
+        adjustmentWeight: weight,
+        // Store base quantity (quantity for 1 serving) for later
+        baseQuantity: totalQuantity / servings, 
       };
     });
 
     // ⚙️ Step 1: Compute totals (% of recommended calories)
     const totalAdjustmentWeight = processedCartItems.reduce((sum, i) => sum + i.adjustmentWeight, 0);
 
-    // ✅ Fix: Use 100% if total < 100
-    const effectiveTotalWeight = (totalAdjustmentWeight < 100 && totalAdjustmentWeight > 0) ? 100 : totalAdjustmentWeight;
+    // --- ✅ THE FIX ---
+    // Handle the case where total weight is 0 to prevent division by zero
+    if (totalAdjustmentWeight === 0) {
+      return res.status(400).json({ 
+        message: "Cannot adjust portions. Total adjustmentWeight is 0.",
+        adjustedItems: processedCartItems // Return items unprocessed
+      });
+    }
+
+    // Always use the ACTUAL totalAdjustmentWeight for the calculation
+    const effectiveTotalWeight = totalAdjustmentWeight;
+    // --- END FIX ---
 
     const alertMessage =
       totalAdjustmentWeight < 100 && totalAdjustmentWeight > 0
@@ -250,14 +267,30 @@ async function adjustMealPortions(req, res) {
 
     // ⚙️ Step 2: Apply Excel formula for each item
     const adjustedItems = processedCartItems.map(item => {
+      // Prevent division by zero if baseCalories is 0
+      if (item.baseCalories === 0) {
+        return {
+          ...item,
+          adjustedQuantity: 0,
+          adjustedCalories: 0,
+          newServingSizeString: "N/A (0 calories)",
+          calcRaw: 0
+        };
+      }
+        
+      // This is the core formula
       const calcRaw =
         (item.adjustmentWeight / effectiveTotalWeight) *
         (recommendedCalories / item.baseCalories) *
-        item.totalQuantity;
+        item.baseQuantity; // Use baseQuantity (for 1 serving)
 
       const adjustedQuantity = MROUND(calcRaw, 0.25);
-      const quantityRatio = item.totalQuantity > 0 ? adjustedQuantity / item.totalQuantity : 0;
-      const adjustedCalories = Math.round(item.totalCalories * quantityRatio);
+      
+      // Calculate ratio based on base quantity
+      const quantityRatio = item.baseQuantity > 0 ? adjustedQuantity / item.baseQuantity : 0;
+      
+      // Adjusted calories = base calories * new ratio
+      const adjustedCalories = Math.round(item.baseCalories * quantityRatio);
 
       return {
         ...item,
@@ -276,7 +309,7 @@ async function adjustMealPortions(req, res) {
       message: "Meal portions adjusted according to custom plate logic.",
       alert: alertMessage,
       totalPercentage: totalAdjustmentWeight,
-      effectiveTotalWeight,
+      effectiveTotalWeight, // This now equals totalPercentage
       recommendedCalories,
       newTotalCalories: totalAdjustedCalories,
       adjustedItems
@@ -347,5 +380,5 @@ async function searchRecipes(req, res) {
 module.exports = {
   getBuilderItems,
   adjustMealPortions,
-    searchRecipes
+  searchRecipes
 };
