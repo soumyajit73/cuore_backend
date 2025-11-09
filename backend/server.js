@@ -7,6 +7,7 @@ console.log("SANITY_READ_TOKEN:", process.env.SANITY_READ_TOKEN ? 'Loaded' : 'MI
 const express = require('express');
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
+const cors = require('cors');
 
 // 2️⃣ Import all routes AFTER dotenv loads
 const onboardingRoutes = require('./routes/onboardingRoutes');
@@ -32,6 +33,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
+app.use(cors());
 app.use(bodyParser.json());
 
 // MongoDB Connection (Keep if other parts of your app still use it)
