@@ -18,6 +18,7 @@ const timelineRoutes = require('./routes/timelineRoutes');
 const predictRoutes = require('./routes/predictRoutes');
 const cuoreHealthRoutes=require('./routes/cuoreHealthRoutes.js');
 const doctorAuthRoutes=require('./routes/web/doctorAuthRoutes.js');
+const doctorDashboardRoutes = require('./routes/web/doctorDashboardRoutes.js');
 
 // --- NEW/UPDATED IMPORTS ---
 const nourishmentRoutes = require('./routes/nourishmentRoutes'); 
@@ -84,6 +85,7 @@ app.use('/api/tobacco', tobaccoRoutes);
 
 // web app entry points
 app.use('/api/web/auth', require('./routes/web/doctorAuthRoutes'));
+app.use('/api/web/dashboard', doctorDashboardRoutes);
 // --- Start Server ---
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);

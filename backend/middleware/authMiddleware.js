@@ -1,48 +1,66 @@
 const jwt = require('jsonwebtoken');
+const Doctor = require('../models/Doctor');
+// Assuming you have a User model, though your old middleware didn't check the DB
+// const User = require('../models/User');
 
-exports.protect = (req, res, next) => {
+exports.protect = async (req, res, next) => {
     let token;
 
-    // Read the secret inside the function to ensure dotenv has loaded
+    // Read the secret inside the function
     const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
-    console.log("[PROTECT] JWT_ACCESS_SECRET:", JWT_ACCESS_SECRET);
+    if (!JWT_ACCESS_SECRET) {
+        return res.status(500).json({ message: "Server configuration error: JWT secret is missing." });
+    }
 
-    // 1. Check for token in Authorization header (Bearer <token>)
+    // 1. Check for token in Authorization header
     const authHeader = req.headers.authorization;
-    console.log("[PROTECT] Incoming Authorization header:", authHeader);
-
     if (authHeader && authHeader.startsWith('Bearer')) {
-        // Get token from header (split "Bearer" and actual token)
         token = authHeader.split(' ')[1];
     }
-    console.log("[PROTECT] Token extracted:", token);
 
-    // --- CRITICAL CHECK: Token must exist ---
+    // 2. Token must exist
     if (!token) {
-        return res.status(401).json({ message: "Not authorized, no token provided in request." });
-    }
-
-    // Check for empty or malformed token
-    if (token === 'undefined' || token === '') {
-        return res.status(401).json({ message: "Not authorized, malformed token." });
+        return res.status(401).json({ message: "Not authorized, no token provided." });
     }
 
     try {
-        // 2. Verify the token signature and expiration
+        // 3. Verify the token
         const decoded = jwt.verify(token, JWT_ACCESS_SECRET);
         console.log("[PROTECT] Decoded JWT payload:", decoded);
 
-        // 3. Attach user ID to the request object
-        req.user = { userId: decoded.userId };
+        // --- 4. SMARTLY CHECK PAYLOAD TYPE ---
+        
+        // --- A) It's a DOCTOR token ---
+        if (decoded.type === 'doctor' && decoded.id) {
+            
+            // Get doctor from the token ID
+            const doctor = await Doctor.findById(decoded.id).select('-password');
+            
+            if (!doctor) {
+                return res.status(401).json({ error: 'Not authorized, doctor not found' });
+            }
+            
+            // Attach doctor to request
+            req.doctor = doctor;
+            next(); // Go to the doctor's controller
 
-        next(); // Move to the controller function
+        // --- B) It's a USER (patient) token ---
+        } else if (decoded.userId) {
+            
+            // This matches your old logic:
+            // Just attach the user ID to the request object
+            req.user = { userId: decoded.userId };
+            next(); // Go to the user's controller
+
+        // --- C) It's an unrecognized token ---
+        } else {
+            return res.status(401).json({ message: "Not authorized, invalid token payload." });
+        }
+        // --- END OF CHECK ---
 
     } catch (error) {
-        // This catch block handles:
-        // a) Token expiration (TokenExpiredError)
-        // b) Invalid signature (JsonWebTokenError)
+        // Handles expired tokens, invalid signatures, etc.
         console.error("[PROTECT] JWT Verification Error:", error);
-
         return res.status(401).json({ message: "Not authorized, invalid or expired token." });
     }
 };
