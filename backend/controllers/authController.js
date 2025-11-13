@@ -10,7 +10,8 @@ let nanoid;
 const User = require('../models/User');
 const OtpRequest = require('../models/otp');
 const { Onboarding } = require('../models/onboardingModel.js');
-const PatientLink = require('../models/PatientLink'); // Corrected import
+const PatientLink = require('../models/PatientLink'); 
+const Doctor = require('../models/Doctor');// Corrected import
 
 // --- CONSTANTS ---
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'fallback-access-secret';
@@ -128,61 +129,83 @@ exports.createAccount = async (req, res) => {
 };
 // 2. Verify OTP and Activate New User Account
 exports.verifyNewUserOtp = async (req, res) => {
-    const { request_id, otp_code } = req.body;
-    
-    if (!request_id || !otp_code) {
-        return res.status(400).json({ error: "Missing required fields." });
-    }
+    const { request_id, otp_code } = req.body;
+    
+    if (!request_id || !otp_code) {
+        return res.status(400).json({ error: "Missing required fields." });
+    }
 
-    try {
-        // 1. Find the OTP request entry and its temporary data
-        const otpEntry = await OtpRequest.findOne({ request_id });
-        if (!otpEntry) {
-             return res.status(401).json({ error: "OTP_INVALID (Code not found or expired.)" });
-        }
-        
-        // 2. Check Expiration
-        if (otpEntry.expiresAt < new Date()) {
-            await OtpRequest.deleteOne({ request_id });
-            return res.status(410).json({ error: "OTP_EXPIRED (This code has expired.)" });
-        }
+    try {
+        // 1. Find the OTP request entry and its temporary data
+        const otpEntry = await OtpRequest.findOne({ request_id });
+        if (!otpEntry) {
+            return res.status(401).json({ error: "OTP_INVALID (Code not found or expired.)" });
+        }
+        
+        // 2. Check Expiration
+        if (otpEntry.expiresAt < new Date()) {
+            await OtpRequest.deleteOne({ request_id });
+            return res.status(410).json({ error: "OTP_EXPIRED (This code has expired.)" });
+        }
 
-        // 3. Verify OTP code
-        const isOtpValid = compareOtp(otp_code, otpEntry.otpHash);
-        if (!isOtpValid) {
-            return res.status(401).json({ error: "OTP_INVALID (That code didn't match.)" });
-        }
+        // 3. Verify OTP code
+        const isOtpValid = compareOtp(otp_code, otpEntry.otpHash);
+        if (!isOtpValid) {
+            return res.status(401).json({ error: "OTP_INVALID (That code didn't match.)" });
+        }
 
-        // --- NEW LOGIC: Create the user account from the temporary data ---
-        // Ensure user doesn't already exist from a race condition
-        const existingUser = await User.findOne({ phone: otpEntry.phone });
-        if (existingUser) {
-            await OtpRequest.deleteOne({ request_id });
-            return res.status(409).json({ error: "USER_ALREADY_EXISTS", message: "This mobile number is already registered. Please log in." });
-        }
+        // 4. Check for race condition
+        const existingUser = await User.findOne({ phone: otpEntry.phone });
+        if (existingUser) {
+            await OtpRequest.deleteOne({ request_id });
+            return res.status(409).json({ error: "USER_ALREADY_EXISTS", message: "This mobile number is already registered. Please log in." });
+        }
 
-        const newUser = await User.create({
-            ...otpEntry.userData,
-            isPhoneVerified: true 
-        });
+        // 5. Create the new user
+        const newUser = await User.create({
+            ...otpEntry.userData,
+            isPhoneVerified: true 
+        });
 
-        await OtpRequest.deleteOne({ request_id });
+        // --- START: NEW LINKING LOGIC ---
+        // 6. Check if a doctor_code was used
+        if (newUser.doctor_code) {
+            // Find the doctor by their code
+            const linkedDoctor = await Doctor.findOne({ doctorCode: newUser.doctor_code });
 
-        const { accessToken, refreshToken } = generateTokens(newUser._id);
+            if (linkedDoctor) {
+                // Add this new patient's ID to the doctor's 'patients' array
+                // We check $addToSet to avoid duplicates
+                await Doctor.updateOne(
+                    { _id: linkedDoctor._id },
+                    { $addToSet: { patients: newUser._id } }
+                );
+                console.log(`[LINK] Successfully linked User ${newUser._id} to Doctor ${linkedDoctor._id}`);
+            } else {
+                console.warn(`[LINK] User ${newUser._id} had a doctor_code (${newUser.doctor_code}), but no matching doctor was found.`);
+            }
+        }
+        // --- END: NEW LINKING LOGIC ---
 
-        return res.status(200).json({
-            user_id: newUser._id,
-            new_user: true, 
-            onboardingStatus: "incomplete",
-            access_token: accessToken,
-            refresh_token: refreshToken,
-            expires_in: 18000 
-        });
+        // 7. Clean up the OTP request
+        await OtpRequest.deleteOne({ request_id });
 
-    } catch (error) {
-        console.error("Error verifying new user OTP:", error);
-        return res.status(500).json({ error: "SERVER_ERROR (Something went wrong.)" });
-    }
+        // 8. Generate tokens and send response
+        const { accessToken, refreshToken } = generateTokens(newUser._id);
+
+        return res.status(200).json({
+            user_id: newUser._id,
+            new_user: true, 
+            onboardingStatus: "incomplete",
+            access_token: accessToken,
+            refresh_token: refreshToken,
+            expires_in: 18000 
+        });
+
+    } catch (error) {
+        console.error("Error verifying new user OTP:", error);
+        return res.status(500).json({ error: "SERVER_ERROR (Something went wrong.)" });
+    }
 };
 // Existing User Login Flow Endpoints (Modified)
 // Existing User Login Flow Endpoints (Modified)

@@ -1,110 +1,73 @@
-// This is a hardcoded data array that matches your UI screenshot.
-// We will replace this with real database logic later.
 const PatientLink = require('../../models/PatientLink');
-const hardcodedPatientData = [
-  {
-    _id: "67890abcde001",
-    sobAlert: true, // For the red dot
-    name: "John Smith",
-    phone: "9876543210",
-    sbp: 140,
-    dbp: 90,
-    hr: 88,
-    fbs: 126,
-    bspp: 180,
-    a1c: 7.6,
-    hscrp: 3.2,
-    tghdl: 4.2,
-    lifestyle: 65,
-    status: "26 May 24",
-    statusType: "date",
-  },
-  {
-    _id: "67890abcde002",
-    sobAlert: true, // For the red dot
-    name: "M. Johnson",
-    phone: "9876543210",
-    sbp: 120,
-    dbp: 80,
-    hr: 88,
-    fbs: 138,
-    bspp: 190,
-    a1c: 7.8,
-    hscrp: 2.1,
-    tghdl: 3.8,
-    lifestyle: 82,
-    status: "23 Feb 25",
-    statusType: "date",
-  },
-  {
-    _id: "67890abcde003",
-    sobAlert: false,
-    name: "John Smith",
-    phone: "9876543210",
-    sbp: 140,
-    dbp: 90,
-    hr: 88,
-    fbs: 126,
-    bspp: 180,
-    a1c: 7.6,
-    hscrp: 3.2,
-    tghdl: 4.2,
-    lifestyle: 65,
-    status: "Accept",
-    statusType: "accept", // For the orange button
-  },
-  {
-    _id: "67890abcde004",
-    sobAlert: false,
-    name: "M. Johnson",
-    phone: "9876543210",
-    sbp: 120,
-    dbp: 80,
-    hr: 88,
-    fbs: 138,
-    bspp: 190,
-    a1c: 7.8,
-    hscrp: 2.1,
-    tghdl: 3.8,
-    lifestyle: 82,
-    status: "26 May 24",
-    statusType: "date",
-  },
-  {
-    _id: "67890abcde005",
-    sobAlert: false,
-    name: "M. Johnson",
-    phone: "9876543210",
-    sbp: 120,
-    dbp: 80,
-    hr: 88,
-    fbs: 138,
-    bspp: 190,
-    a1c: 7.8,
-    hscrp: 2.1,
-    tghdl: 3.8,
-    lifestyle: 82,
-    status: "Renewal",
-    statusType: "renewal", // For the red text
-  },
-    {
-    _id: "67890abcde006",
-    sobAlert: false,
-    name: "Mary Johnson",
-    phone: "9876543210",
-    sbp: 120,
-    dbp: 80,
-    hr: 88,
-    fbs: 138,
-    bspp: 190,
-    a1c: 7.8,
-    hscrp: 2.1,
-    tghdl: 3.8,
-    lifestyle: 82,
-    status: "Inactive",
-    statusType: "inactive", // For the greyed-out text
-  },
-];
+
+// --- ADDED IMPORTS FOR REAL DATA ---
+const Doctor = require('../../models/Doctor');
+const User = require('../../models/User');
+const { Onboarding } = require('../../models/onboardingModel'); // Ensure this path is correct
+const { calculateAllMetrics } = require('../../models/onboardingModel'); // Ensure this is exported and path is correct
+// --- END OF IMPORTS ---
+
+
+// --- HELPER FUNCTION ---
+// This function gets all data for ONE patient and formats it for the dashboard
+const formatPatientData = async (patientUser) => {
+    if (!patientUser) return null;
+
+    // 1. Find the patient's Onboarding data
+    const onboardingDoc = await Onboarding.findOne({ userId: patientUser._id }).lean();
+    if (!onboardingDoc) {
+        // This patient has signed up but not completed onboarding
+        return {
+            _id: patientUser._id,
+            sobAlert: false,
+            name: patientUser.display_name,
+            phone: patientUser.phone,
+            sbp: null, dbp: null, hr: null, fbs: null, bspp: null, a1c: null, hscrp: null, tghdl: null, lifestyle: null,
+            status: "Pending Onboarding",
+            statusType: "inactive",
+        };
+    }
+
+    // 2. We have onboarding data, so get biometrics
+    const o7 = onboardingDoc.o7Data || {};
+    const o3 = onboardingDoc.o3Data || {};
+    
+    // 3. Calculate metrics to get Lifestyle Score and TG/HDL
+    let metrics = {};
+    if (typeof calculateAllMetrics === "function") {
+         metrics = calculateAllMetrics(onboardingDoc);
+    } else {
+        console.warn(`[formatPatientData] calculateAllMetrics function not found. Lifestyle/TGHDL may be null for user ${patientUser._id}.`);
+    }
+    
+    // 4. Check for SOB/Chest Discomfort Alert
+    const sobAlert = o3.q5 === true; // From your UI doc
+
+    // 5. Determine Status (Simplified for now)
+    // TODO: Add logic for 'Accept', 'Renewal', 'Lapsed' based on your rules
+    const status = onboardingDoc.timestamp ? new Date(onboardingDoc.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : "No Date";
+    const statusType = "date"; // Default
+
+    // 6. Build the final flat object for the UI
+    return {
+        _id: patientUser._id,
+        sobAlert: sobAlert,
+        name: patientUser.display_name,
+        phone: patientUser.phone,
+        sbp: o7.bp_upper || null,
+        dbp: o7.bp_lower || null,
+        hr: o7.pulse || null,
+        fbs: o7.bs_f || null,
+        bspp: o7.bs_am || null,
+        a1c: o7.A1C || null,
+        hscrp: o7.HsCRP || null,
+        tghdl: metrics?.trigHDLRatio?.current || null,
+        lifestyle: metrics?.lifestyle?.score || null,
+        status: status,
+        statusType: statusType,
+    };
+};
+// --- END OF HELPER FUNCTION ---
 
 
 /**
@@ -115,29 +78,34 @@ const hardcodedPatientData = [
 exports.getPatientList = async (req, res) => {
   try {
     // req.doctor is available here from the 'protect' middleware
-    console.log(`Fetching patient list for Doctor: ${req.doctor.displayName}`);
+    console.log(`Fetching REAL patient list for Doctor: ${req.doctor.displayName}`);
 
-    // --- THIS IS THE HARDCODED PART ---
-    // Instead of querying the database for req.doctor.patients,
-    // we are just returning the fake array.
-    const patientList = hardcodedPatientData;
-
-    // TODO: Later, we will replace the line above with this real logic:
-    // const doctor = await Doctor.findById(req.doctor._id).populate('patients');
-    // const patientList = doctor.patients.map(patient => {
-    //   // ... logic to build the flat object from patient data
-    // });
+    // --- THIS IS THE NEW LOGIC ---
     
-    // Sort by SOB/Chest Discomfort alert first, as per your doc
+    // 1. Find the doctor and use .populate() to get all linked patient User documents
+    const doctor = await Doctor.findById(req.doctor._id)
+                               .populate('patients'); // 'patients' is the field in your Doctor model
+    
+    if (!doctor) {
+        return res.status(404).json({ error: "Doctor not found." });
+    }
+
+    // 2. Now doctor.patients is an array of full User objects
+    // We loop through them and fetch their onboarding data
+    const patientDataPromises = doctor.patients.map(patientUser => formatPatientData(patientUser));
+    const patientList = (await Promise.all(patientDataPromises)).filter(p => p !== null); // Filter out any nulls
+
+    // 3. Sort by SOB/Chest Discomfort alert first
     patientList.sort((a, b) => (b.sobAlert ? 1 : 0) - (a.sobAlert ? 1 : 0));
+    // --- END OF NEW LOGIC ---
 
     res.status(200).json({
-      count: patientList.length,
       doctorInfo: {
         displayName: req.doctor.displayName,
         doctorCode: req.doctor.doctorCode
       },
-      patients: patientList,
+      count: patientList.length,
+      patients: patientList, // This is now REAL data
     });
 
   } catch (error) {
