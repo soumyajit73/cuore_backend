@@ -9,7 +9,8 @@ let nanoid;
 
 const User = require('../models/User');
 const OtpRequest = require('../models/otp');
-const { Onboarding } = require('../models/onboardingModel.js'); // Corrected import
+const { Onboarding } = require('../models/onboardingModel.js');
+const PatientLink = require('../models/PatientLink'); // Corrected import
 
 // --- CONSTANTS ---
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'fallback-access-secret';
@@ -52,69 +53,79 @@ function generateSimpleOtp() {
 
 // 1. Create Profile and send OTP for Verification
 exports.createAccount = async (req, res) => {
-    const { 
-        phone,
-        display_name,
-        dob,
-        gender,
-        preferred_time_zone,
-        consent_flags,
-        caregiver_mobile,
-        doctor_code,
-        corporate_code
-    } = req.body;
+    let { 
+        phone,
+        display_name,
+        dob,
+        gender,
+        preferred_time_zone,
+        consent_flags,
+        caregiver_mobile,
+        doctor_code, // This is the code the user *might* have typed in
+        corporate_code
+    } = req.body;
 
-    if (!phone || !phone.startsWith('+')) {
-        return res.status(400).json({ error: "A valid mobile number in international format is required." });
-    }
-    if (!display_name || !consent_flags || !consent_flags.tos) {
-        return res.status(400).json({ error: "Display name and Terms of Service consent are required." });
-    }
+    if (!phone || !phone.startsWith('+')) {
+        return res.status(400).json({ error: "A valid mobile number in international format is required." });
+    }
+    if (!display_name || !consent_flags || !consent_flags.tos) {
+        return res.status(400).json({ error: "Display name and Terms of Service consent are required." });
+    }
 
-    try {
-        const existingUser = await User.findOne({ phone });
-        if (existingUser) {
-            return res.status(409).json({ error: "USER_ALREADY_EXISTS", message: "This mobile number is already registered. Please log in instead." });
-        }
+    try {
+        const existingUser = await User.findOne({ phone });
+        if (existingUser) {
+            return res.status(409).json({ error: "USER_ALREADY_EXISTS", message: "This mobile number is already registered. Please log in instead." });
+        }
 
-        const otp = generateSimpleOtp();
-        const otpHash = hashOtp(otp);
-        const requestId = require('crypto').randomBytes(16).toString('hex');
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
-        
-        await OtpRequest.create({
-            request_id: requestId,
-            phone,
-            otpHash,
-            expiresAt,
-            lastRequestedAt: new Date(),
-            userData: {
-                phone:phone,
-                display_name,
-                dob,
-                gender,
-                preferred_time_zone,
-                consent_flags,
-                caregiver_mobile,
-                doctor_code,
-                corporate_code
-            }
-        });
-        
-        console.log(`[AUTH] Test OTP for new user ${phone}: ${otp} (Request ID: ${requestId})`);
+        // --- START: MODIFIED LOGIC ---
+        // Check if a doctor has pre-linked this number.
+        const patientLink = await PatientLink.findOne({ patientMobile: phone });
+        let final_doctor_code = doctor_code; // Default to user's input
 
-        return res.status(201).json({ 
-            request_id: requestId, 
-            test_otp_code: otp,
-            message: "A verification code has been sent. Please verify to complete your account."
-        });
+        if (patientLink) {
+            // If a link exists, it OVERRIDES whatever the user typed.
+            final_doctor_code = patientLink.doctorCode;
+        }
+        // --- END: MODIFIED LOGIC ---
 
-    } catch (error) {
-        console.error("Error creating account:", error);
-        return res.status(500).json({ error: "Internal server error during account creation." });
-    }
+        const otp = generateSimpleOtp();
+        const otpHash = hashOtp(otp);
+        const requestId = require('crypto').randomBytes(16).toString('hex');
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        
+        await OtpRequest.create({
+            request_id: requestId,
+            phone,
+            otpHash,
+            expiresAt,
+            lastRequestedAt: new Date(),
+            userData: {
+                phone:phone,
+                display_name,
+                dob,
+                gender,
+                preferred_time_zone,
+                consent_flags,
+                caregiver_mobile,
+                doctor_code: final_doctor_code, // Use the final, verified code
+                corporate_code
+            }
+        });
+        
+        console.log(`[AUTH] Test OTP for new user ${phone}: ${otp} (Request ID: ${requestId})`);
+
+        return res.status(201).json({ 
+            request_id: requestId, 
+            test_otp_code: otp,
+            message: "A verification code has been sent. Please verify to complete your account."
+        });
+
+    } catch (error) {
+        console.error("Error creating account:", error);
+        return res.status(500).json({ error: "Internal server error during account creation." });
+    }
 };
-
 // 2. Verify OTP and Activate New User Account
 exports.verifyNewUserOtp = async (req, res) => {
     const { request_id, otp_code } = req.body;
@@ -177,48 +188,61 @@ exports.verifyNewUserOtp = async (req, res) => {
 // Existing User Login Flow Endpoints (Modified)
 
 exports.requestOtp = async (req, res) => {
-    const { phone } = req.body;
-    
-    if (!phone || !phone.startsWith('+')) {
-        return res.status(400).json({ error: "Please enter a valid mobile number in international format eg: +91.... ." });
-    }
+    const { phone } = req.body;
+    
+    if (!phone || !phone.startsWith('+')) {
+        return res.status(400).json({ error: "Please enter a valid mobile number in international format eg: +91.... ." });
+    }
 
-    try {
-        const existingUser = await User.findOne({ phone });
+    try {
+        const existingUser = await User.findOne({ phone });
 
-        if (!existingUser) {
-            return res.status(404).json({
-                error: "USER_NOT_FOUND",
-                message: "Mobile number not registered, please sign up."
-            });
-        }
-        
-        const otp = generateSimpleOtp();
-        const otpHash = hashOtp(otp);
-        const requestId = typeof nanoid !== 'undefined' ? nanoid() : require('crypto').randomBytes(16).toString('hex');
-        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        // --- START: MODIFIED LOGIC ---
+        // This function is for "LOGIN". If the user exists, send a login OTP.
+        // If the user does NOT exist, check for a doctor link for the "auto-fill" feature.
+        
+        if (!existingUser) {
+            // User not found. Check if they are a new, pre-linked patient.
+            const patientLink = await PatientLink.findOne({ patientMobile: phone });
+            
+            return res.status(404).json({
+                error: "USER_NOT_FOUND",
+                message: "Mobile number not registered, please sign up.",
+                // This NEW field tells the frontend to auto-fill the doctor code
+                linkedDoctorCode: patientLink ? patientLink.doctorCode : null 
+            });
+        }
+        // --- END: MODIFIED LOGIC ---
+        
+        // --- (This is the original logic for an EXISTING user) ---
+        const otp = generateSimpleOtp();
+        const otpHash = hashOtp(otp);
+        const requestId = typeof nanoid !== 'undefined' ? nanoid() : require('crypto').randomBytes(16).toString('hex');
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
-        await OtpRequest.create({
-            request_id: requestId,
-            phone,
-            otpHash,
-            expiresAt,
-            lastRequestedAt: new Date(),
-        });
-        
-        console.log(`[AUTH] Test OTP for ${phone}: ${otp} (Request ID: ${requestId})`);
+        await OtpRequest.create({
+            request_id: requestId,
+            phone,
+            otpHash,
+            expiresAt,
+            lastRequestedAt: new Date(),
+        });
+        
+        console.log(`[AUTH] Test OTP for ${phone}: ${otp} (Request ID: ${requestId})`);
 
-        return res.status(202).json({ 
-            request_id: requestId, 
-            test_otp_code: otp,
-            retry_after_seconds: RETRY_AFTER,
-            message: "A login code has been sent to your registered number." 
-        });
+        return res.status(202).json({ 
+            request_id: requestId, 
+            test_otp_code: otp,
+            retry_after_seconds: RETRY_AFTER,
+            message: "A login code has been sent to your registered number.",
+            // We also send null here so the frontend knows not to auto-fill for logins
+            linkedDoctorCode: null 
+        });
 
-    } catch (error) {
-        console.error("Error requesting OTP:", error);
-        return res.status(500).json({ error: "Something went wrong. Please try again." });
-    }
+    } catch (error) {
+        console.error("Error requesting OTP:", error);
+        return res.status(500).json({ error: "Something went wrong. Please try again." });
+    }
 };
 
 exports.verifyOtp = async (req, res) => {

@@ -1,5 +1,6 @@
 // This is a hardcoded data array that matches your UI screenshot.
 // We will replace this with real database logic later.
+const PatientLink = require('../../models/PatientLink');
 const hardcodedPatientData = [
   {
     _id: "67890abcde001",
@@ -132,6 +133,10 @@ exports.getPatientList = async (req, res) => {
 
     res.status(200).json({
       count: patientList.length,
+      doctorInfo: {
+        displayName: req.doctor.displayName,
+        doctorCode: req.doctor.doctorCode
+      },
       patients: patientList,
     });
 
@@ -139,4 +144,41 @@ exports.getPatientList = async (req, res) => {
     console.error("Error in getPatientList:", error);
     res.status(500).json({ error: "Server error fetching patient list." });
   }
+};
+
+exports.addPatientLink = async (req, res) => {
+    const { patientMobile, planDuration } = req.body;
+    
+    // Get the logged-in doctor's code from the middleware
+    const doctorCode = req.doctor.doctorCode;
+
+    if (!patientMobile || !patientMobile.startsWith('+')) {
+        return res.status(400).json({ error: 'A valid mobile number in international format is required.' });
+    }
+
+    try {
+        // Use findOneAndUpdate with "upsert"
+        // This will create a new link OR update the doctor code if one already exists
+        const link = await PatientLink.findOneAndUpdate(
+            { patientMobile: patientMobile },
+            { 
+                patientMobile: patientMobile,
+                doctorCode: doctorCode,
+                planDuration: planDuration,
+                expiresAt: new Date(Date.now() + 30*24*60*60*1000) // Reset expiry
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+
+        res.status(201).json({
+            message: 'Patient link created successfully.',
+            link: link,
+            // This is the "SMS" data for testing
+            simulated_sms: `Patient at ${patientMobile} is now linked to ${doctorCode}. Please ask them to download the Cuore app.`
+        });
+
+    } catch (error) {
+        console.error("Error creating patient link:", error);
+        res.status(500).json({ error: 'Server error creating link.' });
+    }
 };
