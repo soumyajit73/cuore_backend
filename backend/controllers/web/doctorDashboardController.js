@@ -3,7 +3,7 @@ const Doctor = require('../../models/Doctor');
 const User = require('../../models/User');
 const { Onboarding } = require('../../models/onboardingModel'); // Ensure this path is correct
 const { calculateAllMetrics } = require('../../models/onboardingModel'); 
-const Reminder = require('../../models/Reminder');// This is still needed for 'formatPatientData'
+const Reminder = require('../../models/Reminder');
 
 
 // --- HELPER FUNCTION (for getPatientList) ---
@@ -113,13 +113,11 @@ exports.addPatientLink = async (req, res) => {
 // ====================================================================
 
 // --- Helper 1: Build the simple Profile object ---
-// --- Helper 1: Build the simple Profile object (NOW UPDATED) ---
 function buildPatientProfile(user, onboardingDoc, allMeds) {
   const o2 = onboardingDoc.o2Data || {};
-  const o3 = onboardingDoc.o3Data || {}; // This is o3Data
-  const o4 = onboardingDoc.o4Data || {}; // This is o4Data
+  const o3 = onboardingDoc.o3Data || {};
+  const o4 = onboardingDoc.o4Data || {};
 
-  // --- Logic copied from your getCuoreHealthData ---
   const minDuration = 15 * 24 * 60 * 60 * 1000; // 15 days
   const medications = allMeds
     .filter((med) => {
@@ -130,22 +128,14 @@ function buildPatientProfile(user, onboardingDoc, allMeds) {
     })
     .map((med) => med.title);
 
-  // This is the correct logic for Past History
   const historyItems = [
-    o3.q1,
-    o3.q2,
-    o3.q3,
-    o3.q4,
-    o3.q5,
-    o3.q6,
-    o3.other_conditions,
+    o3.q1, o3.q2, o3.q3, o3.q4, o3.q5, o3.q6, o3.other_conditions,
   ];
   
   const pastHistory = historyItems
     .filter(item => item && typeof item === 'string' && item.trim().length > 0 && item.toLowerCase() !== "false")
     .join(", ");
 
-  // This is the correct logic for Smoker Status
   const smokerStatus = o4.smoking || "N/A";
   
   return {
@@ -165,6 +155,8 @@ const METRIC_LIMITS = {
   bpUpper: 122, bpLower: 80, bsFasting: 100, bsAfterMeals: 140,
   a1c: 5.7, weight: 70, hdl: 60, ldl: 100,
   triglyceride: 150, heartRate: 80,
+  // --- ADDED ---
+  nutrition: 90, fitness: 90, sleep: 90, stress: 90,
 };
 const momentumPredict = (B, A, direction, limit) => {
   A = A || 0; B = B || 0;
@@ -226,6 +218,12 @@ const fetchHistory = (onboarding, metricKey) => {
   let historyArray = [];
   switch (metricKey) {
     case 'weight_kg': historyArray = onboarding.o2History || []; return historyArray.map(h => h.data?.weight_kg);
+    // --- ADDED ---
+    case 'nutrition': historyArray = onboarding.o5History || []; return historyArray.map(h => h.data?.foodScore);
+    case 'fitness': historyArray = onboarding.o5History || []; return historyArray.map(h => h.data?.exerciseScore);
+    case 'sleep': historyArray = onboarding.o6History || []; return historyArray.map(h => h.data?.sleepScore);
+    case 'stress': historyArray = onboarding.o6History || []; return historyArray.map(h => h.data?.stressScore);
+    // --- END ---
     default:
         historyArray = onboarding.o7History || [];
         return historyArray.map(h => h.data ? h.data[metricKey] : undefined);
@@ -251,6 +249,11 @@ async function getPatientPredictionGraphs(onboardingDoc) {
     hdl: { initialB: (A, X) => A + (2 * X), direction: 'increase' },
     ldl: { initialB: (A, X) => A - (5 * X), direction: 'decrease' },
     triglyceride: { initialB: (A, X) => A - (5 * X), direction: 'decrease' },
+    // --- ADDED ---
+    nutrition: { initialB: (A, X) => A + (5 * X), direction: 'increase' },
+    fitness: { initialB: (A, X) => A + (5 * X), direction: 'increase' },
+    sleep: { initialB: (A, X) => A + (5 * X), direction: 'increase' },
+    stress: { initialB: (A, X) => A + (5 * X), direction: 'increase' },
   };
 
   const generateArgs = (key, dbKey, isO7 = false) => [
@@ -258,7 +261,7 @@ async function getPatientPredictionGraphs(onboardingDoc) {
       X, formulas[key].initialB, formulas[key].direction, METRIC_LIMITS[key], isO7
   ];
 
-  // Calculate only the series we need
+  // Calculate series
   const { series: bpUpperSeries } = generatePredictionSeries(...generateArgs('bpUpper', 'bp_upper', true));
   const { series: bpLowerSeries } = generatePredictionSeries(...generateArgs('bpLower', 'bp_lower', true));
   const { series: hrSeries } = generatePredictionSeries(...generateArgs('heartRate', 'pulse', true));
@@ -268,6 +271,16 @@ async function getPatientPredictionGraphs(onboardingDoc) {
   const { series: hdlSeries } = generatePredictionSeries(...generateArgs('hdl', 'HDL', true));
   const { series: ldlSeries } = generatePredictionSeries(...generateArgs('ldl', 'LDL', true));
   const { series: trigSeries } = generatePredictionSeries(...generateArgs('triglyceride', 'Trig', true));
+  // --- ADDED ---
+  const { series: nutritionSeries } = generatePredictionSeries(...generateArgs('nutrition', 'nutrition'));
+  const { series: fitnessSeries } = generatePredictionSeries(...generateArgs('fitness', 'fitness'));
+  const { series: sleepSeries } = generatePredictionSeries(...generateArgs('sleep', 'sleep'));
+  const { series: stressSeries } = generatePredictionSeries(...generateArgs('stress', 'stress'));
+  
+  // --- ADDED A1C ---
+  const a1cFormula = (sugar) => sugar > 0 ? (sugar + 46.7) / 28.7 : 0;
+  const a1cSeries = bsFastingSeries.map(sugarVal => Math.round(Math.min(Math.max(0, a1cFormula(sugarVal)), METRIC_LIMITS.a1c) * 100) / 100);
+
 
   // --- Build the new chartData object ---
   const labels = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
@@ -291,7 +304,19 @@ async function getPatientPredictionGraphs(onboardingDoc) {
         day,
         ldl: ldlSeries[i],
         hdl: hdlSeries[i],
-        trig: trigSeries[i] // Using 'trig' key
+        trig: trigSeries[i]
+    })),
+    // --- ADDED ---
+    a1c: labels.map((day, i) => ({
+        day,
+        a1c: a1cSeries[i]
+    })),
+    lifestyle: labels.map((day, i) => ({
+        day,
+        nutrition: nutritionSeries[i],
+        fitness: fitnessSeries[i],
+        sleep: sleepSeries[i],
+        stress: stressSeries[i]
     })),
   };
 
@@ -325,6 +350,14 @@ async function getPatientPredictionGraphs(onboardingDoc) {
         ],
         domain: [80, 250],
     },
+    // --- ADDED ---
+    {
+        key: "a1c",
+        title: "A1C",
+        dataKey: chartData.a1c,
+        lines: [{ key: "a1c", label: "A1C %", stroke: "#9b59b6" }],
+        domain: [4, 10],
+    },
     {
         key: "cholesterol",
         title: "Cholesterol",
@@ -332,9 +365,22 @@ async function getPatientPredictionGraphs(onboardingDoc) {
         lines: [
             { key: "ldl", label: "LDL", stroke: "#FFA500" },
             { key: "hdl", label: "HDL", stroke: "#10B981" },
-            { key: "trig", label: "Triglycerides", stroke: "#FF4D4D" } // Matched key 'trig'
+            { key: "trig", label: "Triglycerides", stroke: "#FF4D4D" }
         ],
         domain: [20, 300],
+    },
+    // --- ADDED ---
+    {
+        key: "lifestyle",
+        title: "Lifestyle Metrics",
+        dataKey: chartData.lifestyle,
+        lines: [
+            { key: "nutrition", label: "Nutrition", stroke: "#f1c40f" },
+            { key: "fitness", label: "Fitness", stroke: "#2ecc71" },
+            { key: "sleep", label: "Sleep", stroke: "#e74c3c" },
+            { key: "stress", label: "Stress", stroke: "#2980b9" },
+        ],
+        domain: [0, 100],
     }
   ];
 
@@ -395,7 +441,7 @@ exports.getPatientDetails = async (req, res) => {
         res.status(200).json({
             doctorInfo,
             patientProfile: profileData,
-            predictDataPoints // "patientHealthSummary" has been removed
+            predictDataPoints 
         });
 
     } catch (err) {
