@@ -1,22 +1,16 @@
 const PatientLink = require('../../models/PatientLink');
-
-// --- ADDED IMPORTS FOR REAL DATA ---
 const Doctor = require('../../models/Doctor');
 const User = require('../../models/User');
 const { Onboarding } = require('../../models/onboardingModel'); // Ensure this path is correct
-const { calculateAllMetrics } = require('../../models/onboardingModel'); // Ensure this is exported and path is correct
-// --- END OF IMPORTS ---
+const { calculateAllMetrics } = require('../../models/onboardingModel'); 
+const Reminder = require('../../models/Reminder');// This is still needed for 'formatPatientData'
 
 
-// --- HELPER FUNCTION ---
-// This function gets all data for ONE patient and formats it for the dashboard
+// --- HELPER FUNCTION (for getPatientList) ---
 const formatPatientData = async (patientUser) => {
     if (!patientUser) return null;
-
-    // 1. Find the patient's Onboarding data
     const onboardingDoc = await Onboarding.findOne({ userId: patientUser._id }).lean();
     if (!onboardingDoc) {
-        // This patient has signed up but not completed onboarding
         return {
             _id: patientUser._id,
             sobAlert: false,
@@ -27,44 +21,26 @@ const formatPatientData = async (patientUser) => {
             statusType: "inactive",
         };
     }
-
-    // 2. We have onboarding data, so get biometrics
     const o7 = onboardingDoc.o7Data || {};
     const o3 = onboardingDoc.o3Data || {};
-    
-    // 3. Calculate metrics to get Lifestyle Score and TG/HDL
     let metrics = {};
     if (typeof calculateAllMetrics === "function") {
          metrics = calculateAllMetrics(onboardingDoc);
     } else {
         console.warn(`[formatPatientData] calculateAllMetrics function not found. Lifestyle/TGHDL may be null for user ${patientUser._id}.`);
     }
-    
-    // 4. Check for SOB/Chest Discomfort Alert
-    const sobAlert = o3.q5 === true; // From your UI doc
-
-    // 5. Determine Status (Simplified for now)
-    // TODO: Add logic for 'Accept', 'Renewal', 'Lapsed' based on your rules
+    const sobAlert = o3.q5 === true;
     const status = onboardingDoc.timestamp ? new Date(onboardingDoc.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : "No Date";
-    const statusType = "date"; // Default
-
-    // 6. Build the final flat object for the UI
+    const statusType = "date";
     return {
         _id: patientUser._id,
         sobAlert: sobAlert,
         name: patientUser.display_name,
         phone: patientUser.phone,
-        sbp: o7.bp_upper || null,
-        dbp: o7.bp_lower || null,
-        hr: o7.pulse || null,
-        fbs: o7.bs_f || null,
-        bspp: o7.bs_am || null,
-        a1c: o7.A1C || null,
-        hscrp: o7.HsCRP || null,
-        tghdl: metrics?.trigHDLRatio?.current || null,
-        lifestyle: metrics?.lifestyle?.score || null,
-        status: status,
-        statusType: statusType,
+        sbp: o7.bp_upper || null, dbp: o7.bp_lower || null, hr: o7.pulse || null,
+        fbs: o7.bs_f || null, bspp: o7.bs_am || null, a1c: o7.A1C || null,
+        hscrp: o7.HsCRP || null, tghdl: metrics?.trigHDLRatio?.current || null, lifestyle: metrics?.lifestyle?.score || null,
+        status: status, statusType: statusType,
     };
 };
 // --- END OF HELPER FUNCTION ---
@@ -73,60 +49,43 @@ const formatPatientData = async (patientUser) => {
 /**
  * @desc    Get the list of patients for the logged-in doctor
  * @route   GET /api/web/dashboard/patients
- * @access  Private (Doctor only)
  */
 exports.getPatientList = async (req, res) => {
   try {
-    // req.doctor is available here from the 'protect' middleware
     console.log(`Fetching REAL patient list for Doctor: ${req.doctor.displayName}`);
-
-    // --- THIS IS THE NEW LOGIC ---
-    
-    // 1. Find the doctor and use .populate() to get all linked patient User documents
     const doctor = await Doctor.findById(req.doctor._id)
-                               .populate('patients'); // 'patients' is the field in your Doctor model
-    
+                               .populate('patients'); 
     if (!doctor) {
         return res.status(404).json({ error: "Doctor not found." });
     }
-
-    // 2. Now doctor.patients is an array of full User objects
-    // We loop through them and fetch their onboarding data
     const patientDataPromises = doctor.patients.map(patientUser => formatPatientData(patientUser));
-    const patientList = (await Promise.all(patientDataPromises)).filter(p => p !== null); // Filter out any nulls
-
-    // 3. Sort by SOB/Chest Discomfort alert first
+    const patientList = (await Promise.all(patientDataPromises)).filter(p => p !== null); 
     patientList.sort((a, b) => (b.sobAlert ? 1 : 0) - (a.sobAlert ? 1 : 0));
-    // --- END OF NEW LOGIC ---
-
     res.status(200).json({
       doctorInfo: {
         displayName: req.doctor.displayName,
         doctorCode: req.doctor.doctorCode
       },
       count: patientList.length,
-      patients: patientList, // This is now REAL data
+      patients: patientList,
     });
-
   } catch (error) {
     console.error("Error in getPatientList:", error);
     res.status(500).json({ error: "Server error fetching patient list." });
   }
 };
 
+/**
+ * @desc    Doctor adds a new patient's mobile to link them
+ * @route   POST /api/web/dashboard/add-patient
+ */
 exports.addPatientLink = async (req, res) => {
     const { patientMobile, planDuration } = req.body;
-    
-    // Get the logged-in doctor's code from the middleware
     const doctorCode = req.doctor.doctorCode;
-
     if (!patientMobile || !patientMobile.startsWith('+')) {
         return res.status(400).json({ error: 'A valid mobile number in international format is required.' });
     }
-
     try {
-        // Use findOneAndUpdate with "upsert"
-        // This will create a new link OR update the doctor code if one already exists
         const link = await PatientLink.findOneAndUpdate(
             { patientMobile: patientMobile },
             { 
@@ -137,49 +96,76 @@ exports.addPatientLink = async (req, res) => {
             },
             { upsert: true, new: true, setDefaultsOnInsert: true }
         );
-
         res.status(201).json({
             message: 'Patient link created successfully.',
             link: link,
-            // This is the "SMS" data for testing
             simulated_sms: `Patient at ${patientMobile} is now linked to ${doctorCode}. Please ask them to download the Cuore app.`
         });
-
     } catch (error) {
         console.error("Error creating patient link:", error);
         res.status(500).json({ error: 'Server error creating link.' });
     }
 };
 
-// --- Helper 1: Build the simple Profile object ---
-function buildPatientProfile(user, onboardingDoc) {
-  const o2 = onboardingDoc.o2Data || {};
-  const o3 = onboardingDoc.o3Data || {};
-  const o4 = onboardingDoc.o4Data || {};
 
-  // Re-create the logic from your snippets
-  const smokerStatus = o4.tobacco_user === true ? "Smoker" : (o4.tobacco_user === false ? "Non-Smoker" : "N/A");
-  const pastHistory = o3.conditions?.length > 0 ? o3.conditions.join(', ') : "None";
-  const medications = o3.medications?.length > 0 ? o3.medications.join(', ') : "None";
+// ====================================================================
+// START: NEW FUNCTIONS FOR PATIENT DETAILS
+// ====================================================================
+
+// --- Helper 1: Build the simple Profile object ---
+// --- Helper 1: Build the simple Profile object (NOW UPDATED) ---
+function buildPatientProfile(user, onboardingDoc, allMeds) {
+  const o2 = onboardingDoc.o2Data || {};
+  const o3 = onboardingDoc.o3Data || {}; // This is o3Data
+  const o4 = onboardingDoc.o4Data || {}; // This is o4Data
+
+  // --- Logic copied from your getCuoreHealthData ---
+  const minDuration = 15 * 24 * 60 * 60 * 1000; // 15 days
+  const medications = allMeds
+    .filter((med) => {
+      if (med.endDate === null) return true; // Active med with no end date
+      const duration =
+        new Date(med.endDate).getTime() - new Date(med.startDate).getTime();
+      return duration >= minDuration;
+    })
+    .map((med) => med.title);
+
+  // This is the correct logic for Past History
+  const historyItems = [
+    o3.q1,
+    o3.q2,
+    o3.q3,
+    o3.q4,
+    o3.q5,
+    o3.q6,
+    o3.other_conditions,
+  ];
+  
+  const pastHistory = historyItems
+    .filter(item => item && typeof item === 'string' && item.trim().length > 0 && item.toLowerCase() !== "false")
+    .join(", ");
+
+  // This is the correct logic for Smoker Status
+  const smokerStatus = o4.smoking || "N/A";
   
   return {
     name: user?.display_name || "User",
     age: o2.age || null,
     smoker: smokerStatus,
-    pastHO: pastHistory,
-    medications: medications,
+    pastHO: pastHistory.length > 0 ? pastHistory : "None",
+    medications: medications.length > 0 ? medications.join(', ') : "None",
     lastConsulted: onboardingDoc.lastConsultedDate || null,
   };
 }
 
-// --- Helper 2: Build the "Prediction" Graphs (Logic from your getPredictionData) ---
+// --- Helper 2: Build the "Prediction" Graphs (REWRITTEN) ---
 
+// (These are the sub-helpers required for getPatientPredictionGraphs)
 const METRIC_LIMITS = {
-  cuoreScore: 90, bpUpper: 122, bpLower: 80, bsFasting: 100, bsAfterMeals: 140,
-  a1c: 5.7, weight: 70, bmi: 22.9, bodyFat: 20, hdl: 60, ldl: 100,
-  triglyceride: 150, nutrition: 90, fitness: 90, sleep: 90, stress: 90, heartRate: 80,
+  bpUpper: 122, bpLower: 80, bsFasting: 100, bsAfterMeals: 140,
+  a1c: 5.7, weight: 70, hdl: 60, ldl: 100,
+  triglyceride: 150, heartRate: 80,
 };
-
 const momentumPredict = (B, A, direction, limit) => {
   A = A || 0; B = B || 0;
   if (A === B) {
@@ -196,7 +182,6 @@ const momentumPredict = (B, A, direction, limit) => {
   }
   return Math.max(0, prediction);
 };
-
 const generatePredictionSeries = (history, X, initialBFormula, direction, limit, isO7Metric = false) => {
   const points = new Array(6).fill(0);
   const validHistory = history.filter(val => typeof val === 'number' && !isNaN(val));
@@ -237,59 +222,35 @@ const generatePredictionSeries = (history, X, initialBFormula, direction, limit,
     return { series: points.map(p => Math.round(Math.max(0, p) * 100) / 100), historyCount: 3 };
   }
 };
-
 const fetchHistory = (onboarding, metricKey) => {
   let historyArray = [];
   switch (metricKey) {
-    case 'cuoreScore': historyArray = onboarding.scoreHistory || []; return historyArray.map(h => h.data?.cuoreScore);
     case 'weight_kg': historyArray = onboarding.o2History || []; return historyArray.map(h => h.data?.weight_kg);
-    case 'bmi': historyArray = onboarding.o2History || []; return historyArray.map(h => h.data?.bmi);
-    case 'nutrition': historyArray = onboarding.o5History || []; return historyArray.map(h => h.data?.foodScore);
-    case 'fitness': historyArray = onboarding.o5History || []; return historyArray.map(h => h.data?.exerciseScore);
-    case 'sleep': historyArray = onboarding.o6History || []; return historyArray.map(h => h.data?.sleepScore);
-    case 'stress': historyArray = onboarding.o6History || []; return historyArray.map(h => h.data?.stressScore);
     default:
         historyArray = onboarding.o7History || [];
         return historyArray.map(h => h.data ? h.data[metricKey] : undefined);
   }
 };
 
-const getLabels = () => ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
-const splitData = (series, historyCount) => {
-    let actualData = [], predictedData = [];
-    if (historyCount === 0) { predictedData = series; }
-    else if (historyCount === 1) { actualData = [series[0]]; predictedData = series.slice(1); }
-    else if (historyCount === 2) { actualData = [series[0], series[1]]; predictedData = series.slice(2); }
-    else { actualData = [series[0], series[1], series[2]]; predictedData = series.slice(3); }
-    return { actualData, predictedData };
-};
-const formatGraphData = (title, datasets) => ({ title: title, data: { labels: getLabels(), datasets: datasets } });
-
 // This is the main helper that runs all the prediction logic
 async function getPatientPredictionGraphs(onboardingDoc) {
-  if (!onboardingDoc) return [];
+  if (!onboardingDoc) return { chartData: {}, metrics: [] };
 
-  const onboarding = onboardingDoc; // Use the doc we already fetched
+  const onboarding = onboardingDoc;
   const cuoreScore = onboarding.scores?.cuoreScore || 0;
   let X;
   if (cuoreScore < 50) X = 0.9; else if (cuoreScore > 70) X = 0.3; else X = 0.6;
 
   const formulas = {
-    cuoreScore: { initialB: (A, X) => A + (10 * X), direction: 'increase' },
     bpUpper: { initialB: (A, X) => A - (4 * X), direction: 'decrease' },
     bpLower: { initialB: (A, X) => A - (2 * X), direction: 'decrease' },
     heartRate: { initialB: (A, X) => A - (2 * X), direction: 'decrease' },
     bsFasting: { initialB: (A, X) => A - (20 * X), direction: 'decrease' },
     bsAfterMeals: { initialB: (A, X) => A - (20 * X), direction: 'decrease' },
     weight: { initialB: (A, X) => A - (2 * X), direction: 'decrease' },
-    bmi: { initialB: (A, X) => A - (1 * X), direction: 'decrease' },
     hdl: { initialB: (A, X) => A + (2 * X), direction: 'increase' },
     ldl: { initialB: (A, X) => A - (5 * X), direction: 'decrease' },
     triglyceride: { initialB: (A, X) => A - (5 * X), direction: 'decrease' },
-    nutrition: { initialB: (A, X) => A + (5 * X), direction: 'increase' },
-    fitness: { initialB: (A, X) => A + (5 * X), direction: 'increase' },
-    sleep: { initialB: (A, X) => A + (5 * X), direction: 'increase' },
-    stress: { initialB: (A, X) => A + (5 * X), direction: 'increase' },
   };
 
   const generateArgs = (key, dbKey, isO7 = false) => [
@@ -297,65 +258,88 @@ async function getPatientPredictionGraphs(onboardingDoc) {
       X, formulas[key].initialB, formulas[key].direction, METRIC_LIMITS[key], isO7
   ];
 
-  const { series: csSeries, historyCount: csHist } = generatePredictionSeries(...generateArgs('cuoreScore', 'cuoreScore'));
-  const { series: bpUpperSeries, historyCount: bpUpperHist } = generatePredictionSeries(...generateArgs('bpUpper', 'bp_upper', true));
-  const { series: bpLowerSeries, historyCount: bpLowerHist } = generatePredictionSeries(...generateArgs('bpLower', 'bp_lower', true));
-  const { series: hrSeries, historyCount: hrHist } = generatePredictionSeries(...generateArgs('heartRate', 'pulse', true));
-  const { series: bsFastingSeries, historyCount: bsFastingHist } = generatePredictionSeries(...generateArgs('bsFasting', 'bs_f', true));
-  const { series: bsAfterMealsSeries, historyCount: bsAfterMealsHist } = generatePredictionSeries(...generateArgs('bsAfterMeals', 'bs_am', true));
+  // Calculate only the series we need
+  const { series: bpUpperSeries } = generatePredictionSeries(...generateArgs('bpUpper', 'bp_upper', true));
+  const { series: bpLowerSeries } = generatePredictionSeries(...generateArgs('bpLower', 'bp_lower', true));
+  const { series: hrSeries } = generatePredictionSeries(...generateArgs('heartRate', 'pulse', true));
+  const { series: bsFastingSeries } = generatePredictionSeries(...generateArgs('bsFasting', 'bs_f', true));
+  const { series: bsAfterMealsSeries } = generatePredictionSeries(...generateArgs('bsAfterMeals', 'bs_am', true));
+  const { series: weightSeries } = generatePredictionSeries(...generateArgs('weight', 'weight_kg'));
+  const { series: hdlSeries } = generatePredictionSeries(...generateArgs('hdl', 'HDL', true));
+  const { series: ldlSeries } = generatePredictionSeries(...generateArgs('ldl', 'LDL', true));
+  const { series: trigSeries } = generatePredictionSeries(...generateArgs('triglyceride', 'Trig', true));
 
-  const a1cFormula = (sugar) => sugar > 0 ? (sugar + 46.7) / 28.7 : 0;
-  const a1cSeries = bsFastingSeries.map(sugarVal => Math.round(Math.min(Math.max(0, a1cFormula(sugarVal)), METRIC_LIMITS.a1c) * 100) / 100);
-  const a1cHist = bsFastingHist;
+  // --- Build the new chartData object ---
+  const labels = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
+  const chartData = {
+    bp: labels.map((day, i) => ({
+        day,
+        sys: bpUpperSeries[i],
+        dia: bpLowerSeries[i],
+        hr: hrSeries[i]
+    })),
+    weight: labels.map((day, i) => ({
+        day,
+        weight: weightSeries[i]
+    })),
+    sugar: labels.map((day, i) => ({
+        day,
+        fasting: bsFastingSeries[i],
+        pp: bsAfterMealsSeries[i]
+    })),
+    cholesterol: labels.map((day, i) => ({
+        day,
+        ldl: ldlSeries[i],
+        hdl: hdlSeries[i],
+        trig: trigSeries[i] // Using 'trig' key
+    })),
+  };
 
-  const { series: weightSeries, historyCount: weightHist } = generatePredictionSeries(...generateArgs('weight', 'weight_kg'));
-  const heightM = (onboarding.o2Data?.height_cm || 1) / 100;
-  const bmiFormula = (weight) => heightM > 0 ? weight / (heightM * heightM) : 0;
-  const bmiSeries = weightSeries.map(weightVal => Math.round(Math.min(Math.max(0, bmiFormula(weightVal)), METRIC_LIMITS.bmi) * 100) / 100);
-  const bmiHist = weightHist;
-  const bodyFatSeries = bmiSeries.map(b => Math.round(Math.min(Math.max(0, b * 0.8), METRIC_LIMITS.bodyFat) * 100) / 100);
-  const bodyFatHist = bmiHist;
-
-  const { series: hdlSeries, historyCount: hdlHist } = generatePredictionSeries(...generateArgs('hdl', 'HDL', true));
-  const { series: ldlSeries, historyCount: ldlHist } = generatePredictionSeries(...generateArgs('ldl', 'LDL', true));
-  const { series: trigSeries, historyCount: trigHist } = generatePredictionSeries(...generateArgs('triglyceride', 'Trig', true));
-
-  const { series: nutritionSeries, historyCount: nutritionHist } = generatePredictionSeries(...generateArgs('nutrition', 'nutrition'));
-  const { series: fitnessSeries, historyCount: fitnessHist } = generatePredictionSeries(...generateArgs('fitness', 'fitness'));
-  const { series: sleepSeries, historyCount: sleepHist } = generatePredictionSeries(...generateArgs('sleep', 'sleep'));
-  const { series: stressSeries, historyCount: stressHist } = generatePredictionSeries(...generateArgs('stress', 'stress'));
-
-  const healthGraphs = [
-    formatGraphData('Cuore Score', [{ label: 'Cuore Score', ...splitData(csSeries, csHist), color: '#1E64AC', limit: METRIC_LIMITS.cuoreScore }]),
-    formatGraphData('Blood Pressure & Heart Rate', [
-        { label: 'BP Upper', ...splitData(bpUpperSeries, bpUpperHist), color: '#ff4d4d', limit: METRIC_LIMITS.bpUpper },
-        { label: 'BP Lower', ...splitData(bpLowerSeries, bpLowerHist), color: '#00b8a9', limit: METRIC_LIMITS.bpLower },
-        { label: 'Heart Rate', ...splitData(hrSeries, hrHist), color: '#40c4ff', limit: METRIC_LIMITS.heartRate }
-    ]),
-    formatGraphData('Blood Sugar', [
-        { label: 'Fasting', ...splitData(bsFastingSeries, bsFastingHist), color: '#f39c12', limit: METRIC_LIMITS.bsFasting },
-        { label: 'After Meal', ...splitData(bsAfterMealsSeries, bsAfterMealsHist), color: '#d35400', limit: METRIC_LIMITS.bsAfterMeals }
-    ]),
-    formatGraphData('A1C', [{ label: 'A1C', ...splitData(a1cSeries, a1cHist), color: '#9b59b6', limit: METRIC_LIMITS.a1c }]),
-    formatGraphData('Weight', [{ label: 'Weight (kg)', ...splitData(weightSeries, weightHist), color: '#34495e', limit: METRIC_LIMITS.weight }]),
-    formatGraphData('BMI & Body Fat', [
-        { label: 'BMI', ...splitData(bmiSeries, bmiHist), color: '#2ecc71', limit: METRIC_LIMITS.bmi },
-        { label: 'Body Fat (%)', ...splitData(bodyFatSeries, bodyFatHist), color: '#ff0000', limit: METRIC_LIMITS.bodyFat }
-    ]),
-    formatGraphData('Cholesterol', [
-        { label: 'HDL', ...splitData(hdlSeries, hdlHist), color: '#3498db', limit: METRIC_LIMITS.hdl },
-        { label: 'LDL', ...splitData(ldlSeries, ldlHist), color: '#e74c3c', limit: METRIC_LIMITS.ldl },
-        { label: 'Triglycerides', ...splitData(trigSeries, trigHist), color: '#8C00FF', limit: METRIC_LIMITS.triglyceride }
-    ]),
-    formatGraphData('Lifestyle Metrics', [
-        { label: 'Nutrition', ...splitData(nutritionSeries, nutritionHist), color: '#f1c40f', limit: METRIC_LIMITS.nutrition },
-        { label: 'Fitness', ...splitData(fitnessSeries, fitnessHist), color: '#2ecc71', limit: METRIC_LIMITS.fitness },
-        { label: 'Sleep', ...splitData(sleepSeries, sleepHist), color: '#e74c3c', limit: METRIC_LIMITS.sleep },
-        { label: 'Stress', ...splitData(stressSeries, stressHist), color: '#2980b9', limit: METRIC_LIMITS.stress }
-    ])
+  // --- Build the new metrics array ---
+  const metrics = [
+    {
+        key: "bp",
+        title: "Blood Pressure & Heart Rate",
+        dataKey: chartData.bp,
+        lines: [
+            { key: "sys", label: "Systolic", stroke: "#FF4D4D" },
+            { key: "dia", label: "Diastolic", stroke: "#4D79FF" },
+            { key: "hr", label: "Heart Rate", stroke: "#10B981" },
+        ],
+        domain: [50, 160],
+    },
+    {
+        key: "weight",
+        title: "Weight",
+        dataKey: chartData.weight,
+        lines: [{ key: "weight", label: "Weight (kg)", stroke: "#FFA500" }],
+        domain: [60, 100],
+    },
+    {
+        key: "sugar",
+        title: "Blood Sugar",
+        dataKey: chartData.sugar,
+        lines: [
+            { key: "fasting", label: "Fasting", stroke: "#FF7F7F" },
+            { key: "pp", label: "PP", stroke: "#1E90FF" },
+        ],
+        domain: [80, 250],
+    },
+    {
+        key: "cholesterol",
+        title: "Cholesterol",
+        dataKey: chartData.cholesterol,
+        lines: [
+            { key: "ldl", label: "LDL", stroke: "#FFA500" },
+            { key: "hdl", label: "HDL", stroke: "#10B981" },
+            { key: "trig", label: "Triglycerides", stroke: "#FF4D4D" } // Matched key 'trig'
+        ],
+        domain: [20, 300],
+    }
   ];
 
-  return healthGraphs;
+  // Return the data in the new format
+  return { chartData, metrics };
 }
 // ====================================================================
 // END: HELPERS
@@ -374,17 +358,17 @@ exports.getPatientDetails = async (req, res) => {
         const doctor = req.doctor; // From auth middleware
 
         // 1. --- SECURITY CHECK ---
-        // Check if this patient ID is in the doctor's 'patients' list
         const isPatientLinked = doctor.patients.some(id => id.toString() === patientId);
-        
         if (!isPatientLinked) {
             return res.status(403).json({ error: "You are not authorized to view this patient." });
         }
 
         // 2. --- GET DATA (in parallel) ---
-        const [patientProfile, onboardingDoc] = await Promise.all([
+        // We also fetch active medications for the profile
+        const [patientProfile, onboardingDoc, allMeds] = await Promise.all([
             User.findById(patientId).lean(),
-            Onboarding.findOne({ userId: patientId }).lean()
+            Onboarding.findOne({ userId: patientId }).lean(),
+            Reminder.find({ userId: patientId, isMedication: true, isActive: true }).lean()
         ]);
 
         if (!patientProfile) {
@@ -402,11 +386,10 @@ exports.getPatientDetails = async (req, res) => {
         };
         
         // This helper builds the simple { name, age, smoker, ... } object
-        const profileData = buildPatientProfile(patientProfile, onboardingDoc);
+        const profileData = buildPatientProfile(patientProfile, onboardingDoc, allMeds);
         
-        // This helper runs all your prediction logic and returns the graph array
+        // This helper runs all your prediction logic and returns the new { chartData, metrics } object
         const predictDataPoints = await getPatientPredictionGraphs(onboardingDoc);
-
         
         // 4. --- COMBINE AND SEND ---
         res.status(200).json({
