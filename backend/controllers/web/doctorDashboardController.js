@@ -4,6 +4,22 @@ const User = require('../../models/User');
 const { Onboarding } = require('../../models/onboardingModel'); // Ensure this path is correct
 const { calculateAllMetrics } = require('../../models/onboardingModel'); 
 const Reminder = require('../../models/Reminder');
+const bcrypt = require('bcryptjs');
+
+function generateNewCode(name) {
+    // 1. Get initial 2 alphabets
+    const namePart = name.replace(/[^a-zA-Z]/g, '').substring(0, 2).toUpperCase();
+    
+    // 2. Get 4 random numbers
+    const numPart = Math.floor(1000 + Math.random() * 9000); // 1000-9999
+    
+    // 3. Get 2 random alphabets
+    const alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const alphaPart = alpha[Math.floor(Math.random() * alpha.length)] + alpha[Math.floor(Math.random() * alpha.length)];
+    
+    // 4. Combine: JR-7496-CD
+    return `${namePart}-${numPart}-${alphaPart}`;
+}
 
 
 // --- HELPER FUNCTION (for getPatientList) ---
@@ -447,5 +463,120 @@ exports.getPatientDetails = async (req, res) => {
     } catch (err) {
         console.error("Error in getPatientDetails:", err);
         return res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+exports.sendProfileEditOtp = async (req, res) => {
+    try {
+        // 1. Get the logged-in doctor
+        const doctor = await Doctor.findById(req.doctor._id);
+        if (!doctor) {
+            return res.status(404).json({ error: 'Doctor not found.' });
+        }
+
+        // 2. Generate OTP and hash it
+        const otp = Math.floor(1000 + Math.random() * 9000).toString(); // 4-digit
+        const otpHash = await bcrypt.hash(otp, 10);
+        
+        // 3. Save the OTP and expiry *directly to the Doctor model*
+        doctor.otp = otpHash;
+        doctor.otpExpires = Date.now() + 5 * 60 * 1000; // 5 minutes
+        await doctor.save();
+        
+        // 4. --- TODO: Send the *real* OTP via your SMS service ---
+        console.log(`Sending EDIT OTP to ${doctor.mobileNumber}: ${otp}`); // For testing
+        
+        res.status(200).json({
+            message: 'OTP sent successfully to your registered mobile number.',
+            test_otp: otp // For easy testing
+        });
+
+    } catch (error) {
+        console.error("Error in sendProfileEditOtp:", error);
+        res.status(500).json({ error: 'Server error sending OTP.' });
+    }
+};
+
+exports.updateDoctorProfile = async (req, res) => {
+    try {
+        // 1. Get all potential data from the body
+        const { 
+            displayName, 
+            address, 
+            fees, 
+            newPassword, 
+            otp 
+        } = req.body;
+
+        if (!otp) {
+            return res.status(400).json({ error: 'OTP is required to submit changes.' });
+        }
+
+        // 2. Get the doctor and their saved OTP
+        const doctor = await Doctor.findById(req.doctor._id).select('+otp +otpExpires');
+        if (!doctor) {
+            return res.status(404).json({ error: 'Doctor not found.' });
+        }
+
+        // 3. --- VERIFY THE OTP ---
+        if (!doctor.otp || doctor.otpExpires < Date.now()) {
+            return res.status(400).json({ error: 'OTP is invalid or has expired.' });
+        }
+        
+        const isMatch = await bcrypt.compare(otp, doctor.otp);
+        if (!isMatch) {
+            return res.status(400).json({ error: 'Invalid OTP.' });
+        }
+
+        // 4. --- OTP IS VALID - UPDATE THE DATA ---
+        
+        // Update non-sensitive fields
+        if (address) doctor.address = address;
+        if (fees) doctor.fees = fees;
+
+        // --- START: MODIFIED LOGIC ---
+        // Check if displayName is being sent AND is different from the old one
+        if (displayName && displayName !== doctor.displayName) {
+            doctor.displayName = displayName;
+            // RE-GENERATE DOCTOR CODE
+            doctor.doctorCode = generateNewCode(displayName); 
+            console.log(`[Update] New Doctor Code generated: ${doctor.doctorCode}`);
+        }
+        // --- END: MODIFIED LOGIC ---
+
+        // Update password (if provided)
+        if (newPassword && newPassword.length >= 6) {
+            doctor.password = newPassword; // The 'pre-save' hook will auto-hash this
+        }
+
+        // Clear the OTP
+        doctor.otp = undefined;
+        doctor.otpExpires = undefined;
+
+        // Save all changes
+        await doctor.save();
+        
+        // 5. Send back the updated profile (without password)
+        const updatedProfile = await Doctor.findById(doctor._id); // Re-fetch to get clean data
+
+        res.status(200).json({
+            message: 'Profile updated successfully.',
+            doctor: updatedProfile
+        });
+
+    } catch (error) {
+        console.error("Error in updateDoctorProfile:", error);
+        res.status(500).json({ error: 'Server error updating profile.' });
+    }
+};
+
+exports.getDoctorProfile = async (req, res) => {
+    try {
+        // The 'protect' middleware already fetched the doctor for us.
+        // req.doctor is the full document.
+        res.status(200).json(req.doctor);
+    } catch (error) {
+        console.error("Error in getDoctorProfile:", error);
+        res.status(500).json({ error: 'Server error fetching profile.' });
     }
 };

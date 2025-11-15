@@ -11,6 +11,21 @@ const generateToken = (id) => {
     });
 };
 
+function generateNewCode(name) {
+    // 1. Get initial 2 alphabets
+    const namePart = name.replace(/[^a-zA-Z]/g, '').substring(0, 2).toUpperCase();
+    
+    // 2. Get 4 random numbers
+    const numPart = Math.floor(1000 + Math.random() * 9000); // 1000-9999
+    
+    // 3. Get 2 random alphabets
+    const alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const alphaPart = alpha[Math.floor(Math.random() * alpha.length)] + alpha[Math.floor(Math.random() * alpha.length)];
+    
+    // 4. Combine: JR-7496-CD
+    return `${namePart}-${numPart}-${alphaPart}`;
+}
+
 /**
  * @desc    Step 1 of Registration: Send OTP & save user data
  * @route   POST /api/web/auth/send-registration-otp
@@ -95,11 +110,10 @@ exports.registerDoctor = async (req, res) => {
         // 3. OTP is valid! Get the stored user data.
         const { displayName, mobileNumber, address, fees, password, accountManagerCode } = otpRequest.userData;
 
-        // 4. --- Generate a unique Doctor Code ---
-        const namePart = displayName.substring(0, 4).toUpperCase().replace(/\s/g, '');
-        const numPart = Math.floor(100 + Math.random() * 900); // 100-999
-        const doctorCode = `DOC-${namePart}${numPart}`;
-        // (In production, you'd add a loop to ensure this is 100% unique)
+        // 4. --- START: UPDATED DOCTOR CODE LOGIC ---
+        // Use the new helper function to generate the code (e.g., JR-7496-CD)
+        const doctorCode = generateNewCode(displayName);
+        // --- END: UPDATED DOCTOR CODE LOGIC ---
 
         // 5. Create the new doctor in the main Doctor collection
         const doctor = await Doctor.create({
@@ -107,9 +121,9 @@ exports.registerDoctor = async (req, res) => {
             mobileNumber,
             address,
             fees,
-            password, // The 'pre-save' hook in your Doctor model will hash this
-            accountManagerCode,
-            doctorCode
+            password, // The 'pre-save' hook will hash this
+            accountManagerCode, // This is the AM Code from the form
+            doctorCode: doctorCode // This is the new, correctly formatted code
         });
 
         // 6. Delete the temporary OTP request
