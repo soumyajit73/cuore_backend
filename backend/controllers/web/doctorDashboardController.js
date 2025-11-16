@@ -153,6 +153,11 @@ function buildPatientProfile(user, onboardingDoc, allMeds) {
     .join(", ");
 
   const smokerStatus = o4.smoking || "N/A";
+  const presentDate = new Date().toLocaleDateString('en-US', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
   
   return {
     name: user?.display_name || "User",
@@ -160,7 +165,7 @@ function buildPatientProfile(user, onboardingDoc, allMeds) {
     smoker: smokerStatus,
     pastHO: pastHistory.length > 0 ? pastHistory : "None",
     medications: medications.length > 0 ? medications.join(', ') : "None",
-    lastConsulted: onboardingDoc.lastConsultedDate || null,
+    lastConsulted: onboardingDoc.lastConsultedDate || presentDate,
   };
 }
 
@@ -403,6 +408,39 @@ async function getPatientPredictionGraphs(onboardingDoc) {
   // Return the data in the new format
   return { chartData, metrics };
 }
+
+function buildDummySummary() {
+  // Get present date and format it, e.g., "Uploaded on November 16, 2025"
+  const presentDate = new Date().toLocaleDateString('en-US', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric'
+  });
+  const formattedDate = `Uploaded on ${presentDate}`;
+
+  return {
+    summary: {
+      history: "Cholecystectomy (Gallbladder removal)\nLeft thigh fracture",
+      medications: "Diabetes on metformin\nHypertension (HTN) on Cardace",
+      labs: "RBS: 230"
+    },
+    diseaseProgressionRisk: "You have a 52% risk of developing a diabetes + kidney decline cluster within 4 years.",
+    healthRecords: [
+      {
+        _id: "dummy_presc_1",
+        type: "Prescription",
+        date: formattedDate,
+        url: "#" // Placeholder URL
+      },
+      {
+        _id: "dummy_presc_2",
+        type: "Prescription",
+        date: formattedDate,
+        url: "#"
+      }
+    ]
+  };
+}
 // ====================================================================
 // END: HELPERS
 // ====================================================================
@@ -426,7 +464,6 @@ exports.getPatientDetails = async (req, res) => {
         }
 
         // 2. --- GET DATA (in parallel) ---
-        // We also fetch active medications for the profile
         const [patientProfile, onboardingDoc, allMeds] = await Promise.all([
             User.findById(patientId).lean(),
             Onboarding.findOne({ userId: patientId }).lean(),
@@ -434,7 +471,7 @@ exports.getPatientDetails = async (req, res) => {
         ]);
 
         if (!patientProfile) {
-            return res.status(404).json({ error: "Patient profile not found." });
+            return res.status(4404).json({ error: "Patient profile not found." });
         }
         if (!onboardingDoc) {
              return res.status(404).json({ error: "Patient has not completed onboarding." });
@@ -450,14 +487,20 @@ exports.getPatientDetails = async (req, res) => {
         // This helper builds the simple { name, age, smoker, ... } object
         const profileData = buildPatientProfile(patientProfile, onboardingDoc, allMeds);
         
-        // This helper runs all your prediction logic and returns the new { chartData, metrics } object
+        // This helper runs all your prediction logic
         const predictDataPoints = await getPatientPredictionGraphs(onboardingDoc);
+        
+        // --- START: MODIFICATION ---
+        // This helper builds the new dummy data object
+        const summaryOfRecords = buildDummySummary();
+        // --- END: MODIFICATION ---
         
         // 4. --- COMBINE AND SEND ---
         res.status(200).json({
             doctorInfo,
             patientProfile: profileData,
-            predictDataPoints 
+            predictDataPoints,
+            summaryOfRecords: summaryOfRecords // <-- ADDED THIS NEW KEY
         });
 
     } catch (err) {
