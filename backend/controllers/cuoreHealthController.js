@@ -16,7 +16,7 @@ exports.getCuoreHealthData = async (req, res) => {
     const userId = req.user.userId;
 
     // --- 1. FETCH ALL DATA SOURCES IN PARALLEL ---
-    const userPromise = User.findById(userId).select("name").lean();
+    const userPromise = User.findById(userId).select("display_name").lean();
     const onboardingPromise = model.getOnboardingDataByUserId(userId);
     const medicationPromise = Reminder.find({
       userId,
@@ -68,7 +68,7 @@ exports.getCuoreHealthData = async (req, res) => {
     const smokerStatus = onboardingDoc.o4Data?.smoking || "N/A";
 
     const profileData = {
-      name: user?.name || "User",
+      name: user?.display_name || "User",
       age: onboardingDoc.o2Data?.age || null,
       smoker: smokerStatus,
       pastHO: pastHistory,
