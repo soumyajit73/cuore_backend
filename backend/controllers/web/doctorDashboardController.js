@@ -129,45 +129,78 @@ exports.addPatientLink = async (req, res) => {
 // ====================================================================
 
 // --- Helper 1: Build the simple Profile object ---
-function buildPatientProfile(user, onboardingDoc, allMeds) {
+function buildPatientProfile(user, onboardingDoc, allMeds) { 
   const o2 = onboardingDoc.o2Data || {};
   const o3 = onboardingDoc.o3Data || {};
   const o4 = onboardingDoc.o4Data || {};
 
-  const minDuration = 15 * 24 * 60 * 60 * 1000; // 15 days
+  // -------------------------
+  // CORRECTED PAST HISTORY LOGIC
+  // -------------------------
+  const processedHistory = [];
+
+  const isSelected = (val) =>
+    val && typeof val === "string" && val.toLowerCase() !== "false" && val.trim().length > 0;
+
+  // q1: Heart Attack
+  if (isSelected(o3.q1)) processedHistory.push(o3.q1);
+
+  // q2: Diabetes
+  if (isSelected(o3.q2)) processedHistory.push(o3.q2);
+
+  // q3: HTN
+  if (isSelected(o3.q3)) processedHistory.push("HTN");
+
+  // q4: Stroke → DM
+  if (isSelected(o3.q4)) processedHistory.push("DM");
+
+  // q5: SOB/Chest Discomfort → also used for red alert
+  if (isSelected(o3.q5)) processedHistory.push("SOB/ Chest Discomfort");
+
+  // q6: Kidney Disease
+  if (isSelected(o3.q6)) processedHistory.push(o3.q6);
+
+  // Other conditions
+  if (isSelected(o3.other_conditions)) processedHistory.push(o3.other_conditions);
+
+  const pastHistory = processedHistory.join(", ");
+  // -------------------------
+
+  // -------------------------
+  // MEDICATION LOGIC
+  // -------------------------
+  const minDuration = 15 * 24 * 60 * 60 * 1000;
   const medications = allMeds
     .filter((med) => {
-      if (med.endDate === null) return true; // Active med with no end date
-      const duration =
-        new Date(med.endDate).getTime() - new Date(med.startDate).getTime();
-      return duration >= minDuration;
+      if (med.endDate === null) return true;
+      return (new Date(med.endDate) - new Date(med.startDate)) >= minDuration;
     })
     .map((med) => med.title);
 
-  const historyItems = [
-    o3.q1, o3.q2, o3.q3, o3.q4, o3.q5, o3.q6, o3.other_conditions,
-  ];
-  
-  const pastHistory = historyItems
-    .filter(item => item && typeof item === 'string' && item.trim().length > 0 && item.toLowerCase() !== "false")
-    .join(", ");
-
   const smokerStatus = o4.smoking || "N/A";
-  const presentDate = new Date().toLocaleDateString('en-US', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric'
+
+  const presentDate = new Date().toLocaleDateString("en-US", {
+    day: "numeric",
+    month: "long",
+    year: "numeric"
   });
-  
+
+  // -------------------------
+  // FINAL PROFILE OBJECT
+  // -------------------------
   return {
     name: user?.display_name || "User",
     age: o2.age || null,
     smoker: smokerStatus,
-    pastHO: pastHistory.length > 0 ? pastHistory : "None",
-    medications: medications.length > 0 ? medications.join(', ') : "None",
+    pastHO: pastHistory || "None",
+    medications: medications.length > 0 ? medications.join(", ") : "None",
     lastConsulted: onboardingDoc.lastConsultedDate || presentDate,
+
+    // RED FLAG INDICATOR FOR DOCTOR WEB APP
+    sobChestDiscomfort: o3.q5 === true
   };
 }
+
 
 // --- Helper 2: Build the "Prediction" Graphs (REWRITTEN) ---
 
