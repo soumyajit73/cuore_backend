@@ -95,29 +95,52 @@ const generatePredictionSeries = (history, X, initialBFormula, direction, limit,
 // --- DATA FETCHING (Unchanged) ---
 const fetchHistory = (onboarding, metricKey) => {
   let historyArray = [];
-  switch (metricKey) {
-    case 'cuoreScore': historyArray = onboarding.scoreHistory || []; return historyArray.map(h => h.data?.cuoreScore);
-    case 'weight_kg': historyArray = onboarding.o2History || []; return historyArray.map(h => h.data?.weight_kg);
-    case 'bmi': historyArray = onboarding.o2History || []; return historyArray.map(h => h.data?.bmi);
-      
-    // --- THIS WILL NOW WORK ---
-    case 'nutrition': // This is the 'key' from generateArgs
-        historyArray = onboarding.o5History || []; 
-        return historyArray.map(h => h.data?.foodScore); // Fetches the 'foodScore'
-    case 'fitness': // This is the 'key' from generateArgs
-        historyArray = onboarding.o5History || []; 
-        return historyArray.map(h => h.data?.exerciseScore); // Fetches the 'exerciseScore'
-    case 'sleep': // This is the 'key' from generateArgs
-        historyArray = onboarding.o6History || []; 
-        return historyArray.map(h => h.data?.sleepScore); // Fetches the 'sleepScore'
-    case 'stress': // This is the 'key' from generateArgs
-        historyArray = onboarding.o6History || []; 
-        return historyArray.map(h => h.data?.stressScore); // Fetches the 'stressScore'
-    // --- END FIX ---
 
-    default: // o7 keys
-        historyArray = onboarding.o7History || [];
-        return historyArray.map(h => h.data ? h.data[metricKey] : undefined);
+  // Helper: Treat both numbers and numeric strings as valid
+  const allowNumericString = (val) => {
+    if (val === null || val === undefined) return undefined;
+    if (typeof val === 'number') return val;
+    if (typeof val === 'string' && !isNaN(val.trim())) return val; // keep string
+    return undefined; // invalid (non-numeric)
+  };
+
+  switch (metricKey) {
+
+    case 'cuoreScore':
+      historyArray = onboarding.scoreHistory || [];
+      return historyArray.map(h => allowNumericString(h.data?.cuoreScore));
+
+    case 'weight_kg':
+      historyArray = onboarding.o2History || [];
+      return historyArray.map(h => allowNumericString(h.data?.weight_kg));
+
+    case 'bmi':
+      historyArray = onboarding.o2History || [];
+      return historyArray.map(h => allowNumericString(h.data?.bmi));
+
+    case 'nutrition':
+      historyArray = onboarding.o5History || [];
+      return historyArray.map(h => allowNumericString(h.data?.foodScore));
+
+    case 'fitness':
+      historyArray = onboarding.o5History || [];
+      return historyArray.map(h => allowNumericString(h.data?.exerciseScore));
+
+    case 'sleep':
+      historyArray = onboarding.o6History || [];
+      return historyArray.map(h => allowNumericString(h.data?.sleepScore));
+
+    case 'stress':
+      historyArray = onboarding.o6History || [];
+      return historyArray.map(h => allowNumericString(h.data?.stressScore));
+
+    // --- All O7 metrics ---
+    default:
+      historyArray = onboarding.o7History || [];
+      return historyArray.map(h => {
+        const val = h.data ? h.data[metricKey] : undefined;
+        return allowNumericString(val);
+      });
   }
 };
 
