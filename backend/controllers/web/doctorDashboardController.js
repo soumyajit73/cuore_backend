@@ -79,18 +79,29 @@ const formatPatientData = async (patientUser) => {
 exports.getPatientList = async (req, res) => {
   try {
     console.log(`Fetching REAL patient list for Doctor: ${req.doctor.displayName}`);
+
     const doctor = await Doctor.findById(req.doctor._id)
                                .populate('patients'); 
+
     if (!doctor) {
         return res.status(404).json({ error: "Doctor not found." });
     }
-    const patientDataPromises = doctor.patients.map(patientUser => formatPatientData(patientUser));
-    const patientList = (await Promise.all(patientDataPromises)).filter(p => p !== null); 
-    
-    // --- THIS IS YOUR SORTING LOGIC ---
-    // It sorts 'true' (1) before 'false' (0) in descending order.
+
+    const patientDataPromises = doctor.patients.map(patientUser =>
+      formatPatientData(patientUser)
+    );
+
+    const patientList = (await Promise.all(patientDataPromises)).filter(p => p !== null);
+
+    // Sort based on SOB alert (red flag patients first)
     patientList.sort((a, b) => (b.sobAlert ? 1 : 0) - (a.sobAlert ? 1 : 0));
-    // --- END OF SORTING LOGIC ---
+
+    // --- ADD CURRENT DATE IN RESPONSE ---
+    const currentDate = new Date().toLocaleDateString("en-US", {
+      day: "numeric",
+      month: "long",
+      year: "numeric"
+    });
 
     res.status(200).json({
       doctorInfo: {
@@ -99,12 +110,15 @@ exports.getPatientList = async (req, res) => {
       },
       count: patientList.length,
       patients: patientList,
+      currentDate     // <-- Added here
     });
+
   } catch (error) {
     console.error("Error in getPatientList:", error);
     res.status(500).json({ error: "Server error fetching patient list." });
   }
 };
+
 
 /**
  * @desc    Doctor adds a new patient's mobile to link them
