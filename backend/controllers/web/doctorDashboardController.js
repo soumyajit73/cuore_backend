@@ -45,12 +45,22 @@ const formatPatientData = async (patientUser) => {
     } else {
         console.warn(`[formatPatientData] calculateAllMetrics function not found. Lifestyle/TGHDL may be null for user ${patientUser._id}.`);
     }
-    const sobAlert = o3.q5 === true;
+
+    // This isSelected helper is crucial for the logic
+    const isSelected = (val) =>
+        val &&
+        typeof val === "string" &&
+        val.trim() !== "" &&
+        val.toLowerCase() !== "false";
+    
+    // Check for SOB/Chest Discomfort
+    const sobAlert = isSelected(o3.q5); // <-- This will be true or false
+
     const status = onboardingDoc.timestamp ? new Date(onboardingDoc.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : "No Date";
     const statusType = "date";
     return {
         _id: patientUser._id,
-        sobAlert: sobAlert,
+        sobAlert: sobAlert, // <-- This is the flag for sorting
         name: patientUser.display_name,
         phone: patientUser.phone,
         sbp: o7.bp_upper || null, dbp: o7.bp_lower || null, hr: o7.pulse || null,
@@ -76,7 +86,12 @@ exports.getPatientList = async (req, res) => {
     }
     const patientDataPromises = doctor.patients.map(patientUser => formatPatientData(patientUser));
     const patientList = (await Promise.all(patientDataPromises)).filter(p => p !== null); 
+    
+    // --- THIS IS YOUR SORTING LOGIC ---
+    // It sorts 'true' (1) before 'false' (0) in descending order.
     patientList.sort((a, b) => (b.sobAlert ? 1 : 0) - (a.sobAlert ? 1 : 0));
+    // --- END OF SORTING LOGIC ---
+
     res.status(200).json({
       doctorInfo: {
         displayName: req.doctor.displayName,
@@ -128,81 +143,71 @@ exports.addPatientLink = async (req, res) => {
 // START: NEW FUNCTIONS FOR PATIENT DETAILS
 // ====================================================================
 
-// --- Helper 1: Build the simple Profile object ---
-function buildPatientProfile(user, onboardingDoc, allMeds) { 
+// --- Helper 1: Build the simple Profile object (CLEANED UP) ---
+function buildPatientProfile(user, onboardingDoc, allMeds) {
   const o2 = onboardingDoc.o2Data || {};
   const o3 = onboardingDoc.o3Data || {};
   const o4 = onboardingDoc.o4Data || {};
 
-  // -------------------------
-  // CORRECTED PAST HISTORY LOGIC
-  // -------------------------
-  const processedHistory = [];
-
-  const isSelected = (val) =>
-    val && typeof val === "string" && val.toLowerCase() !== "false" && val.trim().length > 0;
-
-  // q1: Heart Attack
-  if (isSelected(o3.q1)) processedHistory.push(o3.q1);
-
-  // q2: Diabetes
-  if (isSelected(o3.q2)) processedHistory.push(o3.q2);
-
-  // q3: HTN
-  if (isSelected(o3.q3)) processedHistory.push("HTN");
-
-  // q4: Stroke → DM
-  if (isSelected(o3.q4)) processedHistory.push("DM");
-
-  // q5: SOB/Chest Discomfort → also used for red alert
-  if (isSelected(o3.q5)) processedHistory.push("SOB/ Chest Discomfort");
-
-  // q6: Kidney Disease
-  if (isSelected(o3.q6)) processedHistory.push(o3.q6);
-
-  // Other conditions
-  if (isSelected(o3.other_conditions)) processedHistory.push(o3.other_conditions);
-
-  const pastHistory = processedHistory.join(", ");
-  // -------------------------
-
-  // -------------------------
-  // MEDICATION LOGIC
-  // -------------------------
+  // ----------------------------
+  // PROCESS MEDICATIONS
+  // ----------------------------
   const minDuration = 15 * 24 * 60 * 60 * 1000;
   const medications = allMeds
     .filter((med) => {
       if (med.endDate === null) return true;
-      return (new Date(med.endDate) - new Date(med.startDate)) >= minDuration;
+      const duration =
+        new Date(med.endDate).getTime() - new Date(med.startDate).getTime();
+      return duration >= minDuration;
     })
     .map((med) => med.title);
 
+  // ----------------------------
+  // PAST HISTORY + ABBREVIATION
+  // ----------------------------
+  const processedHistory = [];
+
+  const isSelected = (val) =>
+    val &&
+    typeof val === "string" &&
+    val.trim() !== "" &&
+    val.toLowerCase() !== "false";
+
+  if (isSelected(o3.q1)) processedHistory.push(o3.q1);
+  if (isSelected(o3.q2)) processedHistory.push("o2.q2");
+  if (isSelected(o3.q3)) processedHistory.push("HTN");
+  if (isSelected(o3.q4)) processedHistory.push("DM");
+  if (isSelected(o3.q5)) processedHistory.push("SOB/ Chest Discomfort");
+  if (isSelected(o3.q6)) processedHistory.push(o3.q6);
+  if (isSelected(o3.other_conditions)) processedHistory.push(o3.other_conditions);
+
+  const pastHistory =
+    processedHistory.length > 0 ? processedHistory.join(", ") : "None";
+
+  // ----------------------------
+  // RETURN PROFILE OBJECT
+  // ----------------------------
   const smokerStatus = o4.smoking || "N/A";
 
-  const presentDate = new Date().toLocaleDateString("en-US", {
-    day: "numeric",
-    month: "long",
-    year: "numeric"
-  });
-
-  // -------------------------
-  // FINAL PROFILE OBJECT
-  // -------------------------
   return {
     name: user?.display_name || "User",
     age: o2.age || null,
     smoker: smokerStatus,
-    pastHO: pastHistory || "None",
+    pastHO: pastHistory,
     medications: medications.length > 0 ? medications.join(", ") : "None",
-    lastConsulted: onboardingDoc.lastConsultedDate || presentDate,
-
-    // RED FLAG INDICATOR FOR DOCTOR WEB APP
-    sobChestDiscomfort: o3.q5 === true
+    lastConsulted:
+      onboardingDoc.lastConsultedDate ||
+      new Date().toLocaleDateString("en-US", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      }),
   };
 }
 
 
-// --- Helper 2: Build the "Prediction" Graphs (REWRITTEN) ---
+
+// --- Helper 2: Build the "Prediction" Graphs (UNCHANGED) ---
 
 // (These are the sub-helpers required for getPatientPredictionGraphs)
 const METRIC_LIMITS = {
@@ -211,70 +216,49 @@ const METRIC_LIMITS = {
   triglyceride: 150, nutrition: 90, fitness: 90, sleep: 90, stress: 90, heartRate: 80,
 };
 
-// --- PREDICTION LOGIC (From your working file) ---
-const momentumPredict = (B, A, direction, limit) => { // Limit added here as well for capping
+const momentumPredict = (B, A, direction, limit) => {
   A = A || 0;
   B = B || 0;
-
   if (A === B) {
-    // If flat, predict stays flat, but ensure it's not already past the limit
-     if (direction === 'increase') return Math.min(B, limit); // Cap at limit if already above
-     else return Math.max(B, limit); // Cap at limit if already below
+     if (direction === 'increase') return Math.min(B, limit);
+     else return Math.max(B, limit);
   }
-
   let prediction;
   if (direction === 'increase') {
     prediction = B + ((B - A) * 0.8);
-    // Cap prediction at the upper limit
     prediction = Math.min(prediction, limit);
   } else {
     prediction = B - ((A - B) * 0.8);
-    // Cap prediction at the lower limit (goal)
     prediction = Math.max(prediction, limit);
   }
-
-  // --- Rule 1: Ensure prediction is never below 0 (absolute floor) ---
   return Math.max(0, prediction);
 };
 
-// --- generatePredictionSeries (From your working file) ---
 const generatePredictionSeries = (history, X, initialBFormula, direction, limit, isO7Metric = false) => {
   const points = new Array(6).fill(0);
-  // Filter out any null/undefined/non-numeric values from history FOR CALCULATION
   const validHistory = history.filter(val => typeof val === 'number' && !isNaN(val));
   const n = validHistory.length;
-  // Pass limit to predictNext
   const predictNext = (B, A) => momentumPredict(B, A, direction, limit);
 
-  // --- Rule 2: Check for skipped O7 input ---
-  // If it's an O7 metric AND the latest historical value (from original history) is missing/null/undefined, return all zeros.
   const latestRawValue = history.length > 0 ? history[history.length - 1] : undefined;
   if (isO7Metric && (latestRawValue === null || latestRawValue === undefined)) {
-      // console.log(`Skipped O7 metric detected (latestRawValue: ${latestRawValue}). Returning zeros.`); // Optional log
-      return { series: points, historyCount: 0 }; // Treat as no history
+      return { series: points, historyCount: 0 };
   }
-  // --- END NEW RULE 2 ---
 
-  // Apply the 3 Scenarios
   if (n === 0) {
-    // Scenario 0: No valid data.
     return { series: points, historyCount: 0 };
   } else if (n === 1) {
-    // Scenario 1: "latest + 5 predicted"
     points[0] = validHistory[0];
-    // Apply limit capping to initial B calculation
     let initialB = initialBFormula(points[0], X);
     if (direction === 'increase') initialB = Math.min(initialB, limit);
     else initialB = Math.max(initialB, limit);
-    points[1] = Math.max(0, initialB); // Ensure >= 0
-
+    points[1] = Math.max(0, initialB); 
     points[2] = predictNext(points[1], points[0]);
     points[3] = predictNext(points[2], points[1]);
     points[4] = predictNext(points[3], points[2]);
     points[5] = predictNext(points[4], points[3]);
     return { series: points.map(p => Math.round(Math.max(0, p) * 100) / 100), historyCount: 1 };
   } else if (n === 2) {
-    // Scenario 2: "1 previous + 1 latest + 4 predicted"
     points[0] = validHistory[0];
     points[1] = validHistory[1];
     points[2] = predictNext(points[1], points[0]);
@@ -283,7 +267,6 @@ const generatePredictionSeries = (history, X, initialBFormula, direction, limit,
     points[5] = predictNext(points[4], points[3]);
     return { series: points.map(p => Math.round(Math.max(0, p) * 100) / 100), historyCount: 2 };
   } else {
-    // Scenario 3 (n >= 3): "2 previous + 1 latest + 3 predicted"
     points[0] = validHistory[n - 3];
     points[1] = validHistory[n - 2];
     points[2] = validHistory[n - 1];
@@ -294,32 +277,22 @@ const generatePredictionSeries = (history, X, initialBFormula, direction, limit,
   }
 };
 
-// ---------------- DATE HELPERS (From your working file) ------------------
-
-// format "Jan 24", "Jul 25", etc.
 const formatDateLabel = (date) => {
   const d = new Date(date);
   if (isNaN(d)) return "";
   return d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
 };
 
-// add N months to a date
 const addMonths = (date, months) => {
   const d = new Date(date);
   d.setMonth(d.getMonth() + months);
   return d;
 };
 
-/**
- * Build date labels for actual + predicted points
- * historyArray → full history array (o2History, o7History etc)
- * historyCount → how many actual points appear in P1..P6
- */
 const buildDateLabels = (historyArray, historyCount) => {
   const labels = new Array(6).fill("");
   if (!historyArray || historyArray.length === 0) return labels;
 
-  // extract all dates (This is the FIX: added h.timestamp)
   const dates = historyArray
     .map(h => h.date || h.createdAt || h.updatedAt || h.timestamp || null)
     .filter(Boolean);
@@ -328,7 +301,6 @@ const buildDateLabels = (historyArray, historyCount) => {
 
   const lastDate = new Date(dates[dates.length - 1]);
 
-  // --- actual readings (This is the FIX: new logic) ---
   if (historyCount === 1) {
     labels[0] = formatDateLabel(dates[dates.length - 1]);
   } else if (historyCount === 2) {
@@ -340,66 +312,48 @@ const buildDateLabels = (historyArray, historyCount) => {
     labels[2] = formatDateLabel(dates[dates.length - 1]);
   }
 
-  // --- predicted readings (+2 months increments) ---
   let monthsToAdd = 2;
   for (let i = historyCount; i < 6; i++) {
     labels[i] = formatDateLabel(addMonths(lastDate, monthsToAdd));
     monthsToAdd += 2;
   }
-
   return labels;
 };
 
-// ---------------- END DATE HELPERS ------------------
-
-
-// --- DATA FETCHING (From your working file) ---
 const fetchHistory = (onboarding, metricKey) => {
   let historyArray = [];
-
-  // Helper: Treat both numbers and numeric strings as valid
   const allowNumericString = (val) => {
     if (val === null || val === undefined) return undefined;
     if (typeof val === 'number') return val;
-    // Fix: Convert valid numeric strings to numbers for processing
     if (typeof val === 'string') {
         const num = parseFloat(val.trim());
         if (!isNaN(num)) return num;
     }
-    return undefined; // invalid (non-numeric)
+    return undefined;
   };
 
   switch (metricKey) {
-
     case 'cuoreScore':
       historyArray = onboarding.scoreHistory || [];
       return historyArray.map(h => allowNumericString(h.data?.cuoreScore));
-
     case 'weight_kg':
       historyArray = onboarding.o2History || [];
       return historyArray.map(h => allowNumericString(h.data?.weight_kg));
-
     case 'bmi':
       historyArray = onboarding.o2History || [];
       return historyArray.map(h => allowNumericString(h.data?.bmi));
-
     case 'nutrition':
       historyArray = onboarding.o5History || [];
       return historyArray.map(h => allowNumericString(h.data?.foodScore));
-
     case 'fitness':
       historyArray = onboarding.o5History || [];
       return historyArray.map(h => allowNumericString(h.data?.exerciseScore));
-
     case 'sleep':
       historyArray = onboarding.o6History || [];
       return historyArray.map(h => allowNumericString(h.data?.sleepScore));
-
     case 'stress':
       historyArray = onboarding.o6History || [];
       return historyArray.map(h => allowNumericString(h.data?.stressScore));
-
-    // --- All O7 metrics ---
     default:
       historyArray = onboarding.o7History || [];
       return historyArray.map(h => {
@@ -409,7 +363,6 @@ const fetchHistory = (onboarding, metricKey) => {
   }
 };
 
-// --- REBUILT getPatientPredictionGraphs function ---
 async function getPatientPredictionGraphs(onboardingDoc) {
   if (!onboardingDoc) return { chartData: {}, metrics: [] };
 
@@ -418,7 +371,6 @@ async function getPatientPredictionGraphs(onboardingDoc) {
   let X;
   if (cuoreScore < 50) X = 0.9; else if (cuoreScore > 70) X = 0.3; else X = 0.6;
 
-  // Formulas (from your working file)
   const formulas = {
       bpUpper:    { initialB: (A, X) => A - (4 * X),  direction: 'decrease' },
       bpLower:    { initialB: (A, X) => A - (2 * X),  direction: 'decrease' },
@@ -435,10 +387,8 @@ async function getPatientPredictionGraphs(onboardingDoc) {
       stress:     { initialB: (A, X) => A + (5 * X),  direction: 'increase' },
   };
 
-  // --- Generate series (Pass isO7Metric flag and Limit) ---
-  // Helper to avoid repetition
   const generateArgs = (key, dbKey, isO7 = false) => [
-      fetchHistory(onboarding, dbKey || key), // Use specific DB key if provided
+      fetchHistory(onboarding, dbKey || key),
       X, formulas[key].initialB, formulas[key].direction, METRIC_LIMITS[key], isO7
   ];
 
@@ -448,11 +398,9 @@ async function getPatientPredictionGraphs(onboardingDoc) {
   const { series: bsFastingSeries, historyCount: bsFastingHist } = generatePredictionSeries(...generateArgs('bsFasting', 'bs_f', true));
   const { series: bsAfterMealsSeries, historyCount: bsAfterMealsHist } = generatePredictionSeries(...generateArgs('bsAfterMeals', 'bs_am', true));
 
-  // A1C derived
   const a1cFormula = (sugar) => sugar > 0 ? (sugar + 46.7) / 28.7 : 0;
-  // Apply limit to derived A1C values too
   const a1cSeries = bsFastingSeries.map(sugarVal => Math.round(Math.min(Math.max(0, a1cFormula(sugarVal)), METRIC_LIMITS.a1c) * 100) / 100);
-  const a1cHist = bsFastingHist; // Use the same history count
+  const a1cHist = bsFastingHist;
 
   const { series: weightSeries, historyCount: weightHist } = generatePredictionSeries(...generateArgs('weight', 'weight_kg'));
   
@@ -465,53 +413,33 @@ async function getPatientPredictionGraphs(onboardingDoc) {
   const { series: sleepSeries, historyCount: sleepHist } = generatePredictionSeries(...generateArgs('sleep', 'sleep'));
   const { series: stressSeries, historyCount: stressHist } = generatePredictionSeries(...generateArgs('stress', 'stress'));
 
-  // --- BUILD DATE LABELS FOR EACH CATEGORY ---
   const o7HistoryRaw = onboarding.o7History || [];
   const o2HistoryRaw = onboarding.o2History || [];
   const o5HistoryRaw = onboarding.o5History || [];
 
-  // Use the *correct* history counts returned from generatePredictionSeries
-  const bpLabels        = buildDateLabels(o7HistoryRaw, bpUpperHist); // Use one hist count for all in this graph
+  const bpLabels        = buildDateLabels(o7HistoryRaw, bpUpperHist);
   const sugarLabels     = buildDateLabels(o7HistoryRaw, bsFastingHist);
   const weightLabels    = buildDateLabels(o2HistoryRaw, weightHist);
   const cholesterolLabels = buildDateLabels(o7HistoryRaw, hdlHist);
   const lifestyleLabels = buildDateLabels(o5HistoryRaw, nutritionHist);
-  
-  // A1C shares the same timeline as sugar
   const a1cLabels = sugarLabels;
 
-  // --- Build the new chartData object ---
   const chartData = {
       bp: bpLabels.map((day, i) => ({
-        day, // <-- This will now have the correct date!
-        sys: bpUpperSeries[i],
-        dia: bpLowerSeries[i],
-        hr: hrSeries[i]
+        day, sys: bpUpperSeries[i], dia: bpLowerSeries[i], hr: hrSeries[i]
       })),
-
       weight: weightLabels.map((day, i) => ({
-        day,
-        weight: weightSeries[i]
+        day, weight: weightSeries[i]
       })),
-
       sugar: sugarLabels.map((day, i) => ({
-        day,
-        fasting: bsFastingSeries[i],
-        pp: bsAfterMealsSeries[i]
+        day, fasting: bsFastingSeries[i], pp: bsAfterMealsSeries[i]
       })),
-
       cholesterol: cholesterolLabels.map((day, i) => ({
-        day,
-        ldl: ldlSeries[i],
-        hdl: hdlSeries[i],
-        trig: trigSeries[i]
+        day, ldl: ldlSeries[i], hdl: hdlSeries[i], trig: trigSeries[i]
       })),
-
       a1c: a1cLabels.map((day, i) => ({
-        day,
-        a1c: a1cSeries[i]
+        day, a1c: a1cSeries[i]
       })),
-
       lifestyle: lifestyleLabels.map((day, i) => ({
         day,
         nutrition: nutritionSeries[i],
@@ -521,7 +449,6 @@ async function getPatientPredictionGraphs(onboardingDoc) {
       })),
   };
 
-  // --- Build the new metrics array (Unchanged from your original file) ---
   const metrics = [
     {
         key: "bp",
@@ -579,17 +506,15 @@ async function getPatientPredictionGraphs(onboardingDoc) {
             { key: "sleep", label: "Sleep", stroke: "#e74c3c" },
             { key: "stress", label: "Stress", stroke: "#2980b9" },
         ],
-        domain: [Math.min(0, ...nutritionSeries, ...fitnessSeries, ...sleepSeries, ...stressSeries) - 2, // Ensure domain starts at least at 0
-                Math.max(100, ...nutritionSeries, ...fitnessSeries, ...sleepSeries, ...stressSeries) + 2], // Ensure domain goes at least to 100
+        domain: [Math.min(0, ...nutritionSeries, ...fitnessSeries, ...sleepSeries, ...stressSeries) - 2,
+                Math.max(100, ...nutritionSeries, ...fitnessSeries, ...sleepSeries, ...stressSeries) + 2],
     }
   ];
 
-  // Return the data in the original format
   return { chartData, metrics };
 }
 
 function buildDummySummary() {
-  // Get present date and format it, e.g., "Uploaded on November 16, 2025"
   const presentDate = new Date().toLocaleDateString('en-US', {
     day: 'numeric',
     month: 'long',
@@ -609,7 +534,7 @@ function buildDummySummary() {
         _id: "dummy_presc_1",
         type: "Prescription",
         date: formattedDate,
-        url: "#" // Placeholder URL
+        url: "#"
       },
       {
         _id: "dummy_presc_2",
@@ -650,7 +575,7 @@ exports.getPatientDetails = async (req, res) => {
         ]);
 
         if (!patientProfile) {
-            return res.status(4404).json({ error: "Patient profile not found." });
+            return res.status(404).json({ error: "Patient profile not found." });
         }
         if (!onboardingDoc) {
              return res.status(404).json({ error: "Patient has not completed onboarding." });
@@ -663,23 +588,63 @@ exports.getPatientDetails = async (req, res) => {
              doctorCode: doctor.doctorCode
         };
         
-        // This helper builds the simple { name, age, smoker, ... } object
+        // Helper 1: Builds the simple { name, age, smoker, ... } object
         const profileData = buildPatientProfile(patientProfile, onboardingDoc, allMeds);
         
-        // This helper runs all your prediction logic
+        // Helper 2: Runs all your prediction logic
         const predictDataPoints = await getPatientPredictionGraphs(onboardingDoc);
-        
-        // --- START: MODIFICATION ---
+
+        // --- START: NEW DANGER ZONE ALERT LOGIC ---
+        // Get raw data and calculated metrics
+        const o7 = onboardingDoc.o7Data || {};
+        const o3 = onboardingDoc.o3Data || {};
+        const metrics = calculateAllMetrics(onboardingDoc);
+        const TG_HDL = metrics.trigHDLRatio?.current;
+        const lifestyleScore = metrics.lifestyle?.score;
+
+        const isSelected = (val) =>
+            val &&
+            typeof val === "string" &&
+            val.trim() !== "" &&
+            val.toLowerCase() !== "false";
+
+        // Check values against your rules
+        const alerts = {
+          sbp: o7.bp_upper != null && (o7.bp_upper <= 100 || o7.bp_upper >= 150),
+          dbp: o7.bp_lower != null && (o7.bp_lower <= 66 || o7.bp_lower >= 100),
+          hr: o7.pulse != null && (o7.pulse <= 60 || o7.pulse >= 110),
+          fbs: o7.bs_f != null && (o7.bs_f <= 80 || o7.bs_f >= 200),
+          bspp: o7.bs_am != null && (o7.bs_am <= 110 || o7.bs_am >= 240),
+          a1c: o7.A1C != null && o7.A1C >= 9.0,
+          hscrp: o7.HsCRP != null && o7.HsCRP >= 0.3,
+          tg_hdl: TG_HDL != null && TG_HDL >= 4.0,
+          lifestyle: lifestyleScore != null && lifestyleScore <= 50,
+          sob_chest_discomfort: isSelected(o3.q5) // This is your SOB alert
+        };
+        // --- END: NEW DANGER ZONE ALERT LOGIC ---
+
         // This helper builds the new dummy data object
         const summaryOfRecords = buildDummySummary();
-        // --- END: MODIFICATION ---
         
+        // --- ADD RAW VALUES TO PROFILE OBJECT ---
+        // This adds the actual numbers to the profileData object for the UI
+        profileData.sbp = o7.bp_upper || null;
+        profileData.dbp = o7.bp_lower || null;
+        profileData.hr = o7.pulse || null;
+        profileData.fbs = o7.bs_f || null;
+        profileData.bspp = o7.bs_am || null;
+        profileData.a1c = o7.A1C || null;
+        profileData.hscrp = o7.HsCRP || null;
+        profileData.tghdl = TG_HDL || null;
+        profileData.lifestyle = lifestyleScore || null;
+
         // 4. --- COMBINE AND SEND ---
         res.status(200).json({
             doctorInfo,
-            patientProfile: profileData,
+            patientProfile: profileData, // Contains profile + raw values
             predictDataPoints,
-            summaryOfRecords: summaryOfRecords // <-- ADDED THIS NEW KEY
+            alerts: alerts, // Contains boolean flags for red color
+            summaryOfRecords: summaryOfRecords
         });
 
     } catch (err) {
