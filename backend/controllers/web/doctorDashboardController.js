@@ -173,51 +173,75 @@ function buildPatientProfile(user, onboardingDoc, allMeds) {
 
 // (These are the sub-helpers required for getPatientPredictionGraphs)
 const METRIC_LIMITS = {
-  bpUpper: 122, bpLower: 80, bsFasting: 100, bsAfterMeals: 140,
-  a1c: 5.7, weight: 70, hdl: 60, ldl: 100,
-  triglyceride: 150, heartRate: 80,
-  // --- ADDED ---
-  nutrition: 90, fitness: 90, sleep: 90, stress: 90,
+  cuoreScore: 90, bpUpper: 122, bpLower: 80, bsFasting: 100, bsAfterMeals: 140,
+  a1c: 5.7, weight: 70, bmi: 22.9, bodyFat: 20, hdl: 60, ldl: 100,
+  triglyceride: 150, nutrition: 90, fitness: 90, sleep: 90, stress: 90, heartRate: 80,
 };
-const momentumPredict = (B, A, direction, limit) => {
-  A = A || 0; B = B || 0;
+
+// --- PREDICTION LOGIC (From your working file) ---
+const momentumPredict = (B, A, direction, limit) => { // Limit added here as well for capping
+  A = A || 0;
+  B = B || 0;
+
   if (A === B) {
-    if (direction === 'increase') return Math.min(B, limit);
-    else return Math.max(B, limit);
+    // If flat, predict stays flat, but ensure it's not already past the limit
+     if (direction === 'increase') return Math.min(B, limit); // Cap at limit if already above
+     else return Math.max(B, limit); // Cap at limit if already below
   }
+
   let prediction;
   if (direction === 'increase') {
     prediction = B + ((B - A) * 0.8);
+    // Cap prediction at the upper limit
     prediction = Math.min(prediction, limit);
   } else {
     prediction = B - ((A - B) * 0.8);
+    // Cap prediction at the lower limit (goal)
     prediction = Math.max(prediction, limit);
   }
+
+  // --- Rule 1: Ensure prediction is never below 0 (absolute floor) ---
   return Math.max(0, prediction);
 };
+
+// --- generatePredictionSeries (From your working file) ---
 const generatePredictionSeries = (history, X, initialBFormula, direction, limit, isO7Metric = false) => {
   const points = new Array(6).fill(0);
+  // Filter out any null/undefined/non-numeric values from history FOR CALCULATION
   const validHistory = history.filter(val => typeof val === 'number' && !isNaN(val));
   const n = validHistory.length;
+  // Pass limit to predictNext
   const predictNext = (B, A) => momentumPredict(B, A, direction, limit);
+
+  // --- Rule 2: Check for skipped O7 input ---
+  // If it's an O7 metric AND the latest historical value (from original history) is missing/null/undefined, return all zeros.
   const latestRawValue = history.length > 0 ? history[history.length - 1] : undefined;
   if (isO7Metric && (latestRawValue === null || latestRawValue === undefined)) {
-    return { series: points, historyCount: 0 };
+      // console.log(`Skipped O7 metric detected (latestRawValue: ${latestRawValue}). Returning zeros.`); // Optional log
+      return { series: points, historyCount: 0 }; // Treat as no history
   }
+  // --- END NEW RULE 2 ---
+
+  // Apply the 3 Scenarios
   if (n === 0) {
+    // Scenario 0: No valid data.
     return { series: points, historyCount: 0 };
   } else if (n === 1) {
+    // Scenario 1: "latest + 5 predicted"
     points[0] = validHistory[0];
+    // Apply limit capping to initial B calculation
     let initialB = initialBFormula(points[0], X);
     if (direction === 'increase') initialB = Math.min(initialB, limit);
     else initialB = Math.max(initialB, limit);
-    points[1] = Math.max(0, initialB);
+    points[1] = Math.max(0, initialB); // Ensure >= 0
+
     points[2] = predictNext(points[1], points[0]);
     points[3] = predictNext(points[2], points[1]);
     points[4] = predictNext(points[3], points[2]);
     points[5] = predictNext(points[4], points[3]);
     return { series: points.map(p => Math.round(Math.max(0, p) * 100) / 100), historyCount: 1 };
   } else if (n === 2) {
+    // Scenario 2: "1 previous + 1 latest + 4 predicted"
     points[0] = validHistory[0];
     points[1] = validHistory[1];
     points[2] = predictNext(points[1], points[0]);
@@ -226,6 +250,7 @@ const generatePredictionSeries = (history, X, initialBFormula, direction, limit,
     points[5] = predictNext(points[4], points[3]);
     return { series: points.map(p => Math.round(Math.max(0, p) * 100) / 100), historyCount: 2 };
   } else {
+    // Scenario 3 (n >= 3): "2 previous + 1 latest + 3 predicted"
     points[0] = validHistory[n - 3];
     points[1] = validHistory[n - 2];
     points[2] = validHistory[n - 1];
@@ -235,23 +260,123 @@ const generatePredictionSeries = (history, X, initialBFormula, direction, limit,
     return { series: points.map(p => Math.round(Math.max(0, p) * 100) / 100), historyCount: 3 };
   }
 };
+
+// ---------------- DATE HELPERS (From your working file) ------------------
+
+// format "Jan 24", "Jul 25", etc.
+const formatDateLabel = (date) => {
+  const d = new Date(date);
+  if (isNaN(d)) return "";
+  return d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+};
+
+// add N months to a date
+const addMonths = (date, months) => {
+  const d = new Date(date);
+  d.setMonth(d.getMonth() + months);
+  return d;
+};
+
+/**
+ * Build date labels for actual + predicted points
+ * historyArray → full history array (o2History, o7History etc)
+ * historyCount → how many actual points appear in P1..P6
+ */
+const buildDateLabels = (historyArray, historyCount) => {
+  const labels = new Array(6).fill("");
+  if (!historyArray || historyArray.length === 0) return labels;
+
+  // extract all dates (This is the FIX: added h.timestamp)
+  const dates = historyArray
+    .map(h => h.date || h.createdAt || h.updatedAt || h.timestamp || null)
+    .filter(Boolean);
+
+  if (dates.length === 0) return labels;
+
+  const lastDate = new Date(dates[dates.length - 1]);
+
+  // --- actual readings (This is the FIX: new logic) ---
+  if (historyCount === 1) {
+    labels[0] = formatDateLabel(dates[dates.length - 1]);
+  } else if (historyCount === 2) {
+    labels[0] = formatDateLabel(dates[dates.length - 2]);
+    labels[1] = formatDateLabel(dates[dates.length - 1]);
+  } else if (historyCount >= 3) {
+    labels[0] = formatDateLabel(dates[dates.length - 3]);
+    labels[1] = formatDateLabel(dates[dates.length - 2]);
+    labels[2] = formatDateLabel(dates[dates.length - 1]);
+  }
+
+  // --- predicted readings (+2 months increments) ---
+  let monthsToAdd = 2;
+  for (let i = historyCount; i < 6; i++) {
+    labels[i] = formatDateLabel(addMonths(lastDate, monthsToAdd));
+    monthsToAdd += 2;
+  }
+
+  return labels;
+};
+
+// ---------------- END DATE HELPERS ------------------
+
+
+// --- DATA FETCHING (From your working file) ---
 const fetchHistory = (onboarding, metricKey) => {
   let historyArray = [];
+
+  // Helper: Treat both numbers and numeric strings as valid
+  const allowNumericString = (val) => {
+    if (val === null || val === undefined) return undefined;
+    if (typeof val === 'number') return val;
+    // Fix: Convert valid numeric strings to numbers for processing
+    if (typeof val === 'string') {
+        const num = parseFloat(val.trim());
+        if (!isNaN(num)) return num;
+    }
+    return undefined; // invalid (non-numeric)
+  };
+
   switch (metricKey) {
-    case 'weight_kg': historyArray = onboarding.o2History || []; return historyArray.map(h => h.data?.weight_kg);
-    // --- ADDED ---
-    case 'nutrition': historyArray = onboarding.o5History || []; return historyArray.map(h => h.data?.foodScore);
-    case 'fitness': historyArray = onboarding.o5History || []; return historyArray.map(h => h.data?.exerciseScore);
-    case 'sleep': historyArray = onboarding.o6History || []; return historyArray.map(h => h.data?.sleepScore);
-    case 'stress': historyArray = onboarding.o6History || []; return historyArray.map(h => h.data?.stressScore);
-    // --- END ---
+
+    case 'cuoreScore':
+      historyArray = onboarding.scoreHistory || [];
+      return historyArray.map(h => allowNumericString(h.data?.cuoreScore));
+
+    case 'weight_kg':
+      historyArray = onboarding.o2History || [];
+      return historyArray.map(h => allowNumericString(h.data?.weight_kg));
+
+    case 'bmi':
+      historyArray = onboarding.o2History || [];
+      return historyArray.map(h => allowNumericString(h.data?.bmi));
+
+    case 'nutrition':
+      historyArray = onboarding.o5History || [];
+      return historyArray.map(h => allowNumericString(h.data?.foodScore));
+
+    case 'fitness':
+      historyArray = onboarding.o5History || [];
+      return historyArray.map(h => allowNumericString(h.data?.exerciseScore));
+
+    case 'sleep':
+      historyArray = onboarding.o6History || [];
+      return historyArray.map(h => allowNumericString(h.data?.sleepScore));
+
+    case 'stress':
+      historyArray = onboarding.o6History || [];
+      return historyArray.map(h => allowNumericString(h.data?.stressScore));
+
+    // --- All O7 metrics ---
     default:
-        historyArray = onboarding.o7History || [];
-        return historyArray.map(h => h.data ? h.data[metricKey] : undefined);
+      historyArray = onboarding.o7History || [];
+      return historyArray.map(h => {
+        const val = h.data ? h.data[metricKey] : undefined;
+        return allowNumericString(val);
+      });
   }
 };
 
-// This is the main helper that runs all the prediction logic
+// --- REBUILT getPatientPredictionGraphs function ---
 async function getPatientPredictionGraphs(onboardingDoc) {
   if (!onboardingDoc) return { chartData: {}, metrics: [] };
 
@@ -260,88 +385,110 @@ async function getPatientPredictionGraphs(onboardingDoc) {
   let X;
   if (cuoreScore < 50) X = 0.9; else if (cuoreScore > 70) X = 0.3; else X = 0.6;
 
+  // Formulas (from your working file)
   const formulas = {
-    bpUpper: { initialB: (A, X) => A - (4 * X), direction: 'decrease' },
-    bpLower: { initialB: (A, X) => A - (2 * X), direction: 'decrease' },
-    heartRate: { initialB: (A, X) => A - (2 * X), direction: 'decrease' },
-    bsFasting: { initialB: (A, X) => A - (20 * X), direction: 'decrease' },
-    bsAfterMeals: { initialB: (A, X) => A - (20 * X), direction: 'decrease' },
-    weight: { initialB: (A, X) => A - (2 * X), direction: 'decrease' },
-    hdl: { initialB: (A, X) => A + (2 * X), direction: 'increase' },
-    ldl: { initialB: (A, X) => A - (5 * X), direction: 'decrease' },
-    triglyceride: { initialB: (A, X) => A - (5 * X), direction: 'decrease' },
-    // --- ADDED ---
-    nutrition: { initialB: (A, X) => A + (5 * X), direction: 'increase' },
-    fitness: { initialB: (A, X) => A + (5 * X), direction: 'increase' },
-    sleep: { initialB: (A, X) => A + (5 * X), direction: 'increase' },
-    stress: { initialB: (A, X) => A + (5 * X), direction: 'increase' },
+      bpUpper:    { initialB: (A, X) => A - (4 * X),  direction: 'decrease' },
+      bpLower:    { initialB: (A, X) => A - (2 * X),  direction: 'decrease' },
+      heartRate:  { initialB: (A, X) => A - (2 * X),  direction: 'decrease' },
+      bsFasting:  { initialB: (A, X) => A - (20 * X), direction: 'decrease' },
+      bsAfterMeals:{ initialB: (A, X) => A - (20 * X), direction: 'decrease' },
+      weight:     { initialB: (A, X) => A - (2 * X),  direction: 'decrease' },
+      hdl:        { initialB: (A, X) => A + (2 * X),  direction: 'increase' },
+      ldl:        { initialB: (A, X) => A - (5 * X),  direction: 'decrease' },
+      triglyceride:{ initialB: (A, X) => A - (5 * X),  direction: 'decrease' },
+      nutrition:  { initialB: (A, X) => A + (5 * X),  direction: 'increase' },
+      fitness:    { initialB: (A, X) => A + (5 * X),  direction: 'increase' },
+      sleep:      { initialB: (A, X) => A + (5 * X),  direction: 'increase' },
+      stress:     { initialB: (A, X) => A + (5 * X),  direction: 'increase' },
   };
 
+  // --- Generate series (Pass isO7Metric flag and Limit) ---
+  // Helper to avoid repetition
   const generateArgs = (key, dbKey, isO7 = false) => [
-      fetchHistory(onboarding, dbKey || key),
+      fetchHistory(onboarding, dbKey || key), // Use specific DB key if provided
       X, formulas[key].initialB, formulas[key].direction, METRIC_LIMITS[key], isO7
   ];
 
-  // Calculate series
-  const { series: bpUpperSeries } = generatePredictionSeries(...generateArgs('bpUpper', 'bp_upper', true));
-  const { series: bpLowerSeries } = generatePredictionSeries(...generateArgs('bpLower', 'bp_lower', true));
-  const { series: hrSeries } = generatePredictionSeries(...generateArgs('heartRate', 'pulse', true));
-  const { series: bsFastingSeries } = generatePredictionSeries(...generateArgs('bsFasting', 'bs_f', true));
-  const { series: bsAfterMealsSeries } = generatePredictionSeries(...generateArgs('bsAfterMeals', 'bs_am', true));
-  const { series: weightSeries } = generatePredictionSeries(...generateArgs('weight', 'weight_kg'));
-  const { series: hdlSeries } = generatePredictionSeries(...generateArgs('hdl', 'HDL', true));
-  const { series: ldlSeries } = generatePredictionSeries(...generateArgs('ldl', 'LDL', true));
-  const { series: trigSeries } = generatePredictionSeries(...generateArgs('triglyceride', 'Trig', true));
-  // --- ADDED ---
-  const { series: nutritionSeries } = generatePredictionSeries(...generateArgs('nutrition', 'nutrition'));
-  const { series: fitnessSeries } = generatePredictionSeries(...generateArgs('fitness', 'fitness'));
-  const { series: sleepSeries } = generatePredictionSeries(...generateArgs('sleep', 'sleep'));
-  const { series: stressSeries } = generatePredictionSeries(...generateArgs('stress', 'stress'));
-  
-  // --- ADDED A1C ---
-  const a1cFormula = (sugar) => sugar > 0 ? (sugar + 46.7) / 28.7 : 0;
-  const a1cSeries = bsFastingSeries.map(sugarVal => Math.round(Math.min(Math.max(0, a1cFormula(sugarVal)), METRIC_LIMITS.a1c) * 100) / 100);
+  const { series: bpUpperSeries, historyCount: bpUpperHist } = generatePredictionSeries(...generateArgs('bpUpper', 'bp_upper', true));
+  const { series: bpLowerSeries, historyCount: bpLowerHist } = generatePredictionSeries(...generateArgs('bpLower', 'bp_lower', true));
+  const { series: hrSeries, historyCount: hrHist } = generatePredictionSeries(...generateArgs('heartRate', 'pulse', true));
+  const { series: bsFastingSeries, historyCount: bsFastingHist } = generatePredictionSeries(...generateArgs('bsFasting', 'bs_f', true));
+  const { series: bsAfterMealsSeries, historyCount: bsAfterMealsHist } = generatePredictionSeries(...generateArgs('bsAfterMeals', 'bs_am', true));
 
+  // A1C derived
+  const a1cFormula = (sugar) => sugar > 0 ? (sugar + 46.7) / 28.7 : 0;
+  // Apply limit to derived A1C values too
+  const a1cSeries = bsFastingSeries.map(sugarVal => Math.round(Math.min(Math.max(0, a1cFormula(sugarVal)), METRIC_LIMITS.a1c) * 100) / 100);
+  const a1cHist = bsFastingHist; // Use the same history count
+
+  const { series: weightSeries, historyCount: weightHist } = generatePredictionSeries(...generateArgs('weight', 'weight_kg'));
+  
+  const { series: hdlSeries, historyCount: hdlHist } = generatePredictionSeries(...generateArgs('hdl', 'HDL', true));
+  const { series: ldlSeries, historyCount: ldlHist } = generatePredictionSeries(...generateArgs('ldl', 'LDL', true));
+  const { series: trigSeries, historyCount: trigHist } = generatePredictionSeries(...generateArgs('triglyceride', 'Trig', true));
+
+  const { series: nutritionSeries, historyCount: nutritionHist } = generatePredictionSeries(...generateArgs('nutrition', 'nutrition'));
+  const { series: fitnessSeries, historyCount: fitnessHist } = generatePredictionSeries(...generateArgs('fitness', 'fitness'));
+  const { series: sleepSeries, historyCount: sleepHist } = generatePredictionSeries(...generateArgs('sleep', 'sleep'));
+  const { series: stressSeries, historyCount: stressHist } = generatePredictionSeries(...generateArgs('stress', 'stress'));
+
+  // --- BUILD DATE LABELS FOR EACH CATEGORY ---
+  const o7HistoryRaw = onboarding.o7History || [];
+  const o2HistoryRaw = onboarding.o2History || [];
+  const o5HistoryRaw = onboarding.o5History || [];
+
+  // Use the *correct* history counts returned from generatePredictionSeries
+  const bpLabels        = buildDateLabels(o7HistoryRaw, bpUpperHist); // Use one hist count for all in this graph
+  const sugarLabels     = buildDateLabels(o7HistoryRaw, bsFastingHist);
+  const weightLabels    = buildDateLabels(o2HistoryRaw, weightHist);
+  const cholesterolLabels = buildDateLabels(o7HistoryRaw, hdlHist);
+  const lifestyleLabels = buildDateLabels(o5HistoryRaw, nutritionHist);
+  
+  // A1C shares the same timeline as sugar
+  const a1cLabels = sugarLabels;
 
   // --- Build the new chartData object ---
-  const labels = ['P1', 'P2', 'P3', 'P4', 'P5', 'P6'];
   const chartData = {
-    bp: labels.map((day, i) => ({
-        day,
+      bp: bpLabels.map((day, i) => ({
+        day, // <-- This will now have the correct date!
         sys: bpUpperSeries[i],
         dia: bpLowerSeries[i],
         hr: hrSeries[i]
-    })),
-    weight: labels.map((day, i) => ({
+      })),
+
+      weight: weightLabels.map((day, i) => ({
         day,
         weight: weightSeries[i]
-    })),
-    sugar: labels.map((day, i) => ({
+      })),
+
+      sugar: sugarLabels.map((day, i) => ({
         day,
         fasting: bsFastingSeries[i],
         pp: bsAfterMealsSeries[i]
-    })),
-    cholesterol: labels.map((day, i) => ({
+      })),
+
+      cholesterol: cholesterolLabels.map((day, i) => ({
         day,
         ldl: ldlSeries[i],
         hdl: hdlSeries[i],
         trig: trigSeries[i]
-    })),
-    // --- ADDED ---
-    a1c: labels.map((day, i) => ({
+      })),
+
+      a1c: a1cLabels.map((day, i) => ({
         day,
         a1c: a1cSeries[i]
-    })),
-    lifestyle: labels.map((day, i) => ({
+      })),
+
+      lifestyle: lifestyleLabels.map((day, i) => ({
         day,
         nutrition: nutritionSeries[i],
         fitness: fitnessSeries[i],
         sleep: sleepSeries[i],
         stress: stressSeries[i]
-    })),
+      })),
   };
 
-  // --- Build the new metrics array ---
+  // --- Build the new metrics array (Unchanged from your original file) ---
   const metrics = [
     {
         key: "bp",
@@ -371,7 +518,6 @@ async function getPatientPredictionGraphs(onboardingDoc) {
         ],
         domain: [80, 250],
     },
-    // --- ADDED ---
     {
         key: "a1c",
         title: "A1C",
@@ -390,7 +536,6 @@ async function getPatientPredictionGraphs(onboardingDoc) {
         ],
         domain: [20, 300],
     },
-    // --- ADDED ---
     {
         key: "lifestyle",
         title: "Lifestyle Metrics",
@@ -401,11 +546,12 @@ async function getPatientPredictionGraphs(onboardingDoc) {
             { key: "sleep", label: "Sleep", stroke: "#e74c3c" },
             { key: "stress", label: "Stress", stroke: "#2980b9" },
         ],
-        domain: [0, 100],
+        domain: [Math.min(0, ...nutritionSeries, ...fitnessSeries, ...sleepSeries, ...stressSeries) - 2, // Ensure domain starts at least at 0
+                Math.max(100, ...nutritionSeries, ...fitnessSeries, ...sleepSeries, ...stressSeries) + 2], // Ensure domain goes at least to 100
     }
   ];
 
-  // Return the data in the new format
+  // Return the data in the original format
   return { chartData, metrics };
 }
 
