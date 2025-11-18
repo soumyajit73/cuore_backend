@@ -591,7 +591,7 @@ exports.getHomeScreenData = async (req, res) => {
         const payload = {
     user: {
         id: userId,
-        name: userData.display_name,
+        name: `Hi,${userData.display_name}`,
         profileImage: userData.profileImage || 'https://example.com/images/mjohnson.png'
     },
     date: dateString,

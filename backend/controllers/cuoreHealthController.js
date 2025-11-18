@@ -98,7 +98,7 @@ exports.getCuoreHealthData = async (req, res) => {
     const smokerStatus = onboardingDoc.o4Data?.smoking || "N/A";
 
     const profileData = {
-      name: `Hi,${user?.display_name}` || "User",
+      name: user?.display_name || "User",
       age: onboardingDoc.o2Data?.age || null,
       smoker: smokerStatus,
       pastHO: pastHistory, // This now contains the abbreviations
