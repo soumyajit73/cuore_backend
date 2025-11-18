@@ -940,41 +940,44 @@ const calculateBMIMetrics = (userData) => {
 const calculateLifestyleScore = (userData) => {
   const { o5Data, o6Data } = userData;
 
-  // Calculate food score
-  const foodScore =
-    (FOODS_SCORE_MAP[o5Data.fruits_veg] +
-      FOODS_SCORE_MAP[o5Data.processed_food] +
-      FOODS_SCORE_MAP[o5Data.high_fiber]) /
-    3;
+  // --- NUTRITION ---
+  const nutritionRaw = (
+    FOODS_SCORE_MAP[o5Data.fruits_veg] +
+    FOODS_SCORE_MAP[o5Data.processed_food] +
+    FOODS_SCORE_MAP[o5Data.high_fiber]
+  ) / 3;
 
-  // Calculate exercise score
-  const exerciseScore = EXERCISE_SCORE_MAP[o5Data.min_exercise_per_week];
+  const nutrition = nutritionRaw * 12;  // convert to %
 
-  // Calculate sleep score
-  const sleepScore = SLEEP_MAP[o6Data.sleep_hours];
+  // --- FITNESS ---
+  const fitnessRaw = EXERCISE_SCORE_MAP[o5Data.min_exercise_per_week];
+  const fitness = fitnessRaw * 12;
 
-  // Calculate stress score
-  const stressScore =
-    (STRESS_MAP[o6Data.problems_overwhelming] +
-      STRESS_MAP[o6Data.enjoyable] +
-      STRESS_MAP[o6Data.felt_nervous]) /
-    3;
+  // --- SLEEP ---
+  const sleepRaw = SLEEP_MAP[o6Data.sleep_hours];
+  const sleep = sleepRaw * 12;
 
-  // Calculate final lifestyle score
-  const lifestyleScore =
-    (100 -
-      foodScore * 12 +
-      (100 - exerciseScore * 12) +
-      (100 - sleepScore * 12) +
-      (100 - stressScore * 12)) /
-    4;
+  // --- STRESS ---
+  const stressRaw = (
+    STRESS_MAP[o6Data.problems_overwhelming] +
+    STRESS_MAP[o6Data.enjoyable] +
+    STRESS_MAP[o6Data.felt_nervous]
+  ) / 3;
 
-  return {
-    score: Math.round(lifestyleScore),
-    status:
-      lifestyleScore > 70 ? "green" : lifestyleScore > 55 ? "orange" : "red",
-  };
+  const stress = stressRaw * 12;
+
+  // --- FINAL LIFESTYLE SCORE ---
+  const lifestyleScore = Math.round((nutrition + fitness + sleep + stress) / 4);
+
+  // --- COLOR LOGIC ---
+  const status =
+    lifestyleScore > 70 ? "green" :
+    lifestyleScore > 55 ? "orange" :
+    "red";
+
+  return { score: lifestyleScore, status };
 };
+
 const calculateRecommendedCalories = (userData) => {
   const { o2Data, derivedMetrics } = userData;
   const { age, gender, weight_kg, height_cm } = o2Data;
