@@ -941,30 +941,28 @@ const calculateLifestyleScore = (userData) => {
   const { o5Data, o6Data } = userData;
 
   // --- NUTRITION ---
-  const nutritionRaw = (
-    FOODS_SCORE_MAP[o5Data.fruits_veg] +
-    FOODS_SCORE_MAP[o5Data.processed_food] +
-    FOODS_SCORE_MAP[o5Data.high_fiber]
-  ) / 3;
+  const nutritionAvg =
+    (FOODS_SCORE_MAP[o5Data.fruits_veg] +
+      FOODS_SCORE_MAP[o5Data.processed_food] +
+      FOODS_SCORE_MAP[o5Data.high_fiber]) / 3;
 
-  const nutrition = nutritionRaw * 12;  // convert to %
+  const nutrition = 100 - ((nutritionAvg + 2) * 8);
 
   // --- FITNESS ---
   const fitnessRaw = EXERCISE_SCORE_MAP[o5Data.min_exercise_per_week];
-  const fitness = fitnessRaw * 12;
+  const fitness = 100 - ((fitnessRaw + 2) * 8);
 
   // --- SLEEP ---
   const sleepRaw = SLEEP_MAP[o6Data.sleep_hours];
-  const sleep = sleepRaw * 12;
+  const sleep = 100 - ((sleepRaw + 2) * 8);
 
   // --- STRESS ---
-  const stressRaw = (
-    STRESS_MAP[o6Data.problems_overwhelming] +
-    STRESS_MAP[o6Data.enjoyable] +
-    STRESS_MAP[o6Data.felt_nervous]
-  ) / 3;
+  const stressAvg =
+    (STRESS_MAP[o6Data.problems_overwhelming] +
+      STRESS_MAP[o6Data.enjoyable] +
+      STRESS_MAP[o6Data.felt_nervous]) / 3;
 
-  const stress = stressRaw * 12;
+  const stress = 100 - ((stressAvg + 2) * 8);
 
   // --- FINAL LIFESTYLE SCORE ---
   const lifestyleScore = Math.round((nutrition + fitness + sleep + stress) / 4);
@@ -977,6 +975,7 @@ const calculateLifestyleScore = (userData) => {
 
   return { score: lifestyleScore, status };
 };
+
 
 const calculateRecommendedCalories = (userData) => {
   const { o2Data, derivedMetrics } = userData;
