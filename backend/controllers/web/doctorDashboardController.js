@@ -106,9 +106,9 @@ const generateMedicalAlerts = (onboarding, lastConsultDate) => {
   const bpUpper = o7.bp_upper;
   if (bpUpper) {
     if (bpUpper > 170 || bpUpper < 90) {
-      addAlert('Red', "Abnormal BP");
+      addAlert('Red', "Abnormal BP (upper bp)");
     } else if ((bpUpper >= 150 && bpUpper <= 170) || (bpUpper >= 90 && bpUpper <= 100)) {
-      addAlert('Orange', "Abnormal BP");
+      addAlert('Orange', "Abnormal BP (upper bp)");
     }
   }
 
@@ -116,9 +116,9 @@ const generateMedicalAlerts = (onboarding, lastConsultDate) => {
   const bpLower = o7.bp_lower;
   if (bpLower) {
     if (bpLower > 110 || bpLower < 60) {
-      addAlert('Red',  "Abnormal BP");
+      addAlert('Red',  "Abnormal BP (lower bp)");
     } else if ((bpLower >= 100 && bpLower <= 110) || (bpLower >= 60 && bpLower <= 66)) {
-      addAlert('Orange', "Abnormal BP");
+      addAlert('Orange', "Abnormal BP (lower bp)");
     }
   }
 
@@ -135,20 +135,20 @@ const generateMedicalAlerts = (onboarding, lastConsultDate) => {
   // --- 9. Blood Sugar Fasting ---
   const bsF = o7.bs_f;
   if (bsF && (bsF > 240 || bsF < 100)) {
-      addAlert('Orange', "Abnormal glucose");
+      addAlert('Orange', "Abnormal glucose (fasting)");
   }
 
   // --- 10. Blood Sugar After Meal ---
   const bsAm = o7.bs_am;
   if (bsAm && (bsAm > 260 || bsAm < 120)) {
-      addAlert('Orange',  "Abnormal glucose");
+      addAlert('Orange',  "Abnormal glucose (after meal)");
   }
 
   // --- 11. Undiagnosed High Sugar ---
   const hasDiabetes = isSelected(o3.q4) || o3.hasDiabetes; 
   if (!hasDiabetes) {
      if ((bsF && bsF > 120) || (bsAm && bsAm > 160)) {
-        addAlert('Orange',  "Abnormal glucose");
+        addAlert('Orange',  "Abnormal glucose (Undiagnosed High Sugar)");
      }
   }
 
