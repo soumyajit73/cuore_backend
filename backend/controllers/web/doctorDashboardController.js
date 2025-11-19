@@ -83,32 +83,32 @@ const generateMedicalAlerts = (onboarding, lastConsultDate) => {
   // --- 2. Stale Cuore Score ---
   const daysSinceConsult = getDaysDiff(lastConsultDate);
   if ((scores.cuoreScore || 0) < 55 && daysSinceConsult > 100) {
-    addAlert('Orange', "It’s time to check in with your doctor.", ">100 days since last consult");
+    addAlert('Orange', ">100 days since last consult");
   }
 
   // --- 3. Reassessment Due ---
   const daysSinceAssessment = getDaysDiff(onboarding.timestamp);
   if (daysSinceAssessment > 55) {
-    addAlert('Orange', "Reassess now to keep your plan aligned", "Plan not updated – Reassessment due");
+    addAlert('Orange', "Plan not updated – Reassessment due");
   }
 
   // --- 4. Shortness of Breath ---
   if (isSelected(o3.q5) || (o3.selectedOptions && o3.selectedOptions.includes("I feel short of breath"))) {
-     addAlert('Red', "Consult your doctor promptly", "SOB or chest discomfort");
+     addAlert('Red', "SOB or chest discomfort");
   }
 
   // --- 5. Diabetes Symptoms ---
   if (isSelected(o3.q6) || (o3.selectedOptions && o3.selectedOptions.includes("increase in hunger"))) {
-     addAlert('Orange', "Consult your doctor for diabetes", "Increased hunger, thirst & urination");
+     addAlert('Orange', "Increased hunger, thirst & urination");
   }
 
   // --- 6. Blood Pressure Upper ---
   const bpUpper = o7.bp_upper;
   if (bpUpper) {
     if (bpUpper > 170 || bpUpper < 90) {
-      addAlert('Red', "Consult your doctor for BP", "Abnormal BP");
+      addAlert('Red', "Abnormal BP");
     } else if ((bpUpper >= 150 && bpUpper <= 170) || (bpUpper >= 90 && bpUpper <= 100)) {
-      addAlert('Orange', "Consult your doctor for BP", "Abnormal BP");
+      addAlert('Orange', "Abnormal BP");
     }
   }
 
@@ -116,9 +116,9 @@ const generateMedicalAlerts = (onboarding, lastConsultDate) => {
   const bpLower = o7.bp_lower;
   if (bpLower) {
     if (bpLower > 110 || bpLower < 60) {
-      addAlert('Red', "Consult your doctor for BP", "Abnormal BP");
+      addAlert('Red',  "Abnormal BP");
     } else if ((bpLower >= 100 && bpLower <= 110) || (bpLower >= 60 && bpLower <= 66)) {
-      addAlert('Orange', "Consult your doctor for BP", "Abnormal BP");
+      addAlert('Orange', "Abnormal BP");
     }
   }
 
@@ -126,29 +126,29 @@ const generateMedicalAlerts = (onboarding, lastConsultDate) => {
   const pulse = o7.pulse;
   if (pulse) {
     if (pulse < 50 || pulse > 120) {
-      addAlert('Red', "Consult your doctor for heart rate", "Abnormal HR");
+      addAlert('Red',  "Abnormal HR");
     } else if ((pulse >= 50 && pulse <= 60) || (pulse >= 110 && pulse <= 120)) {
-      addAlert('Orange', "Monitor heart rate", "Abnormal HR");
+      addAlert('Orange', "Abnormal HR");
     }
   }
 
   // --- 9. Blood Sugar Fasting ---
   const bsF = o7.bs_f;
   if (bsF && (bsF > 240 || bsF < 100)) {
-      addAlert('Orange', "Monitor sugar & consult your doctor", "Abnormal glucose");
+      addAlert('Orange', "Abnormal glucose");
   }
 
   // --- 10. Blood Sugar After Meal ---
   const bsAm = o7.bs_am;
   if (bsAm && (bsAm > 260 || bsAm < 120)) {
-      addAlert('Orange', "Monitor sugar & consult your doctor", "Abnormal glucose");
+      addAlert('Orange',  "Abnormal glucose");
   }
 
   // --- 11. Undiagnosed High Sugar ---
   const hasDiabetes = isSelected(o3.q4) || o3.hasDiabetes; 
   if (!hasDiabetes) {
      if ((bsF && bsF > 120) || (bsAm && bsAm > 160)) {
-        addAlert('Orange', "Monitor sugar & consult your doctor", "Abnormal glucose");
+        addAlert('Orange',  "Abnormal glucose");
      }
   }
 
@@ -156,16 +156,16 @@ const generateMedicalAlerts = (onboarding, lastConsultDate) => {
   const o2 = o7.o2_sat;
   if (o2) {
     if (o2 < 91) {
-      addAlert('Red', "Consult your doctor", "O2 sat <91%");
+      addAlert('Red',  "O2 sat <91%");
     } else if (o2 >= 91 && o2 <= 94) {
-      addAlert('Orange', "Monitor your O2 saturation", "Low O2 sat%");
+      addAlert('Orange',  "Low O2 sat%");
     }
   }
 
   // --- 13. HsCRP ---
   const hscrp = o7.HsCRP;
   if (hscrp && hscrp > 0.3) { 
-    addAlert('Orange', "Consult your doctor for high HsCRP", "High HsCRP");
+    addAlert('Orange',  "High HsCRP");
   }
 
   // --- 14. Lipids ---
@@ -173,7 +173,7 @@ const generateMedicalAlerts = (onboarding, lastConsultDate) => {
   const ldl = o7.LDL;
   const trig = o7.Trig;
   if ((hdl && hdl < 45) || (ldl && ldl > 180) || (trig && trig > 200)) {
-    addAlert('Orange', "Consult your doctor for Cholesterol", "Hyperlipidaemia");
+    addAlert('Orange',  "Hyperlipidaemia");
   }
 
   return alerts;
