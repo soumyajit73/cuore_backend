@@ -338,70 +338,89 @@ const processO4Data = (o4Data) => {
 };
 
 const processO5Data = (o5Data) => {
-  const { min_exercise_per_week, fruits_veg, processed_food, high_fiber } =
-    o5Data;
-  if (!EXERCISE_SCORE_MAP.hasOwnProperty(min_exercise_per_week)) {
-    throw new ValidationError(
-      `Invalid value for min_exercise_per_week: ${min_exercise_per_week}.`
-    );
-  }
-  if (
-    !FOODS_SCORE_MAP.hasOwnProperty(fruits_veg) ||
-    !FOODS_SCORE_MAP.hasOwnProperty(processed_food) ||
-    !FOODS_SCORE_MAP.hasOwnProperty(high_fiber)
-  ) {
-    throw new ValidationError(
-      "Invalid value for one of the food-related fields."
-    );
-  }
-  const exerciseScore = EXERCISE_SCORE_MAP[min_exercise_per_week];
-  const foodsScore =
-    FOODS_SCORE_MAP[fruits_veg] +
-    FOODS_SCORE_MAP[processed_food] +
-    FOODS_SCORE_MAP[high_fiber];
-  const o5Score = exerciseScore + foodsScore;
+  const { min_exercise_per_week, fruits_veg, processed_food, high_fiber } = o5Data;
+
+  if (!EXERCISE_SCORE_MAP.hasOwnProperty(min_exercise_per_week)) {
+    throw new ValidationError(
+      `Invalid value for min_exercise_per_week: ${min_exercise_per_week}.`
+    );
+  }
+  if (
+    !FOODS_SCORE_MAP.hasOwnProperty(fruits_veg) ||
+    !FOODS_SCORE_MAP.hasOwnProperty(processed_food) ||
+    !FOODS_SCORE_MAP.hasOwnProperty(high_fiber)
+  ) {
+    throw new ValidationError(
+      "Invalid value for one of the food-related fields."
+    );
+  }
+
+  // 1. Raw Scores (Keep these for internal O5 score sum if needed)
+  const exerciseRawScore = EXERCISE_SCORE_MAP[min_exercise_per_week];
+  const foodsRawSum =
+    FOODS_SCORE_MAP[fruits_veg] +
+    FOODS_SCORE_MAP[processed_food] +
+    FOODS_SCORE_MAP[high_fiber];
   
-  // --- START OF FIX ---
-  return { 
+  const o5Score = exerciseRawScore + foodsRawSum; // This is the total raw score
+
+  // 2. APPLY THE 0-100 FORMULAS (This is the fix)
+  // Nutrition = 100 – [{(average of nutrition scores) + 2} * 8]
+  const nutritionAvg = foodsRawSum / 3;
+  const finalNutritionScore = Math.max(0, 100 - ((nutritionAvg + 2) * 8));
+
+  // Fitness = 100 – [{(how many min do you exercise score) + 2} * 8]
+  const finalFitnessScore = Math.max(0, 100 - ((exerciseRawScore + 2) * 8));
+
+  return { 
     o5Data, 
     o5Score, 
-    foodScore: foodsScore,     // Pass the sub-score out
-    exerciseScore: exerciseScore // Pass the sub-score out
+    // Save the CALCULATED (0-100) scores for history/prediction
+    foodScore: Math.round(finalNutritionScore),     
+    exerciseScore: Math.round(finalFitnessScore) 
   };
-  // --- END OF FIX ---
 };
 
 const processO6Data = (o6Data) => {
-  const { sleep_hours, problems_overwhelming, enjoyable, felt_nervous } =
-    o6Data;
-  if (!SLEEP_MAP.hasOwnProperty(sleep_hours)) {
-    throw new ValidationError(`Invalid sleep_hours value: ${sleep_hours}.`);
-  }
-  if (
-    !STRESS_MAP.hasOwnProperty(problems_overwhelming) ||
-    !STRESS_MAP.hasOwnProperty(enjoyable) ||
-    !STRESS_MAP.hasOwnProperty(felt_nervous)
-  ) {
-    throw new ValidationError(
-      "Invalid value for one of the stress-related fields."
-    );
-  }
-  const sleepScore = SLEEP_MAP[sleep_hours];
-  const stress_avg =
-    (STRESS_MAP[problems_overwhelming] +
-      STRESS_MAP[enjoyable] +
-      STRESS_MAP[felt_nervous]) /
-    3;
-  const o6Score = sleepScore + stress_avg;
+  const { sleep_hours, problems_overwhelming, enjoyable, felt_nervous } = o6Data;
 
-  // --- START OF FIX ---
-  return { 
+  if (!SLEEP_MAP.hasOwnProperty(sleep_hours)) {
+    throw new ValidationError(`Invalid sleep_hours value: ${sleep_hours}.`);
+  }
+  if (
+    !STRESS_MAP.hasOwnProperty(problems_overwhelming) ||
+    !STRESS_MAP.hasOwnProperty(enjoyable) ||
+    !STRESS_MAP.hasOwnProperty(felt_nervous)
+  ) {
+    throw new ValidationError(
+      "Invalid value for one of the stress-related fields."
+    );
+  }
+
+  // 1. Raw Scores
+  const sleepRawScore = SLEEP_MAP[sleep_hours];
+  const stressRawAvg =
+    (STRESS_MAP[problems_overwhelming] +
+      STRESS_MAP[enjoyable] +
+      STRESS_MAP[felt_nervous]) /
+    3;
+  
+  const o6Score = sleepRawScore + stressRawAvg;
+
+  // 2. APPLY THE 0-100 FORMULAS (This is the fix)
+  // Sleep = 100 – [{(how many hours do you sleep score) + 2} * 8]
+  const finalSleepScore = Math.max(0, 100 - ((sleepRawScore + 2) * 8));
+
+  // Stress = 100 – [{(average of stress scores) + 2} * 8]
+  const finalStressScore = Math.max(0, 100 - ((stressRawAvg + 2) * 8));
+
+  return { 
     o6Data, 
     o6Score,
-    sleepScore: sleepScore,     // Pass the sub-score out
-    stressScore: stress_avg     // Pass the sub-score out (we rename it stressScore)
+    // Save the CALCULATED (0-100) scores for history/prediction
+    sleepScore: Math.round(finalSleepScore),     
+    stressScore: Math.round(finalStressScore)     
   };
-  // --- END OF FIX ---
 };
 
 const score_o2_sat = (value_pct) =>
