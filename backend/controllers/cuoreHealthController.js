@@ -101,13 +101,19 @@ exports.getCuoreHealthData = async (req, res) => {
     
     const smokerStatus = onboardingDoc.o4Data?.smoking || "N/A";
 
+    const currentDate = new Date().toLocaleDateString("en-US", {
+      day: "numeric",
+      month: "long",
+      year: "numeric"
+    });
+
     const profileData = {
       name: user?.display_name || "User",
       age: onboardingDoc.o2Data?.age || null,
       smoker: smokerStatus,
       pastHO: pastHistory, 
       medications: medications,
-      lastConsulted: onboardingDoc.lastConsultedDate || null,
+      lastConsulted: onboardingDoc.lastConsultedDate || currentDate,
     };
 
     // --- 3. PROCESS DATA FOR POINT 2 (HEALTH OBSERVATIONS WITH COLOR) ---
