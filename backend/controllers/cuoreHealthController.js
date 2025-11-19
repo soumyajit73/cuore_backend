@@ -65,9 +65,7 @@ exports.getCuoreHealthData = async (req, res) => {
     const smokerStatus = onboardingDoc.o4Data?.smoking || "N/A";
 
     // Current Date Fallback
-    const currentDate = new Date().toLocaleDateString("en-US", {
-      day: "numeric", month: "long", year: "numeric"
-    });
+    const currentDate = new Date();
 
     const profileData = {
       name: user?.display_name || "User",
