@@ -31,15 +31,19 @@ function determineConditionTypes(o3Data, o4Data) {
 async function fetchCardsInSequence(conditionTypes) {
   // Fetch all cards matching any of the types
   // CHANGED: We now sort by 'title desc' (Z-A) to get the reverse order
-  const query = `*[_type == "knowledgeCard" && conditionType in $types]{
-    _id,
-    title,
-    subtitle,
-    conditionType,
-    details,
-    images,
-    _createdAt
-  } | order(title desc)`; // <-- This is the key change
+const query = `*[_type == "knowledgeCard" && conditionType in $types]{
+  _id,
+  title,
+  subtitle,
+  conditionType,
+  details,
+
+  // FIX: Convert Sanity image asset -> direct URL
+  "images": images[]{ "url": asset->url },
+
+  _createdAt
+} | order(title desc)`;
+ // <-- This is the key change
 
   const cards = await client.fetch(query, { types: conditionTypes });
 
