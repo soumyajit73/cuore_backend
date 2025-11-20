@@ -196,7 +196,7 @@ exports.getUserFitnessPlan = async (req, res) => {
         exerciseType,
         repsDuration,
         sets,
-        videoUrl,
+        "videoUrl": video.asset->url,
         _id,
        "instructions": coalesce(instructions, "")
       }`,

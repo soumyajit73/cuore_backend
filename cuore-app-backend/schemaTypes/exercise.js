@@ -52,11 +52,14 @@ export default {
       validation: Rule => Rule.required().integer().positive(),
     },
     {
-      name: 'videoUrl',
-      title: 'Video URL',
-      type: 'url',
-      description: 'Link to the exercise video snippet.',
-    },
+  name: "video",
+  title: "Video",
+  type: "file",
+  options: {
+    accept: "video/mp4"
+  }
+},
+
     {
   name: 'instructions',
   title: 'Instructions',
