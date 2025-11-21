@@ -170,12 +170,16 @@ const buildDateLabels = (historyArray, historyCount, totalPoints) => {
 const fetchHistory = (onboarding, metricKey) => {
   let historyArray = [];
 
-  const allowNumericString = (val) => {
-    if (val === null || val === undefined) return undefined;
-    if (typeof val === 'number') return val;
-    if (typeof val === 'string' && !isNaN(val.trim())) return val; 
-    return undefined; 
-  };
+ const allowNumericString = (val) => {
+  if (val === null || val === undefined) return undefined;
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string') {
+    const num = parseFloat(val.trim());
+    if (!isNaN(num)) return num;
+  }
+  return undefined;
+};
+
 
   switch (metricKey) {
     case 'cuoreScore':
