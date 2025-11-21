@@ -144,9 +144,12 @@ o6History: [
     }
   ],
   streakCount: { type: Number, default: 0 },
+  lastConsultedDate: { type: Date, default: null },
   lastStreakDate: { type: Date, default: null }
 
   // --- END OF HISTORY FIELDS ---
+
+
 });
 
 const OnboardingModel = mongoose.model(

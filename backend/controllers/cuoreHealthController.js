@@ -180,3 +180,51 @@ exports.getCuoreHealthData = async (req, res) => {
     return res.status(500).json({ error: "Internal server error." });
   }
 };
+
+exports.updateLastConsultedDate = async (req, res) => {
+  try {
+    // 1. Auth check
+    if (!req.user || !req.user.userId) {
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+
+    const userId = req.user.userId;
+    const { lastConsultedDate } = req.body;
+
+    // 2. Body validation
+    if (!lastConsultedDate) {
+      return res.status(400).json({ message: "lastConsultedDate is required" });
+    }
+
+    // 3. Parse date
+    const parsedDate = new Date(lastConsultedDate);
+    if (isNaN(parsedDate)) {
+      return res.status(400).json({ message: "Invalid date format" });
+    }
+
+    // 4. Fetch onboarding doc
+    const onboarding = await Onboarding.findOne({ userId });
+    if (!onboarding) {
+      return res
+        .status(404)
+        .json({ message: "Onboarding data not found for this user" });
+    }
+
+    // 5. Update field
+    onboarding.lastConsultedDate = parsedDate;
+
+    // 6. Save
+    await onboarding.save();
+
+    // 7. Return
+    return res.status(200).json({
+      status: "success",
+      message: "Last consulted date updated successfully",
+      lastConsultedDate: parsedDate,
+    });
+
+  } catch (error) {
+    console.error("Error in updateLastConsultedDate:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
