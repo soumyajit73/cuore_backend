@@ -53,13 +53,13 @@ exports.getCuoreHealthData = async (req, res) => {
     const processedHistory = [];
     const isSelected = (val) => val && typeof val === 'string' && val.toLowerCase() !== 'false' && val.trim().length > 0;
 
-    if (isSelected(o3Data.q1)) processedHistory.push(o3Data.q1);
-    if (isSelected(o3Data.q2)) processedHistory.push(o3Data.q2); 
+    // if (isSelected(o3Data.q1)) processedHistory.push(o3Data.q1);
+    // if (isSelected(o3Data.q2)) processedHistory.push(o3Data.q2); 
     if (isSelected(o3Data.q3)) processedHistory.push("HTN"); 
     if (isSelected(o3Data.q4)) processedHistory.push("DM");
-    if (isSelected(o3Data.q5)) processedHistory.push("SOB/ Chest Discomfort"); 
-    if (isSelected(o3Data.q6)) processedHistory.push(o3Data.q6);
-    if (isSelected(o3Data.other_conditions)) processedHistory.push(o3Data.other_conditions);
+    // if (isSelected(o3Data.q5)) processedHistory.push("SOB/ Chest Discomfort"); 
+    // if (isSelected(o3Data.q6)) processedHistory.push(o3Data.q6);
+    // if (isSelected(o3Data.other_conditions)) processedHistory.push(o3Data.other_conditions);
     
     const pastHistory = processedHistory.join(", ");
     const smokerStatus = onboardingDoc.o4Data?.smoking || "N/A";

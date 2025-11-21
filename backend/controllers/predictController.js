@@ -1,6 +1,6 @@
 const { Onboarding } = require('../models/onboardingModel.js');
 
-// --- METRIC LIMITS (Unchanged) ---
+// --- METRIC LIMITS (Unchanged, except weight widened to 200) ---
 const METRIC_LIMITS = {
   cuoreScore: 90, bpUpper: 122, bpLower: 80, bsFasting: 100, bsAfterMeals: 140,
   a1c: 5.7, weight: 200, bmi: 22.9, bodyFat: 20, hdl: 60, ldl: 100,
@@ -31,7 +31,7 @@ const getWeightDirection = (currentWeight, targetWeight) => {
 };
 
 
-// 3. NEW weight prediction formula
+// 3. NEW weight prediction formula (smooth move toward target)
 const predictWeightTowardsTarget = (current, target) => {
   // smooth movement: 30% towards target
   let next = current + (target - current) * 0.3;
@@ -70,41 +70,71 @@ const momentumPredict = (B, A, direction, limit) => {
 };
 
 
-// --- generatePredictionSeries (UPDATED TO HANDLE WEIGHT) ---
-const generatePredictionSeries = (history, X, initialBFormula, direction, limit, isO7Metric = false, preferFullHistory = false, isWeight = false, targetWeight = null) => {
+// --- generatePredictionSeries (UPDATED TO HANDLE WEIGHT, but 6 points total for all) ---
+const generatePredictionSeries = (
+  history,
+  X,
+  initialBFormula,
+  direction,
+  limit,
+  isO7Metric = false,
+  preferFullHistory = false,
+  isWeight = false,
+  targetWeight = null
+) => {
 
   const validHistory = history.filter(v => typeof v === "number" && !isNaN(v));
   const n = validHistory.length;
 
-  // if weight: use custom logic
+  // ---------- SPECIAL HANDLING FOR WEIGHT (ALWAYS 6 POINTS) ----------
   if (isWeight) {
-    const series = [];
-
     if (n === 0) {
       return { series: new Array(6).fill(0), historyCount: 0 };
     }
 
-    // keep history
-    for (let i = 0; i < n && i < 3; i++) {
-      series.push(validHistory[n - (3 - i)]);
+    // We follow the same 0/1/2/3 history rule like other metrics:
+    // max 3 history points, remaining are predictions towards target
+    const points = new Array(6).fill(0);
+    let historyCount;
+
+    if (n === 1) {
+      // H: [A], P: [B,C,D,E,F] toward target
+      points[0] = validHistory[0];
+      historyCount = 1;
+      let current = points[0];
+      for (let i = 1; i < 6; i++) {
+        current = predictWeightTowardsTarget(current, targetWeight);
+        points[i] = current;
+      }
+    } else if (n === 2) {
+      // H: [A,B], P: [C,D,E,F] toward target (starting from latest)
+      points[0] = validHistory[0];
+      points[1] = validHistory[1];
+      historyCount = 2;
+      let current = points[1];
+      for (let i = 2; i < 6; i++) {
+        current = predictWeightTowardsTarget(current, targetWeight);
+        points[i] = current;
+      }
+    } else {
+      // n >= 3 -> Take last 3 as history: [A,B,C], then 3 preds [D,E,F]
+      points[0] = validHistory[n - 3];
+      points[1] = validHistory[n - 2];
+      points[2] = validHistory[n - 1];
+      historyCount = 3;
+      let current = points[2];
+      for (let i = 3; i < 6; i++) {
+        current = predictWeightTowardsTarget(current, targetWeight);
+        points[i] = current;
+      }
     }
 
-    // start from last history value
-    let current = validHistory[n - 1];
-
-    // generate 3 predictions
-    for (let i = 0; i < 3; i++) {
-      current = predictWeightTowardsTarget(current, targetWeight);
-      series.push(current);
-    }
-
-    return {
-      series,
-      historyCount: Math.min(n, 3)
-    };
+    // Round all
+    const rounded = points.map(p => Math.round(p * 100) / 100);
+    return { series: rounded, historyCount };
   }
 
-  // ---------- NON-WEIGHT METRICS FOLLOW ORIGINAL LOGIC ----------
+  // ---------- NON-WEIGHT METRICS ----------
   const predictNext = (B, A) => momentumPredict(B, A, direction, limit);
 
   const latestRawValue = history.length > 0 ? history[history.length - 1] : undefined;
@@ -112,35 +142,8 @@ const generatePredictionSeries = (history, X, initialBFormula, direction, limit,
       return { series: new Array(6).fill(0), historyCount: 0 };
   }
 
-  if (preferFullHistory) {
-    if (n === 0) return { series: new Array(6).fill(0), historyCount: 0 };
-
-    const historyCount = Math.min(n, 6);
-    const historyPoints = validHistory.slice(n - historyCount);
-
-    const predictionCount = Math.max(3, 6 - historyCount);
-    
-    const series = [...historyPoints];
-
-    for (let i = 0; i < predictionCount; i++) {
-      const currentIdx = series.length;
-      let nextVal;
-      
-      if (currentIdx === 1) {
-        let initialB = initialBFormula(series[0], X);
-        if (direction === 'increase') initialB = Math.min(initialB, limit);
-        else initialB = Math.max(initialB, limit);
-        nextVal = Math.max(0, initialB);
-      } else {
-        nextVal = predictNext(series[currentIdx - 1], series[currentIdx - 2]);
-      }
-      
-      series.push(Math.round(Math.max(0, nextVal) * 100) / 100);
-    }
-
-    return { series, historyCount };
-  }
-
+  // NOTE: we now IGNORE preferFullHistory for BP/HR/BS usage in this file,
+  // because you want always 6 points in normal view.
   const points = new Array(6).fill(0);
   
   if (n === 0) {
@@ -177,7 +180,7 @@ const generatePredictionSeries = (history, X, initialBFormula, direction, limit,
 };
 
 
-// ------------- Date Helpers, fetchHistory, formatting (unchanged) --------------
+// ------------- Date Helpers & fetchHistory & formatting --------------
 const formatDateLabel = (date) => {
   const d = new Date(date);
   if (isNaN(d)) return "";
@@ -294,9 +297,9 @@ const getPredictionData = async (req, res) => {
 
     const gender = onboarding.o2Data?.gender;
     const height = onboarding.o2Data?.height_cm;
-    const weightHistory = fetchHistory(onboarding, "weight_kg");
+    const weightHistoryArr = fetchHistory(onboarding, "weight_kg");
 
-    const currentWeight = weightHistory.length > 0 ? weightHistory[weightHistory.length - 1] : null;
+    const currentWeight = weightHistoryArr.length > 0 ? weightHistoryArr[weightHistoryArr.length - 1] : null;
     const targetWeight = getTargetWeight(gender, height);
     const weightDirection = getWeightDirection(currentWeight, targetWeight);
 
@@ -330,14 +333,14 @@ const getPredictionData = async (req, res) => {
         stress:     { initialB: (A, X) => A + (5 * X),  direction: 'increase' },
     };
 
-    const generateArgs = (key, dbKey, isO7 = false, preferFullHistory = false, isWeightFlag = false) => [
+    const generateArgs = (key, dbKey, isO7 = false, _preferFullHistory = false, isWeightFlag = false) => [
         fetchHistory(onboarding, dbKey || key), 
         X, 
         formulas[key].initialB, 
         formulas[key].direction, 
         METRIC_LIMITS[key], 
         isO7, 
-        preferFullHistory,
+        false,              // <--- preferFullHistory: forced false to always keep 6 points
         isWeightFlag,
         targetWeight
     ];
@@ -345,12 +348,12 @@ const getPredictionData = async (req, res) => {
     const { series: csSeries, historyCount: csHist } = generatePredictionSeries(...generateArgs('cuoreScore', 'cuoreScore'));
     const { series: weightSeries, historyCount: weightHist } = generatePredictionSeries(...generateArgs('weight', 'weight_kg', false, false, true));
 
-    const { series: bpUpperSeries, historyCount: bpUpperHist } = generatePredictionSeries(...generateArgs('bpUpper', 'bp_upper', true, true));
-    const { series: bpLowerSeries, historyCount: bpLowerHist } = generatePredictionSeries(...generateArgs('bpLower', 'bp_lower', true, true));
-    const { series: hrSeries, historyCount: hrHist } = generatePredictionSeries(...generateArgs('heartRate', 'pulse', true, true));
+    const { series: bpUpperSeries, historyCount: bpUpperHist } = generatePredictionSeries(...generateArgs('bpUpper', 'bp_upper', true));
+    const { series: bpLowerSeries, historyCount: bpLowerHist } = generatePredictionSeries(...generateArgs('bpLower', 'bp_lower', true));
+    const { series: hrSeries, historyCount: hrHist } = generatePredictionSeries(...generateArgs('heartRate', 'pulse', true));
 
-    const { series: bsFastingSeries, historyCount: bsFastingHist } = generatePredictionSeries(...generateArgs('bsFasting', 'bs_f', true, true));
-    const { series: bsAfterMealsSeries, historyCount: bsAfterMealsHist } = generatePredictionSeries(...generateArgs('bsAfterMeals', 'bs_am', true, true));
+    const { series: bsFastingSeries, historyCount: bsFastingHist } = generatePredictionSeries(...generateArgs('bsFasting', 'bs_f', true));
+    const { series: bsAfterMealsSeries, historyCount: bsAfterMealsHist } = generatePredictionSeries(...generateArgs('bsAfterMeals', 'bs_am', true));
 
     const a1cFormula = (sugar) => sugar > 0 ? (sugar + 46.7) / 28.7 : 0;
     const a1cSeries = bsFastingSeries.map(sugarVal => Math.round(Math.min(Math.max(0, a1cFormula(sugarVal)), METRIC_LIMITS.a1c) * 100) / 100);
@@ -384,6 +387,24 @@ const getPredictionData = async (req, res) => {
     const cholLabels    = buildDateLabels(o7HistoryRaw, hdlHist, hdlSeries.length);
     const weightLabels  = buildDateLabels(o2HistoryRaw, weightHist, weightSeries.length);
     const lifestyleLabels = buildDateLabels(o5HistoryRaw, nutritionHist, nutritionSeries.length);
+
+    // ---------- BUILD EXTRA HISTORY ARRAY FOR BP / HR / BS (last 6 readings) ----------
+    const o7HistSorted = [...o7HistoryRaw].sort((a, b) => {
+      const ta = new Date(a.timestamp || a.createdAt || a.updatedAt || 0).getTime();
+      const tb = new Date(b.timestamp || b.createdAt || b.updatedAt || 0).getTime();
+      return ta - tb;
+    });
+
+    const last6 = o7HistSorted.slice(-6);
+
+    const metricHistory = last6.map(entry => ({
+      date: entry.timestamp || entry.createdAt || entry.updatedAt || null,
+      bp_upper: entry.data?.bp_upper ?? null,
+      bp_lower: entry.data?.bp_lower ?? null,
+      pulse: entry.data?.pulse ?? null,
+      bs_f: entry.data?.bs_f ?? null,
+      bs_am: entry.data?.bs_am ?? null,
+    }));
 
     const healthGraphs = [
       formatGraphData(
@@ -447,7 +468,14 @@ const getPredictionData = async (req, res) => {
       )
     ];
 
-    res.status(200).json({ status: 'success', data: healthGraphs });
+    // final payload now includes metricHistory for the history screen
+    res.status(200).json({ 
+      status: 'success', 
+      data: {
+        graphs: healthGraphs,
+        history: metricHistory
+      } 
+    });
 
   } catch (err) {
     console.error('Error in getPredictionData:', err);
