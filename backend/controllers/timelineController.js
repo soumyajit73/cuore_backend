@@ -575,62 +575,112 @@ exports.getHomeScreenData = async (req, res) => {
     const todayDate = dayjs.tz(dateString, TZ).toDate();
 
     try {
-        // await generateTimelineCardsForDay(userId, todayDate);
-        
-
-        // **MODIFIED**: Added getNudge back into the Promise.all
         const [userData, timelineData, cuoreScoreData, alerts, motivationalMessage] = await Promise.all([
             User.findById(userId).select('display_name profileImage').lean(),
             getTimelineData(userId, dateString),
             getCuoreScoreData(userId),
             getAlerts(userId),
-            getNudge(userId) // Now gets the dynamic nudge
+            getNudge(userId)
         ]);
 
-        if (!userData) return res.status(404).json({ message: 'User data not found.' });
+        if (!userData) {
+            return res.status(404).json({ message: 'User data not found.' });
+        }
 
+        // -----------------------------
+        // ⭐ FETCH ONBOARDING DOC
+        // -----------------------------
+        const onboarding = await Onboarding.findOne({ userId }).lean();
+
+        // if missing → assign current date (one-time fix)
+        let onboardedAt = onboarding?.onboardedAt
+            ? dayjs(onboarding.onboardedAt)
+            : dayjs(); // fallback for old users
+
+        // -----------------------------
+        // ⭐ CALCULATE TIME-TO-TARGET
+        // -----------------------------
+        const o2 = onboarding?.o2Data || {};
+        const o7 = onboarding?.o7Data || {};
+        const derived = onboarding?.derivedMetrics || {};
+
+        const currentWeight = o2.weight_kg || 0;
+        const targetWeight = derived.targetWeight || currentWeight;
+
+        const diffWeight = Math.abs(currentWeight - targetWeight);
+
+        const systolic = o7.bp_upper || 0;
+        const diffBP = Math.abs(systolic - 122);
+
+        const fastingSugar = o7.bs_f || 0;
+        const diffBS = Math.abs(fastingSugar - 100);
+
+        // YOUR EXACT ORIGINAL FORMULA
+        const timeToTarget = Math.max(
+            Math.ceil(diffWeight / 1.2),
+            Math.ceil(diffBP / 2),
+            Math.ceil(diffBS / 10)
+        ) + 1;
+
+        const targetDate = onboardedAt.add(timeToTarget, "month");
+        const monthsToGo = targetDate.diff(dayjs(), "month");
+
+        const programTimeline = {
+            startMonth: onboardedAt.format("MMM 'YY"),
+            targetMonth: targetDate.format("MMM 'YY"),
+            monthsToGo: Math.max(monthsToGo, 0)
+        };
+
+        // -----------------------------
+        // ⭐ MAIN PAYLOAD
+        // -----------------------------
         const payload = {
-    user: {
-        id: userId,
-        name: `Hi,${userData.display_name}`,
-        profileImage: userData.profileImage || 'https://example.com/images/mjohnson.png'
-    },
-    date: dateString,
+            user: {
+                id: userId,
+                name: `Hi,${userData.display_name}`,
+                profileImage: userData.profileImage || 'https://example.com/images/mjohnson.png'
+            },
 
-    summary: {
-        missedTasks: timelineData.missed,
-        totalTasks: timelineData.totalTasks,                               // ✅ total tasks
-        display: `${timelineData.missed}/${timelineData.totalTasks}`,      // ✅ UI friendly "missed/total"
-        message: `${timelineData.missed} ${timelineData.missed === 1 ? 'task' : 'tasks'} missed`,
-    },
+            date: dateString,
 
-    progress: {
-        periods: cuoreScoreData.history.map((score, i, arr) => ({
-            month: dayjs(score.date).format("MMM 'YY"),
-            value: score.cuoreScore,
-            userImage: i === arr.length - 1
-                ? (userData.profileImage || 'https://example.com/images/mjohnson.png')
-                : undefined
-        })),
-        goal: '>75%',
-        buttonText: 'Update Biomarkers'
-    },
+            summary: {
+                missedTasks: timelineData.missed,
+                totalTasks: timelineData.totalTasks,
+                display: `${timelineData.missed}/${timelineData.totalTasks}`,
+                message: `${timelineData.missed} ${timelineData.missed === 1 ? 'task' : 'tasks'} missed`,
+            },
 
-    motivationalMessage: motivationalMessage,
-    alerts: alerts,
+            progress: {
+                periods: cuoreScoreData.history.map((score, i, arr) => ({
+                    month: dayjs(score.date).format("MMM 'YY"),
+                    value: score.cuoreScore,
+                    userImage: i === arr.length - 1
+                        ? (userData.profileImage || 'https://example.com/images/mjohnson.png')
+                        : undefined
+                })),
+                goal: '>75%',
+                buttonText: 'Update Biomarkers'
+            },
 
-    dailySchedule: timelineData.dailySchedule,
+            motivationalMessage,
+            alerts,
+            dailySchedule: timelineData.dailySchedule,
+            streak: timelineData.streak,
 
-    streak: timelineData.streak   // ✅ streak stays
-};
+            // ⭐ NEW FIELD
+            programTimeline
+        };
 
+        return res.status(200).json(payload);
 
-        res.status(200).json(payload);
     } catch (error) {
         console.error('Error fetching home screen data:', error);
         res.status(500).json({ error: 'Internal server error.' });
     }
 };
+
+
+
 
 // -----------------------------------------------------
 // Timeline Helper

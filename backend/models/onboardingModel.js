@@ -145,6 +145,11 @@ o6History: [
   ],
   streakCount: { type: Number, default: 0 },
   lastConsultedDate: { type: Date, default: null },
+  onboardedAt: {
+  type: Date,
+  default: Date.now
+},
+
   lastStreakDate: { type: Date, default: null }
 
   // --- END OF HISTORY FIELDS ---
@@ -561,6 +566,15 @@ const calculateCuoreScore = (allData, allScores) => {
 exports.processAndSaveFinalSubmission = async (userId, payload) => {
   try {
     const existingDoc = await OnboardingModel.findOne({ userId });
+// ⭐ Ensure onboarding date is set only once
+if (!existingDoc?.onboardedAt) {
+    // If doc exists but onboardedAt missing → set it
+    if (existingDoc) {
+        existingDoc.onboardedAt = new Date();
+        await existingDoc.save();
+    }
+}
+
 
     if (!existingDoc && !payload.o2Data) {
       throw new ValidationError(
@@ -809,6 +823,12 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     pushOperations.scoreHistory = scoreSnapshot;
     if (Object.keys(pushOperations).length > 0)
       updateOperation.$push = pushOperations;
+
+// ⭐ For first-time onboarding, attach onboardedAt
+if (!existingData.onboardedAt) {
+    finalDataToSave.onboardedAt = new Date();
+}
+
 
     const finalOnboardingDoc = await OnboardingModel.findOneAndUpdate(
       { userId },
