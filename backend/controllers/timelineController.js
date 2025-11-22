@@ -585,15 +585,18 @@ exports.getHomeScreenData = async (req, res) => {
     const dateString = req.query.date || dayjs().tz(TZ).format("YYYY-MM-DD");
 
     try {
+        // ⭐ Fetch everything you need (cuoreScoreData was missing earlier)
         const [
             userData,
             timelineData,
+            cuoreScoreData,
             alerts,
             motivationalMessage,
             onboarding
         ] = await Promise.all([
             User.findById(userId).select("display_name profileImage").lean(),
             getTimelineData(userId, dateString),
+            getCuoreScoreData(userId),          // ← FIXED
             getAlerts(userId),
             getNudge(userId),
             Onboarding.findOne({ userId }).lean()
@@ -603,17 +606,17 @@ exports.getHomeScreenData = async (req, res) => {
             return res.status(404).json({ message: "User data not found." });
         }
 
-        // ⭐ ONBOARDING DATE
+        // ⭐ Set Onboarding date
         let onboardedAt = onboarding?.onboardedAt
             ? dayjs(onboarding.onboardedAt)
-            : dayjs();
+            : dayjs(); // fallback for old users
 
-        // ⭐ USE SAME METRICS AS CUORESCORE SCREEN
+        // ⭐ Calculate using SAME LOGIC as CuoreScore Screen
         const metrics = calculateAllMetrics(onboarding);
 
         let cuoreMonths = metrics?.timeToTarget ?? 0;
 
-        // ⭐ Clamp 18 max
+        // ⭐ Clamp to 18 months max
         const clampedMonths = Math.min(cuoreMonths, 18);
 
         // ⭐ Target date
@@ -630,9 +633,7 @@ exports.getHomeScreenData = async (req, res) => {
             user: {
                 id: userId,
                 name: `Hi,${userData.display_name}`,
-                profileImage:
-                    userData.profileImage ||
-                    "https://example.com/images/mjohnson.png",
+                profileImage: userData.profileImage || "https://example.com/images/mjohnson.png",
             },
 
             date: dateString,
@@ -641,23 +642,21 @@ exports.getHomeScreenData = async (req, res) => {
                 missedTasks: timelineData.missed,
                 totalTasks: timelineData.totalTasks,
                 display: `${timelineData.missed}/${timelineData.totalTasks}`,
-                message: `${timelineData.missed} ${
-                    timelineData.missed === 1 ? "task" : "tasks"
-                } missed`,
+                message: `${timelineData.missed} ${timelineData.missed === 1 ? "task" : "tasks"} missed`,
             },
 
+            // ⭐ PROGRESS FIX (cuoreScoreData now exists safely)
             progress: {
-                periods: (metrics?.history || []).map((score, i, arr) => ({
+                periods: cuoreScoreData.history.map((score, i, arr) => ({
                     month: dayjs(score.date).format("MMM 'YY"),
                     value: score.cuoreScore,
                     userImage:
                         i === arr.length - 1
-                            ? userData.profileImage ||
-                              "https://example.com/images/mjohnson.png"
-                            : undefined,
+                            ? userData.profileImage || "https://example.com/images/mjohnson.png"
+                            : undefined
                 })),
                 goal: ">75%",
-                buttonText: "Update Biomarkers",
+                buttonText: "Update Biomarkers"
             },
 
             motivationalMessage,
@@ -665,7 +664,7 @@ exports.getHomeScreenData = async (req, res) => {
             dailySchedule: timelineData.dailySchedule,
             streak: timelineData.streak,
 
-            programTimeline,
+            programTimeline
         };
 
         return res.status(200).json(payload);
