@@ -507,3 +507,55 @@ exports.getDoctorProfile = async (req, res) => {
         res.status(500).json({ error: 'Server error fetching profile.' });
     }
 };
+
+exports.doctorRequestCheckin = async (req, res) => {
+  try {
+    const { userId, message } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ message: "userId is required" });
+    }
+
+    const onboarding = await Onboarding.findOne({ userId });
+    if (!onboarding) {
+      return res.status(404).json({ message: "Patient not found" });
+    }
+
+    onboarding.doctorRequestedCheckin = true;
+    onboarding.doctorRequestedAt = new Date();
+    onboarding.doctorMessage = message || "Check-in requested by doctor.";
+    
+    await onboarding.save();
+
+    res.status(200).json({ 
+      status: "success", 
+      message: "Check-in request sent to user." 
+    });
+
+  } catch (err) {
+    console.error("Error in doctorRequestCheckin:", err);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+
+// exports.clearDoctorCheckin = async (req, res) => {
+//   try {
+//     const userId = req.user.userId;
+
+//     const onboarding = await Onboarding.findOne({ userId });
+//     if (!onboarding) return res.status(404).json({ message: "User not found" });
+
+//     onboarding.doctorRequestedCheckin = false;
+//     onboarding.doctorRequestedAt = null;
+//     onboarding.doctorMessage = null;
+
+//     await onboarding.save();
+
+//     res.status(200).json({ status: "cleared" });
+//   } catch (error) {
+//     console.error("Error clearing doctor check-in:", error);
+//     res.status(500).json({ error: "Internal server error" });
+//   }
+// };
+

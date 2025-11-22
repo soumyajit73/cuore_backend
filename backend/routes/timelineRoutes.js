@@ -37,4 +37,6 @@ router.get('/:userId/cuore-score-details' , protect, timelineController.getCuore
 router.delete('/:userId/reminders/:reminderId', protect, timelineController.deleteReminder);
 
 router.put("/:userId/complete/:reminderId", protect, timelineController.completeCard);
+
+// router.post('/:userId/clear-checkin', protect, timelineController.clearDoctorCheckin);
 module.exports = router;

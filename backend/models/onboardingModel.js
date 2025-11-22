@@ -150,9 +150,22 @@ o6History: [
   default: Date.now
 },
 
-  lastStreakDate: { type: Date, default: null }
+  lastStreakDate: { type: Date, default: null },
 
   // --- END OF HISTORY FIELDS ---
+  doctorRequestedCheckin: {
+    type: Boolean,
+    default: false
+},
+doctorRequestedAt: {
+    type: Date,
+    default: null
+},
+doctorMessage: {
+    type: String,
+    default: null
+}
+
 
 
 });

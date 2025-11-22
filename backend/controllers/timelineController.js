@@ -392,6 +392,15 @@ const getAlerts = async (userId) => {
   const { scores, o3Data, o7Data } = onboarding;
   const now = dayjs();
 
+// 🔴 If doctor requested check-in, show RED alert
+if (onboarding.doctorRequestedCheckin) {
+  alerts.push({
+    type: "red",
+    text:"Check-in requested by doctor.",
+    action: "Check-in"
+  });
+}
+
   // --- Red Alerts (Critical) ---
   if (o3Data.q5) {
     alerts.push({ type: 'red', text: 'Consult your doctor promptly.', action: 'Consult' });
@@ -1708,3 +1717,5 @@ exports.getCuoreScoreDetails = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
+
