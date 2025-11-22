@@ -578,76 +578,61 @@ const generateTimelineCardsForDay = async (userId, targetDate) => {
 // -----------------------------------------------------
 // Home Screen Controller
 // -----------------------------------------------------
+// const { calculateAllMetrics } = require("./timelineController");  // adjust path IF needed
+
 exports.getHomeScreenData = async (req, res) => {
     const userId = req.user.userId;
-    const dateString = req.query.date || dayjs().tz(TZ).format('YYYY-MM-DD');
-    const todayDate = dayjs.tz(dateString, TZ).toDate();
+    const dateString = req.query.date || dayjs().tz(TZ).format("YYYY-MM-DD");
 
     try {
-        const [userData, timelineData, cuoreScoreData, alerts, motivationalMessage] = await Promise.all([
-            User.findById(userId).select('display_name profileImage').lean(),
+        const [
+            userData,
+            timelineData,
+            alerts,
+            motivationalMessage,
+            onboarding
+        ] = await Promise.all([
+            User.findById(userId).select("display_name profileImage").lean(),
             getTimelineData(userId, dateString),
-            getCuoreScoreData(userId),
             getAlerts(userId),
-            getNudge(userId)
+            getNudge(userId),
+            Onboarding.findOne({ userId }).lean()
         ]);
 
         if (!userData) {
-            return res.status(404).json({ message: 'User data not found.' });
+            return res.status(404).json({ message: "User data not found." });
         }
 
-        // -----------------------------
-        // ⭐ FETCH ONBOARDING DOC
-        // -----------------------------
-        const onboarding = await Onboarding.findOne({ userId }).lean();
-
-        // if missing → assign current date (one-time fix)
+        // ⭐ ONBOARDING DATE
         let onboardedAt = onboarding?.onboardedAt
             ? dayjs(onboarding.onboardedAt)
-            : dayjs(); // fallback for old users
+            : dayjs();
 
-        // -----------------------------
-        // ⭐ CALCULATE TIME-TO-TARGET
-        // -----------------------------
-        const o2 = onboarding?.o2Data || {};
-        const o7 = onboarding?.o7Data || {};
-        const derived = onboarding?.derivedMetrics || {};
+        // ⭐ USE SAME METRICS AS CUORESCORE SCREEN
+        const metrics = calculateAllMetrics(onboarding);
 
-        const currentWeight = o2.weight_kg || 0;
-        const targetWeight = derived.targetWeight || currentWeight;
+        let cuoreMonths = metrics?.timeToTarget ?? 0;
 
-        const diffWeight = Math.abs(currentWeight - targetWeight);
+        // ⭐ Clamp 18 max
+        const clampedMonths = Math.min(cuoreMonths, 18);
 
-        const systolic = o7.bp_upper || 0;
-        const diffBP = Math.abs(systolic - 122);
-
-        const fastingSugar = o7.bs_f || 0;
-        const diffBS = Math.abs(fastingSugar - 100);
-
-        // YOUR EXACT ORIGINAL FORMULA
-        const timeToTarget = Math.max(
-            Math.ceil(diffWeight / 1.2),
-            Math.ceil(diffBP / 2),
-            Math.ceil(diffBS / 10)
-        ) + 1;
-
-        const targetDate = onboardedAt.add(timeToTarget, "month");
-        const monthsToGo = targetDate.diff(dayjs(), "month");
+        // ⭐ Target date
+        const targetDate = onboardedAt.add(clampedMonths, "month");
 
         const programTimeline = {
             startMonth: onboardedAt.format("MMM 'YY"),
             targetMonth: targetDate.format("MMM 'YY"),
-            monthsToGo: Math.max(monthsToGo, 0)
+            monthsToGo: clampedMonths
         };
 
-        // -----------------------------
-        // ⭐ MAIN PAYLOAD
-        // -----------------------------
+        // ⭐ Build response
         const payload = {
             user: {
                 id: userId,
                 name: `Hi,${userData.display_name}`,
-                profileImage: userData.profileImage || 'https://example.com/images/mjohnson.png'
+                profileImage:
+                    userData.profileImage ||
+                    "https://example.com/images/mjohnson.png",
             },
 
             date: dateString,
@@ -656,19 +641,23 @@ exports.getHomeScreenData = async (req, res) => {
                 missedTasks: timelineData.missed,
                 totalTasks: timelineData.totalTasks,
                 display: `${timelineData.missed}/${timelineData.totalTasks}`,
-                message: `${timelineData.missed} ${timelineData.missed === 1 ? 'task' : 'tasks'} missed`,
+                message: `${timelineData.missed} ${
+                    timelineData.missed === 1 ? "task" : "tasks"
+                } missed`,
             },
 
             progress: {
-                periods: cuoreScoreData.history.map((score, i, arr) => ({
+                periods: (metrics?.history || []).map((score, i, arr) => ({
                     month: dayjs(score.date).format("MMM 'YY"),
                     value: score.cuoreScore,
-                    userImage: i === arr.length - 1
-                        ? (userData.profileImage || 'https://example.com/images/mjohnson.png')
-                        : undefined
+                    userImage:
+                        i === arr.length - 1
+                            ? userData.profileImage ||
+                              "https://example.com/images/mjohnson.png"
+                            : undefined,
                 })),
-                goal: '>75%',
-                buttonText: 'Update Biomarkers'
+                goal: ">75%",
+                buttonText: "Update Biomarkers",
             },
 
             motivationalMessage,
@@ -676,17 +665,20 @@ exports.getHomeScreenData = async (req, res) => {
             dailySchedule: timelineData.dailySchedule,
             streak: timelineData.streak,
 
-            // ⭐ NEW FIELD
-            programTimeline
+            programTimeline,
         };
 
         return res.status(200).json(payload);
 
     } catch (error) {
-        console.error('Error fetching home screen data:', error);
-        res.status(500).json({ error: 'Internal server error.' });
+        console.error("Error fetching home screen data:", error);
+        res.status(500).json({ error: "Internal server error." });
     }
 };
+
+
+
+
 
 
 
