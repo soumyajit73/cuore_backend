@@ -306,6 +306,7 @@ function buildPatientProfile(user, onboardingDoc, allMeds) {
 
   return {
     name: user?.display_name || "User",
+    id: user?._id || null,
     age: o2.age || null,
     smoker: o4.smoking || "N/A",
     pastHO: pastHistory,
