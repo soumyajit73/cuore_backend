@@ -649,6 +649,7 @@ exports.getHomeScreenData = async (req, res) => {
             progress: {
                 periods: cuoreScoreData.history.map((score, i, arr) => ({
                     month: dayjs(score.date).format("MMM 'YY"),
+                    programTimeline,
                     value: score.cuoreScore,
                     userImage:
                         i === arr.length - 1
@@ -662,9 +663,9 @@ exports.getHomeScreenData = async (req, res) => {
             motivationalMessage,
             alerts,
             dailySchedule: timelineData.dailySchedule,
-            streak: timelineData.streak,
+            streak: timelineData.streak
 
-            programTimeline
+            
         };
 
         return res.status(200).json(payload);
