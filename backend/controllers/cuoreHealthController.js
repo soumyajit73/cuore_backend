@@ -73,7 +73,7 @@ exports.getCuoreHealthData = async (req, res) => {
       smoker: smokerStatus,
       pastHO: pastHistory, 
       medications: medications,
-      lastConsulted: onboardingDoc.lastConsultedDate || currentDate,
+      lastConsulted: onboardingDoc.lastConsultedDate ?? null,
     };
 
     // --- 3. PROCESS DATA FOR POINT 2 (HEALTH OBSERVATIONS WITH COLOR) ---
