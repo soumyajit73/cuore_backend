@@ -19,12 +19,12 @@ exports.updateProfile = async (req, res) => {
   try {
     const updateFields = {};
 
-    // Only update user name if explicitly intended
-    if (display_name !== undefined) {
+    // Update user display name ONLY if front-end sends it
+    if (display_name !== undefined && display_name !== "") {
       updateFields.display_name = display_name;
     }
 
-    // Proper caregiver update
+    // Update caregiver details
     if (caregiver_name !== undefined) {
       updateFields.caregiver_name = caregiver_name;
     }
@@ -32,14 +32,21 @@ exports.updateProfile = async (req, res) => {
       updateFields.caregiver_mobile = caregiver_mobile;
     }
 
-    // Doctor fields
+    // Update doctor info
     if (doctor_name !== undefined) updateFields.doctor_name = doctor_name;
     if (doctor_phone !== undefined) updateFields.doctor_phone = doctor_phone;
     if (doctor_code !== undefined) updateFields.doctor_code = doctor_code;
 
-    if (phone !== undefined) updateFields.phone = phone;
-    if (consent_flags !== undefined) updateFields.consent_flags = consent_flags;
+    // Phone update — ONLY if non-empty
+    if (phone !== undefined && phone !== "") {
+      updateFields.phone = phone;
+    }
 
+    if (consent_flags !== undefined) {
+      updateFields.consent_flags = consent_flags;
+    }
+
+    // No fields to update?
     if (Object.keys(updateFields).length === 0) {
       return res.status(400).json({ error: "No valid fields provided to update." });
     }
@@ -72,6 +79,7 @@ exports.updateProfile = async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 };
+
 
 
 exports.getProfile = async (req, res) => {
