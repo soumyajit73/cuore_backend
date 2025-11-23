@@ -1,5 +1,6 @@
 const User = require('../models/User'); 
-const mongoose = require('mongoose'); // <-- MUST BE ADDED
+const mongoose = require('mongoose');
+const Doctor = require("../models/Doctor");  // <-- MUST BE ADDED
 
 exports.updateProfile = async (req, res) => {
   const userIdFromToken = req.user.userId;
@@ -81,10 +82,21 @@ exports.getProfile = async (req, res) => {
   try {
     const userIdFromToken = req.user.userId;
 
+    // Fetch user
     const user = await User.findById(userIdFromToken).lean();
-
     if (!user) {
       return res.status(404).json({ status: "error", message: "User not found" });
+    }
+
+    // ----------------------------------------
+    // ⭐ FETCH DOCTOR DETAILS (if linked)
+    // ----------------------------------------
+    let doctorDetails = null;
+
+    if (user.doctor_code) {
+      doctorDetails = await Doctor.findOne({
+        doctorCode: user.doctor_code
+      }).lean();
     }
 
     return res.status(200).json({
@@ -94,6 +106,7 @@ exports.getProfile = async (req, res) => {
           phone: user.phone,
           display_name: user.display_name || "",
           isPhoneVerified: user.isPhoneVerified,
+
           consent_flags: user.consent_flags || {},
 
           dob: user.dob || null,
@@ -108,15 +121,28 @@ exports.getProfile = async (req, res) => {
           updatedAt: user.updatedAt
         },
 
-        // Hardcoded doctor & caregiver data (not editable)
-        doctor: {
-          name: "Dr. Sharma",
-          mobile: "+919999999999",
-          doctorCode: user.doctor_code || "DOC123"
-        },
+        // -------------------------------------
+        // ⭐ DOCTOR INFO (REAL one from DB)
+        // -------------------------------------
+        doctor: doctorDetails
+          ? {
+              name: doctorDetails.displayName,
+              mobile: doctorDetails.mobileNumber,
+              doctorCode: doctorDetails.doctorCode,
+              photoUrl: doctorDetails.photoUrl || null
+            }
+          : {
+              name: null,
+              mobile: null,
+              doctorCode: null
+            },
+
+        // -------------------------------------
+        // ⭐ CAREGIVER INFO
+        // -------------------------------------
         caregiver: {
-          name: "Primary Caregiver",
-          mobile: user.caregiver_mobile || "+918888888888"
+          name: user.caregiver_name || null,
+          mobile: user.caregiver_mobile || null
         }
       }
     });
