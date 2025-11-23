@@ -5,7 +5,12 @@ const Doctor = require("../models/Doctor");  // <-- MUST BE ADDED
 exports.updateProfile = async (req, res) => {
   const userIdFromToken = req.user.userId;
 
-  // Extract fields
+  // Protect core fields if caregiver is being updated
+  if (req.body.caregiver_name || req.body.caregiver_mobile) {
+    delete req.body.display_name;  // Prevent name overwrite
+    delete req.body.phone;         // Prevent phone overwrite
+  }
+
   const {
     phone,
     display_name,
@@ -18,11 +23,8 @@ exports.updateProfile = async (req, res) => {
   } = req.body;
 
   try {
-    const userIdObject = new mongoose.Types.ObjectId(userIdFromToken);
-
     const updateFields = {};
 
-    // Only update if NON-EMPTY and NOT null
     const safeAssign = (key, value) => {
       if (value !== undefined && value !== null && value !== "") {
         updateFields[key] = value;
@@ -43,41 +45,23 @@ exports.updateProfile = async (req, res) => {
       return res.status(400).json({ error: "No valid fields provided." });
     }
 
-    const updatedUser = await User.findOneAndUpdate(
-      { _id: userIdObject },
+    const updatedUser = await User.findByIdAndUpdate(
+      userIdFromToken,
       { $set: updateFields },
       { new: true, runValidators: true }
     );
 
-    if (!updatedUser) {
-      return res.status(404).json({ error: "User not found." });
-    }
-
     return res.status(200).json({
       message: "Profile updated successfully",
-      user_id: updatedUser._id,
-      profile: {
-        display_name: updatedUser.display_name,
-        caregiver_name: updatedUser.caregiver_name,
-        caregiver_mobile: updatedUser.caregiver_mobile,
-        doctor_name: updatedUser.doctor_name,
-        doctor_phone: updatedUser.doctor_phone,
-        doctor_code: updatedUser.doctor_code
-      }
+      profile: updatedUser
     });
 
   } catch (error) {
     console.error("Profile Update Error:", error);
-
-    if (error.code === 11000 && error.keyPattern?.phone) {
-      return res.status(400).json({
-        error: "This phone number is already registered."
-      });
-    }
-
     return res.status(500).json({ error: "Internal server error." });
   }
 };
+
 
 
 
