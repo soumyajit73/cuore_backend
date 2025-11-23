@@ -5,9 +5,10 @@ const Doctor = require("../models/Doctor");  // <-- MUST BE ADDED
 exports.updateProfile = async (req, res) => {
   const userIdFromToken = req.user.userId;
 
+  // Extract fields
   const {
-    display_name,
     phone,
+    display_name,
     consent_flags,
     caregiver_name,
     caregiver_mobile,
@@ -17,42 +18,33 @@ exports.updateProfile = async (req, res) => {
   } = req.body;
 
   try {
+    const userIdObject = new mongoose.Types.ObjectId(userIdFromToken);
+
     const updateFields = {};
 
-    // Update user display name ONLY if front-end sends it
-    if (display_name !== undefined && display_name !== "") {
-      updateFields.display_name = display_name;
-    }
+    // Only update if NON-EMPTY and NOT null
+    const safeAssign = (key, value) => {
+      if (value !== undefined && value !== null && value !== "") {
+        updateFields[key] = value;
+      }
+    };
 
-    // Update caregiver details
-    if (caregiver_name !== undefined) {
-      updateFields.caregiver_name = caregiver_name;
-    }
-    if (caregiver_mobile !== undefined) {
-      updateFields.caregiver_mobile = caregiver_mobile;
-    }
+    safeAssign("display_name", display_name);
+    safeAssign("phone", phone);
+    safeAssign("caregiver_name", caregiver_name);
+    safeAssign("caregiver_mobile", caregiver_mobile);
+    safeAssign("doctor_name", doctor_name);
+    safeAssign("doctor_phone", doctor_phone);
+    safeAssign("doctor_code", doctor_code);
 
-    // Update doctor info
-    if (doctor_name !== undefined) updateFields.doctor_name = doctor_name;
-    if (doctor_phone !== undefined) updateFields.doctor_phone = doctor_phone;
-    if (doctor_code !== undefined) updateFields.doctor_code = doctor_code;
+    if (consent_flags) updateFields.consent_flags = consent_flags;
 
-    // Phone update — ONLY if non-empty
-    if (phone !== undefined && phone !== "") {
-      updateFields.phone = phone;
-    }
-
-    if (consent_flags !== undefined) {
-      updateFields.consent_flags = consent_flags;
-    }
-
-    // No fields to update?
     if (Object.keys(updateFields).length === 0) {
-      return res.status(400).json({ error: "No valid fields provided to update." });
+      return res.status(400).json({ error: "No valid fields provided." });
     }
 
-    const updatedUser = await User.findByIdAndUpdate(
-      userIdFromToken,
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: userIdObject },
       { $set: updateFields },
       { new: true, runValidators: true }
     );
@@ -62,23 +54,31 @@ exports.updateProfile = async (req, res) => {
     }
 
     return res.status(200).json({
-      message: "Profile updated successfully.",
+      message: "Profile updated successfully",
+      user_id: updatedUser._id,
       profile: {
         display_name: updatedUser.display_name,
         caregiver_name: updatedUser.caregiver_name,
         caregiver_mobile: updatedUser.caregiver_mobile,
         doctor_name: updatedUser.doctor_name,
         doctor_phone: updatedUser.doctor_phone,
-        doctor_code: updatedUser.doctor_code,
-        phone: updatedUser.phone
+        doctor_code: updatedUser.doctor_code
       }
     });
 
   } catch (error) {
     console.error("Profile Update Error:", error);
-    return res.status(500).json({ error: "Internal server error" });
+
+    if (error.code === 11000 && error.keyPattern?.phone) {
+      return res.status(400).json({
+        error: "This phone number is already registered."
+      });
+    }
+
+    return res.status(500).json({ error: "Internal server error." });
   }
 };
+
 
 
 
