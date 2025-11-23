@@ -1553,53 +1553,85 @@ exports.getCuoreScoreDetails = async (req, res) => {
         ? calculateAllMetrics(onboardingDoc)
         : {};
 
-    const recommendedExercise =
-      typeof calculateRecommendedExercise === "function"
-        ? calculateRecommendedExercise(onboardingDoc.o5Data || {})
-        : 15;
-
     const o7 = onboardingDoc.o7Data || {};
 
-    // 🩺 Prefer manual values from o7Data if available
+    // ------------------------------
+    // ⭐ UNIFIED COLOR LOGIC STARTS
+    // ------------------------------
+
+    const getStatus = (val, type) => {
+      if (val == null || val === "") return "unknown";
+      const num = parseFloat(val);
+
+      switch (type) {
+        case "bs_pp":
+          return num <= 140 ? "green" : "red";
+
+        case "a1c":
+          return num <= 5.6 ? "green" : "red";
+
+        case "tg_hdl":
+          if (num > 4.0) return "red";
+          if (num >= 2.8) return "orange";
+          return "green";
+
+        case "hscrp":
+          return num > 0.3 ? "orange" : "green";
+
+        default:
+          return "unknown";
+      }
+    };
+
+    const getHrStatus = (val) => {
+      if (val == null || val === "") return "unknown";
+      const num = parseFloat(val);
+      if (num < 50 || num > 120) return "red";
+      if ((num >= 50 && num <= 60) || (num >= 110 && num <= 120)) return "orange";
+      return "green";
+    };
+
+    // ⭐ BP Combined Logic
+    let bpString = null;
+    let bpStatus = "unknown";
+
+    if (o7.bp_upper && o7.bp_lower) {
+      const sys = parseFloat(o7.bp_upper);
+      const dia = parseFloat(o7.bp_lower);
+
+      bpString = `${sys}/${dia}`;
+
+      const sysStatus =
+        sys < 100 ? "orange" :
+        sys <= 130 ? "green" :
+        sys <= 145 ? "orange" :
+        "red";
+
+      const diaStatus =
+        dia < 64 ? "orange" :
+        dia <= 82 ? "green" :
+        dia <= 95 ? "orange" :
+        "red";
+
+      if (sysStatus === "red" || diaStatus === "red") bpStatus = "red";
+      else if (sysStatus === "orange" || diaStatus === "orange") bpStatus = "orange";
+      else bpStatus = "green";
+    }
+
+    // ⭐ TG/HDL
+    const tg_hdl_ratio = metrics?.trigHDLRatio?.current;
+    let tgStatus = getStatus(tg_hdl_ratio, "tg_hdl");
+
+    // ------------------------------
+    // ⭐ UNIFIED COLOR LOGIC ENDS
+    // ------------------------------
+
     const bp_upper = safeNum(o7.bp_upper ?? metrics?.bloodPressure?.upper?.current);
     const bp_lower = safeNum(o7.bp_lower ?? metrics?.bloodPressure?.lower?.current);
     const bs_f = safeNum(o7.bs_f ?? metrics?.bloodSugar?.fasting?.current);
     const bs_am = safeNum(o7.bs_am ?? metrics?.bloodSugar?.afterMeal?.current);
     const A1C = safeNum(o7.A1C ?? metrics?.bloodSugar?.A1C?.current);
-    const tg_hdl_ratio = safeNum(metrics?.trigHDLRatio?.current);
     const body_fat = safeNum(o7.body_fat ?? metrics?.bodyFat?.current);
-
-    // 🧠 BP Status logic
-    const upperStatus =
-      bp_upper == null
-        ? "unknown"
-        : bp_upper < 100
-        ? "orange"
-        : bp_upper <= 130
-        ? "green"
-        : bp_upper <= 145
-        ? "orange"
-        : "red";
-
-    const lowerStatus =
-      bp_lower == null
-        ? "unknown"
-        : bp_lower < 64
-        ? "orange"
-        : bp_lower <= 82
-        ? "green"
-        : bp_lower <= 95
-        ? "orange"
-        : "red";
-
-    // 🧠 FIXED: Correct Trig/HDL logic (Target <2.6; <2.8 green; 2.8–4.0 orange; >4.0 red)
-    let tgStatus = "unknown";
-    const tgTarget = 2.6;
-    if (tg_hdl_ratio != null && !isNaN(tg_hdl_ratio)) {
-      if (tg_hdl_ratio > 4.0) tgStatus = "red";
-      else if (tg_hdl_ratio >= 2.8) tgStatus = "orange";
-      else tgStatus = "green";
-    }
 
     const responseBody = {
       health_metrics: {
@@ -1608,106 +1640,120 @@ exports.getCuoreScoreDetails = async (req, res) => {
           metrics?.cuoreScore ??
           metrics?.scores?.cuoreScore ??
           0,
+
         estimated_time_to_target: {
           value: metrics?.timeToTarget ?? 0,
           unit: "months",
         },
+
         metabolic_age: {
           value: metrics?.metabolicAge?.metabolicAge ?? 0,
           unit: "years",
           gap: metrics?.metabolicAge?.gap ?? 0,
         },
+
         weight: {
           current: metrics?.weight?.current ?? null,
           target: metrics?.weight?.target ?? null,
           unit: "kg",
           status: metrics?.weight?.status ?? "unknown",
         },
+
         bmi: {
           value: metrics?.bmi?.current ?? null,
           target: metrics?.bmi?.target ?? null,
           status: metrics?.bmi?.status ?? "unknown",
         },
+
         lifestyle_score: {
           value: metrics?.lifestyle?.score ?? null,
           target: 75,
           unit: "%",
           status: metrics?.lifestyle?.status ?? "unknown",
         },
+
         recommended: {
           calories: {
             value: metrics?.recommendedCalories ?? null,
             unit: "kcal",
           },
           exercise: {
-            value: recommendedExercise,
+            value: metrics?.recommendedExercise ?? 15,
             unit: "min",
           },
         },
-      vitals: {
-  blood_pressure: {
-    current:
-      bp_upper != null && bp_lower != null
-        ? `${bp_upper}/${bp_lower}`
-        : null,
-    target: "120/80",
-    status: {
-      upper: upperStatus,
-      lower: lowerStatus,
-    },
-  },
-  blood_sugar: {
-    fasting: {
-      value: bs_f,
-      target: 100,
-      status: bs_f == null ? "unknown" : bs_f <= 100 ? "green" : "red",
-    },
-    after_meal: {
-      value: bs_am,
-      target: 140,
-      status: bs_am == null ? "unknown" : bs_am <= 140 ? "green" : "red",
-    },
-    A1C: {
-      value: A1C,
-      target: 5.6,
-      status: A1C == null ? "unknown" : A1C <= 5.6 ? "green" : "red",
-    },
-  },
 
-  // 👇 Conditionally include cholesterol (tgl/hdl)
-  ...(o7.Trig != null &&
-  o7.HDL != null &&
-  o7.Trig !== "" &&
-  o7.HDL !== ""
-    ? {
-        cholesterol: {
-          tg_hdl_ratio: {
-            value: tg_hdl_ratio,
-            target: tgTarget,
-            status: tgStatus,
+        vitals: {
+          heartRate: {
+            value: o7.pulse || null,
+            status: getHrStatus(o7.pulse),
+          },
+
+          blood_pressure: {
+            current: bpString,
+            target: "120/80",
+            status: {
+              upper: bpStatus,
+              lower: bpStatus,
+            },
+          },
+
+          blood_sugar: {
+            fasting: {
+              value: bs_f,
+              target: 100,
+              status: bs_f == null ? "unknown" : bs_f <= 100 ? "green" : "red",
+            },
+            after_meal: {
+              value: bs_am,
+              target: 140,
+              status: bs_am == null ? "unknown" : bs_am <= 140 ? "green" : "red",
+            },
+            A1C: {
+              value: A1C,
+              target: 5.6,
+              status: getStatus(A1C, "a1c"),
+            },
+          },
+
+          ...(
+            o7.Trig != null &&
+            o7.HDL != null &&
+            o7.Trig !== "" &&
+            o7.HDL !== ""
+              ? {
+                  cholesterol: {
+                    tg_hdl_ratio: {
+                      value: tg_hdl_ratio,
+                      target: 2.6,
+                      status: tgStatus,
+                    },
+                  },
+                }
+              : {}
+          ),
+
+          HsCRP: {
+            value: o7.HsCRP || null,
+            status: getStatus(o7.HsCRP, "hscrp"),
+          },
+
+          body_fat: {
+            value: body_fat,
+            target: metrics?.bodyFat?.target ?? 23,
+            unit: "%",
+            status: metrics?.bodyFat?.status ?? "unknown",
           },
         },
-      }
-    : {}),
-
-
-  body_fat: {
-    value: body_fat,
-    target: metrics?.bodyFat?.target ?? 23,
-    unit: "%",
-    status: metrics?.bodyFat?.status ?? "unknown",
-  },
-},
 
         main_focus: metrics?.mainFocus ?? [],
       },
     };
 
     return res.status(200).json(responseBody);
+
   } catch (err) {
     console.error("Error in getCuoreScoreDetails:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
 };
-
-
