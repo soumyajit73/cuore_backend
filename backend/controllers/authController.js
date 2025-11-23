@@ -1,5 +1,7 @@
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
+const crypto = require("crypto");
+
 
 let nanoid;
 (async () => {
@@ -377,4 +379,147 @@ exports.resendOtp = async (req, res) => {
 
 exports.logout = async (req, res) => {
     return res.status(200).json({ message: "Logout successful. Tokens cleared." });
+};
+
+
+exports.requestCaregiverOtp = async (req, res) => {
+  const { phone } = req.body;
+
+  try {
+    // 1. Basic validation
+    if (!phone || !phone.startsWith("+")) {
+      return res.status(400).json({
+        error: "A valid mobile number in international format is required (e.g. +919876543210).",
+      });
+    }
+
+    // 2. Find the user where this phone is saved as caregiver_mobile
+    const user = await User.findOne({ caregiver_mobile: phone }).lean();
+
+    if (!user) {
+      return res.status(404).json({
+        error: "No user found for this caregiver number.",
+      });
+    }
+
+    // 3. Generate OTP and store as usual
+    const otp = generateSimpleOtp();
+    const otpHash = hashOtp(otp);
+    const requestId = crypto.randomBytes(16).toString("hex");
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+
+    await OtpRequest.create({
+      request_id: requestId,
+      phone,
+      otpHash,
+      expiresAt,
+      lastRequestedAt: new Date(),
+      // 👇 store context so we know this is caregiver login
+      loginContext: {
+        type: "caregiver",
+        userId: user._id,      // the patient user
+      },
+    });
+
+    console.log(
+      `[AUTH][CAREGIVER] Test OTP for caregiver ${phone}: ${otp} (Request ID: ${requestId})`
+    );
+
+    return res.status(201).json({
+      request_id: requestId,
+      test_otp_code: otp, // remove in production
+      message: "A verification code has been sent to caregiver. Please verify to continue.",
+    });
+  } catch (error) {
+    console.error("Error in requestCaregiverOtp:", error);
+    return res
+      .status(500)
+      .json({ error: "Internal server error during caregiver OTP request." });
+  }
+};
+
+
+// ---------------- CAREGIVER LOGIN: VERIFY OTP ----------------
+exports.verifyCaregiverOtp = async (req, res) => {
+  const { request_id, otp_code } = req.body;
+
+  if (!request_id || !otp_code) {
+    return res.status(400).json({ error: "Missing required fields." });
+  }
+
+  try {
+    // 1. Find OTP entry
+    const otpEntry = await OtpRequest.findOne({ request_id });
+
+    if (!otpEntry) {
+      return res
+        .status(401)
+        .json({ error: "OTP_INVALID (Code not found or expired.)" });
+    }
+
+    // 2. Check expiration
+    if (otpEntry.expiresAt < new Date()) {
+      await OtpRequest.deleteOne({ request_id });
+      return res.status(410).json({ error: "OTP_EXPIRED (This code has expired.)" });
+    }
+
+    // 3. Verify OTP
+    const isOtpValid = compareOtp(otp_code, otpEntry.otpHash);
+    if (!isOtpValid) {
+      return res
+        .status(401)
+        .json({ error: "OTP_INVALID (That code didn't match.)" });
+    }
+
+    // 4. Ensure this OTP was issued for caregiver login
+    const ctx = otpEntry.loginContext || {};
+    if (ctx.type !== "caregiver" || !ctx.userId) {
+      // Safety check: wrong context
+      await OtpRequest.deleteOne({ request_id });
+      return res
+        .status(400)
+        .json({ error: "INVALID_CONTEXT (Not a caregiver OTP request.)" });
+    }
+
+    // 5. Fetch the *user* (patient) this caregiver is linked to
+    const user = await User.findById(ctx.userId);
+    if (!user) {
+      await OtpRequest.deleteOne({ request_id });
+      return res
+        .status(404)
+        .json({ error: "LINKED_USER_NOT_FOUND (Patient record missing.)" });
+    }
+
+    // 6. Clean up OTP entry
+    await OtpRequest.deleteOne({ request_id });
+
+    // 7. Generate tokens AS USUAL (same as user login)
+    //    If your generateTokens supports payload/roles, you can pass { role: 'caregiver' } later.
+    const accessToken = jwt.sign(
+    { userId: user._id, role: "caregiver" },
+    JWT_ACCESS_SECRET,
+    { expiresIn: ACCESS_EXPIRY }
+);
+
+const refreshToken = jwt.sign(
+    { userId: user._id, role: "caregiver" },
+    JWT_REFRESH_SECRET,
+    { expiresIn: REFRESH_EXPIRY }
+);
+
+
+    // 8. Respond
+    return res.status(200).json({
+      user_id: user._id,
+      caregiver_login: true,
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      expires_in: 18000,
+    });
+  } catch (error) {
+    console.error("Error in verifyCaregiverOtp:", error);
+    return res
+      .status(500)
+      .json({ error: "SERVER_ERROR (Something went wrong during caregiver login.)" });
+  }
 };

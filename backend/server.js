@@ -62,6 +62,7 @@ app.get("/", (req, res) => {
 
 // Authentication
 app.use('/api/v1/auth', authRoutes);
+// app.use('api/v1/caregiver', authRoutes);
 
 // Onboarding (Uses two separate routers on the same base path, which is okay)
 app.use('/api/v1/onboarding', onboardingRoutes);

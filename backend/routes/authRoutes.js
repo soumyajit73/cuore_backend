@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 
+
 router.post('/create-account', authController.createAccount);
 
 // 2. Verify OTP and finalize registration (New User)
@@ -18,5 +19,10 @@ router.post('/otp/resend', authController.resendOtp);
 
 // D. Logout
 router.post('/logout', authController.logout);
+
+// caregiver login routes
+router.post('/caregiver/otp/request', authController.requestCaregiverOtp);
+
+router.post('/caregiver/otp/verify', authController.verifyCaregiverOtp);
 
 module.exports = router;

@@ -26,6 +26,10 @@ const otpRequestSchema = new mongoose.Schema({
      userData: {
         type: Object,
         // required: true
+    },
+      loginContext: {
+        type: Object,   // simple, no strict validation required
+        default: null,
     }
 
 }, { timestamps: true });
