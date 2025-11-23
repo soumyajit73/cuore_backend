@@ -95,7 +95,7 @@ exports.getCuoreHealthData = async (req, res) => {
           if (num >= 2.8) return "orange";
           return "green";
         case "hscrp": // HsCRP
-          return num > 0.3 ? "orange" : "green"; 
+          return num > 0.3 ? "red" : "green"; 
         default:
           return "unknown";
       }

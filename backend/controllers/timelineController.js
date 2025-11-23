@@ -1576,7 +1576,7 @@ exports.getCuoreScoreDetails = async (req, res) => {
           return "green";
 
         case "hscrp":
-          return num > 0.3 ? "orange" : "green";
+          return num > 0.3 ? "red" : "green";
 
         default:
           return "unknown";
