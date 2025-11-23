@@ -5,41 +5,47 @@ const Doctor = require("../models/Doctor");  // <-- MUST BE ADDED
 exports.updateProfile = async (req, res) => {
   const userIdFromToken = req.user.userId;
 
-  // ✅ Extract only potential fields from request
   const {
-    phone,
     display_name,
+    phone,
     consent_flags,
     caregiver_name,
     caregiver_mobile,
     doctor_name,
-    doctor_code,
-    doctor_phone
+    doctor_phone,
+    doctor_code
   } = req.body;
 
   try {
-    const userIdObject = new mongoose.Types.ObjectId(userIdFromToken);
-
-    // ✅ Build update object dynamically (only add fields user sent)
     const updateFields = {};
 
-    if (display_name) updateFields.display_name = display_name;
-    if (phone) updateFields.phone = phone;
-    if (consent_flags) updateFields.consent_flags = consent_flags;
-    if (caregiver_name) updateFields.caregiver_name = caregiver_name;
-    if (caregiver_mobile) updateFields.caregiver_mobile = caregiver_mobile;
-    if (doctor_name) updateFields.doctor_name = doctor_name;
-    if (doctor_phone) updateFields.doctor_phone = doctor_phone;
-    if (doctor_code) updateFields.doctor_code = doctor_code;
+    // Only update user name if explicitly intended
+    if (display_name !== undefined) {
+      updateFields.display_name = display_name;
+    }
 
-    // ✅ If no fields provided, throw an error
+    // Proper caregiver update
+    if (caregiver_name !== undefined) {
+      updateFields.caregiver_name = caregiver_name;
+    }
+    if (caregiver_mobile !== undefined) {
+      updateFields.caregiver_mobile = caregiver_mobile;
+    }
+
+    // Doctor fields
+    if (doctor_name !== undefined) updateFields.doctor_name = doctor_name;
+    if (doctor_phone !== undefined) updateFields.doctor_phone = doctor_phone;
+    if (doctor_code !== undefined) updateFields.doctor_code = doctor_code;
+
+    if (phone !== undefined) updateFields.phone = phone;
+    if (consent_flags !== undefined) updateFields.consent_flags = consent_flags;
+
     if (Object.keys(updateFields).length === 0) {
       return res.status(400).json({ error: "No valid fields provided to update." });
     }
 
-    // ✅ Perform the update
-    const updatedUser = await User.findOneAndUpdate(
-      { _id: userIdObject },
+    const updatedUser = await User.findByIdAndUpdate(
+      userIdFromToken,
       { $set: updateFields },
       { new: true, runValidators: true }
     );
@@ -48,32 +54,22 @@ exports.updateProfile = async (req, res) => {
       return res.status(404).json({ error: "User not found." });
     }
 
-    // ✅ Return clean payload
     return res.status(200).json({
       message: "Profile updated successfully.",
-      user_id: updatedUser._id,
       profile: {
-        display_name: updatedUser.display_name || null,
-        phone: updatedUser.phone || null,
-        caregiver_name: updatedUser.caregiver_name || null,
-        caregiver_mobile: updatedUser.caregiver_mobile || null,
-        doctor_name: updatedUser.doctor_name || null,
-        doctor_phone: updatedUser.doctor_phone || null,
-        doctor_code: updatedUser.doctor_code || null,
-      },
+        display_name: updatedUser.display_name,
+        caregiver_name: updatedUser.caregiver_name,
+        caregiver_mobile: updatedUser.caregiver_mobile,
+        doctor_name: updatedUser.doctor_name,
+        doctor_phone: updatedUser.doctor_phone,
+        doctor_code: updatedUser.doctor_code,
+        phone: updatedUser.phone
+      }
     });
 
   } catch (error) {
     console.error("Profile Update Error:", error);
-
-    // ✅ Handle duplicate phone gracefully
-    if (error.code === 11000 && error.keyPattern?.phone) {
-      return res.status(400).json({
-        error: "This phone number is already registered with another account."
-      });
-    }
-
-    return res.status(500).json({ error: "Internal server error during profile update." });
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 
