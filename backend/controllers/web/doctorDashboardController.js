@@ -443,7 +443,7 @@ profileData.lifestyleColor = getColorStatus(lifestyleScore, "lifestyle");
             doctorInfo,
             patientProfile: profileData,
             predictDataPoints,
-            alerts: medicalAlerts,
+            // alerts: medicalAlerts,
             summaryOfRecords
         });
 
