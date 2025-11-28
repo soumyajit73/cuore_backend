@@ -7,4 +7,6 @@ const { protect } = require('../middleware/authMiddleware'); // Import the JWT p
 router.put('/:userId/profile', protect, userController.updateProfile);
 router.get("/:userId/profile", protect, userController.getProfile);
 
+router.get('/find-doctor', protect, userController.searchDoctors);
+
 module.exports = router;

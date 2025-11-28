@@ -140,3 +140,71 @@ exports.getProfile = async (req, res) => {
     return res.status(500).json({ status: "error", message: "Internal Server Error" });
   }
 };
+
+
+// --- SEARCH DOCTORS FOR MOBILE APP ---
+exports.searchDoctors = async (req, res) => {
+  try {
+    const { search } = req.query;
+    let query = {};
+    
+    // If user typed something, filter by name (case-insensitive)
+    if (search) {
+      query.displayName = { $regex: search, $options: "i" };
+    }
+
+    // 1. Fetch Doctors
+    const doctors = await Doctor.find(query)
+      .select("displayName address fees patients mobileNumber doctorCode") 
+      .lean();
+
+    // 2. Format Data for the UI Card
+    const formattedDoctors = doctors.map((doc) => {
+      
+      const count = doc.patients ? doc.patients.length : 0;
+
+      // --- FEE FORMATTING LOGIC ---
+      let feeDisplay = "Consult for fees";
+      
+      if (doc.fees) {
+          if (typeof doc.fees === 'object') {
+             // Create an array of fee strings dynamically
+             const parts = [];
+             
+             // Check for keys and add them if they exist
+             if (doc.fees.threeMonths) parts.push(`3 months: ₹${doc.fees.threeMonths}`);
+             if (doc.fees.sixMonths)   parts.push(`6 months: ₹${doc.fees.sixMonths}`);
+             if (doc.fees.twelveMonths) parts.push(`12 months: ₹${doc.fees.twelveMonths}`);
+             
+             // Join them. If empty (fees object exists but empty), keep default.
+             if (parts.length > 0) {
+                 // Join with a visible separator like spaces or a pipe
+                 feeDisplay = parts.join("   "); 
+             }
+          } else {
+             // Fallback for old string format
+             feeDisplay = doc.fees.toString(); 
+          }
+      }
+
+      return {
+        _id: doc._id,
+        name: doc.displayName,
+        address: doc.address || "Address not available",
+        linkedPatients: count,
+        fees: feeDisplay,
+        doctorCode: doc.doctorCode 
+      };
+    });
+
+    res.status(200).json({
+      status: "success",
+      results: formattedDoctors.length,
+      data: formattedDoctors,
+    });
+
+  } catch (error) {
+    console.error("Error searching doctors:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
