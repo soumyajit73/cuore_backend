@@ -755,13 +755,6 @@ const getTimelineData = async (userId, dateString) => {
     scheduleDate: { $gte: utcStart, $lte: utcEnd },
   }).lean();
 
-  // --- Sort rawCards by scheduledTime string (safeguard when times present) ---
-  rawCards.sort((a, b) => {
-    if (!a?.scheduledTime || !b?.scheduledTime) return 0;
-    // scheduledTime is "HH:mm" - lexicographic compare works
-    return a.scheduledTime.localeCompare(b.scheduledTime);
-  });
-
   // --- USER CARDS ---
   const userCards = rawCards
     .filter((card) => card.type !== "SYSTEM")
@@ -837,22 +830,53 @@ const getTimelineData = async (userId, dateString) => {
     })
     .filter(Boolean);
 
-  // --- Combine and final sort by time ---
+  // ------------------------------------------------------------------
+  // ⭐ FIX: Subjective Day Sort (Wake Up first, Late Night last)
+  // ------------------------------------------------------------------
+  
+  // 1. Get Wake Time in minutes
+  const wakeStr = convertTo24Hour(onboarding?.o6Data?.wake_time) || "07:00";
+  const [wH, wM] = wakeStr.split(':').map(Number);
+  const wakeMins = wH * 60 + wM;
+
+  // 2. Sort Logic
   const allCards = [...systemCardsFromDb, ...userCards]
-    .sort((a, b) => a.time.valueOf() - b.time.valueOf())
+    .sort((a, b) => {
+        const getScore = (c) => {
+            const h = c.time.hour();
+            const m = c.time.minute();
+            let val = h * 60 + m;
+            // If time is earlier than wake time (e.g. 2:00 AM vs 7:00 AM wake),
+            // treat it as belonging to the "end" of the day (+24h)
+            if (val < wakeMins) val += 1440; 
+            return val;
+        };
+        return getScore(a) - getScore(b);
+    })
     .map((card) => ({
       ...card,
       time: dayjs(card.time).tz(TZ).format("h:mm A"),
     }));
 
-  // --- Missed tasks (incomplete and time before now) ---
-  const missedTasks = allCards.filter(
-    (task) =>
-      !task.completed &&
-      dayjs
-        .tz(`${localDay.format("YYYY-MM-DD")} ${task.time}`, "YYYY-MM-DD h:mm A", TZ)
-        .isBefore(dayjs().tz(TZ))
-  ).length;
+  // --- Missed tasks (Updated Logic to handle wrap-around times) ---
+  const missedTasks = allCards.filter((task) => {
+      if (task.completed) return false;
+
+      // Re-parse the time string "h:mm A" relative to the queried day
+      let t = dayjs.tz(`${localDay.format("YYYY-MM-DD")} ${task.time}`, "YYYY-MM-DD h:mm A", TZ);
+      
+      // Check if this task is physically in the early morning of the next day
+      const h = t.hour();
+      const m = t.minute();
+      const mins = h * 60 + m;
+      
+      if (mins < wakeMins) {
+          // It's a "next day" task (e.g. Sleep at 2 AM), so shift date to tomorrow for comparison
+          t = t.add(1, 'day');
+      }
+
+      return t.isBefore(dayjs().tz(TZ));
+  }).length;
 
   // --- Alerts ---
   const alerts = [];
@@ -1145,36 +1169,36 @@ exports.deleteReminder = async (req, res) => {
 
 
 exports.getEntries = async (req, res) => {
-    const userId = req.user.userId;
-    const isMedicationPath = req.originalUrl.includes('/medications');
+    const userId = req.user.userId;
+    const isMedicationPath = req.originalUrl.includes('/medications');
 
-    try {
-        let entries;
-        if (isMedicationPath) {
-            // --- FIX 1 ---
+    try {
+        let entries;
+        if (isMedicationPath) {
+            // --- FIX 1 ---
             // Query the Reminder model for items flagged as medication
-            entries = await Reminder.find({ 
-                userId, 
-                isActive: true, 
-                isMedication: true 
-            }).select('-__v -userId');
-            
-            return res.status(200).json({ type: 'medications', data: entries });
-        } else {
-            // --- FIX 2 ---
+            entries = await Reminder.find({ 
+                userId, 
+                isActive: true, 
+                isMedication: true 
+            }).select('-__v -userId');
+            
+            return res.status(200).json({ type: 'medications', data: entries });
+        } else {
+            // --- FIX 2 ---
             // Query the Reminder model and EXCLUDE items flagged as medication
-            entries = await Reminder.find({ 
-                userId, 
-                isActive: true, 
-                isMedication: { $ne: true } // $ne: true means "not equal to true"
-            }).select('-__v -userId');
-            
-            return res.status(200).json({ type: 'reminders', data: entries });
-        }
-    } catch (error) {
-        console.error('Error getting user entries:', error);
-        return res.status(500).json({ error: "Internal server error: Could not fetch entries." });
-    }
+            entries = await Reminder.find({ 
+                userId, 
+                isActive: true, 
+                isMedication: { $ne: true } // $ne: true means "not equal to true"
+            }).select('-__v -userId');
+            
+            return res.status(200).json({ type: 'reminders', data: entries });
+        }
+    } catch (error) {
+        console.error('Error getting user entries:', error);
+        return res.status(500).json({ error: "Internal server error: Could not fetch entries." });
+    }
 };
 
 
