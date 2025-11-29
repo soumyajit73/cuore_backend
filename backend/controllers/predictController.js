@@ -1,38 +1,53 @@
 const { Onboarding } = require('../models/onboardingModel.js');
 
+// --- CEILINGS (Upper Limits) ---
+// Used for 'increase' metrics (Cuore Score, Nutrition, etc.)
 const METRIC_LIMITS = {
-  cuoreScore: 90, bpUpper: 122, bpLower: 80,
-  bsFasting: 100, bsAfterMeals: 140,
-  a1c: 5.7,
-  weight: 200, bmi: 22.9, bodyFat: 20,
-  hdl: 60, ldl: 100, triglyceride: 150,
+  cuoreScore: 90, 
+  hdl: 80, 
   nutrition: 90, fitness: 90, sleep: 90, stress: 90,
-  heartRate: 80,
+};
+
+// --- FLOORS (Lower Limits) ---
+// Used for 'decrease' metrics to prevent them from dropping to 0 or negative
+// These match the "bottom" of the graph in your screenshot
+const METRIC_FLOORS = {
+  bpUpper: 90,      // Don't predict below 90
+  bpLower: 60,      // Don't predict below 60
+  heartRate: 50,    
+  bsFasting: 60,    // Healthy min
+  bsAfterMeals: 70, // Healthy min
+  weight: 40,       // Realistic min weight
+  bmi: 18,
+  bodyFat: 5,
+  ldl: 50,
+  triglyceride: 50,
+  a1c: 4.0
 };
 
 /*
 -----------------------------------------
-  MOMENTUM PREDICT (corrected)
------------------------------------------
-Rules:
-- If A === B → return B (flat)
-- Increase metric: clamp only if > limit
-- Decrease metric: clamp only if < limit
+  MOMENTUM PREDICT (Fixed Logic)
 -----------------------------------------
 */
 const momentumPredict = (B, A, direction, limit) => {
   A = Number(A) || 0;
   B = Number(B) || 0;
 
-  if (A === B) return B;  // no jump
+  if (A === B) return B; 
 
   let pred;
   if (direction === "increase") {
+    // Prediction logic
     pred = B + ((B - A) * 0.8);
+    // CLAMP MAX (Ceiling)
     if (pred > limit) pred = limit;
   } else {
+    // Prediction logic
     pred = B - ((A - B) * 0.8);
-    if (pred < limit) pred = limit;
+    // CLAMP MIN (Floor) - Fixed Bug Here
+    // We strictly respect the floor.
+    if (pred < limit) pred = limit; 
   }
 
   return Math.max(0, pred);
@@ -40,14 +55,7 @@ const momentumPredict = (B, A, direction, limit) => {
 
 /*
 =====================================================
-  CORE: generateSeries(history)
-=====================================================
-Implements your FINAL RULE:
-
-Case 0: no history → all predicted  
-Case 1: 1 history → A actual, B formula, C-F momentum  
-Case 2: 2 history → A,B actual, C-F momentum  
-Case 3+: A,B,C = last 3 actual, D-F = predicted  
+  CORE: generateSeries
 =====================================================
 */
 const generateSeries = (
@@ -55,7 +63,7 @@ const generateSeries = (
   X,
   initialFormula,
   direction,
-  limit
+  limit // This will now be the Floor for decrease, or Ceiling for increase
 ) => {
   const h = history.filter(v => typeof v === "number" && !isNaN(v));
   const n = h.length;
@@ -64,7 +72,7 @@ const generateSeries = (
 
   // Case 0 → all predicted
   if (n === 0) {
-    let A = 50; // fallback baseline
+    let A = 50; 
     let B = initialFormula(A, X);
     out[0] = A;
     out[1] = B;
@@ -175,40 +183,33 @@ const fetchHistory = (onboarding, key) => {
     case "cuoreScore":
       arr = onboarding.scoreHistory || [];
       return arr.map(h => clean(h.data?.cuoreScore));
-
     case "weight_kg":
       arr = onboarding.o2History || [];
       return arr.map(h => clean(h.data?.weight_kg));
-
     case "bmi":
       arr = onboarding.o2History || [];
       return arr.map(h => clean(h.data?.bmi));
-
     case "nutrition":
       arr = onboarding.o5History || [];
       return arr.map(h => clean(h.data?.foodScore));
-
     case "fitness":
       arr = onboarding.o5History || [];
       return arr.map(h => clean(h.data?.exerciseScore));
-
     case "sleep":
       arr = onboarding.o6History || [];
       return arr.map(h => clean(h.data?.sleepScore));
-
     case "stress":
       arr = onboarding.o6History || [];
       return arr.map(h => clean(h.data?.stressScore));
-
     default:
       arr = onboarding.o7History || [];
       return arr.map(h => clean(h.data?.[key]));
   }
 };
+
 /*
 ----------------------------------------------------
   FORMULAS FOR B (from document)
-  Used ONLY when historyCount = 1
 ----------------------------------------------------
 */
 const formulas = {
@@ -235,7 +236,7 @@ const formulas = {
 
 /*
 ----------------------------------------------------
-  HELPERS FOR GRAPH PACKAGING (unchanged)
+  HELPERS FOR GRAPH PACKAGING
 ----------------------------------------------------
 */
 const splitData = (series, historyCount) => ({
@@ -278,15 +279,25 @@ const getPredictionData = async (req, res) => {
       const hist = fetchHistory(onboarding, dbKey || metric);
       const f = formulas[metric];
 
+      // CORRECTED LOGIC: 
+      // If Increasing, Limit = METRIC_LIMITS (Ceiling)
+      // If Decreasing, Limit = METRIC_FLOORS (Floor)
+      const boundary = f.direction === "increase" 
+        ? (METRIC_LIMITS[metric] || 100) 
+        : (METRIC_FLOORS[metric] || 0);
+
       const { series, historyCount } =
-        generateSeries(hist, X, f.B, f.direction, METRIC_LIMITS[metric]);
+        generateSeries(hist, X, f.B, f.direction, boundary);
+
+      // Round results to 2 decimals
+      const roundedSeries = series.map(v => Math.round(v * 100) / 100);
 
       const labels = buildLabels(
         onboarding.o7History || onboarding.scoreHistory || onboarding.o2History || [],
         historyCount
       );
 
-      return { series, labels, historyCount };
+      return { series: roundedSeries, labels, historyCount };
     };
 
     // Main metrics
@@ -301,14 +312,14 @@ const getPredictionData = async (req, res) => {
 
     const w = build("weight", "weight_kg");
 
-    // BMI
+    // BMI Calculation
     const bmiSeries = w.series.map(wv =>
       Math.round((wv / (heightM * heightM)) * 100) / 100
     );
     const bmiHistoryCount = w.historyCount;
     const BMIlabels = w.labels;
 
-    // BodyFat
+    // BodyFat Calculation
     const bodyFatSeries = bmiSeries.map(b => {
       return gender === "male"
         ? Math.round((1.2 * b + 0.23 * age - 16.2) * 100) / 100
@@ -324,7 +335,7 @@ const getPredictionData = async (req, res) => {
     const slp = build("sleep", "sleep");
     const str = build("stress", "stress");
 
-    // A1C derived from BS F
+    // A1C derived from BS F (Simple Formula)
     const a1cSeries = bsF.series.map(v =>
       Math.round(((v + 46.7) / 28.7) * 100) / 100
     );
@@ -334,22 +345,22 @@ const getPredictionData = async (req, res) => {
     */
     const graphs = [
       graph("Cuore Score", [
-        { label: "Cuore Score", ...splitData(cuore.series, cuore.historyCount), color: "#1E64AC", limit: METRIC_LIMITS.cuoreScore }
+        { label: "Cuore Score", ...splitData(cuore.series, cuore.historyCount), color: "#1E64AC", limit: 90 }
       ], cuore.labels),
 
       graph("Blood Pressure & Heart Rate", [
-        { label: "BP Upper", ...splitData(bpU.series, bpU.historyCount), color: "#ff4d4d" },
-        { label: "BP Lower", ...splitData(bpL.series, bpL.historyCount), color: "#00b8a9" },
+        { label: "BP Upper", ...splitData(bpU.series, bpU.historyCount), color: "#ff4d4d", limit: 122 },
+        { label: "BP Lower", ...splitData(bpL.series, bpL.historyCount), color: "#00b8a9", limit: 80 },
         { label: "Heart Rate", ...splitData(hr.series, hr.historyCount), color: "#40c4ff" },
       ], bpU.labels),
 
       graph("Blood Sugar", [
-        { label: "Fasting", ...splitData(bsF.series, bsF.historyCount), color: "#f39c12" },
-        { label: "After Meal", ...splitData(bsA.series, bsA.historyCount), color: "#d35400" },
+        { label: "Fasting", ...splitData(bsF.series, bsF.historyCount), color: "#f39c12", limit: 100 },
+        { label: "After Meal", ...splitData(bsA.series, bsA.historyCount), color: "#d35400", limit: 140 },
       ], bsF.labels),
 
       graph("A1C", [
-        { label: "A1C", ...splitData(a1cSeries, bsF.historyCount), color: "#9b59b6" }
+        { label: "A1C", ...splitData(a1cSeries, bsF.historyCount), color: "#9b59b6", limit: 5.7 }
       ], bsF.labels),
 
       graph("Weight", [
@@ -357,21 +368,21 @@ const getPredictionData = async (req, res) => {
       ], w.labels),
 
       graph("BMI & Body Fat", [
-        { label: "BMI", actualData: bmiSeries.slice(0, bmiHistoryCount), predictedData: bmiSeries.slice(bmiHistoryCount), color: "#2ecc71" },
-        { label: "Body Fat (%)", actualData: bodyFatSeries.slice(0, bmiHistoryCount), predictedData: bodyFatSeries.slice(bmiHistoryCount), color: "#ff0000" }
+        { label: "BMI", actualData: bmiSeries.slice(0, bmiHistoryCount), predictedData: bmiSeries.slice(bmiHistoryCount), color: "#2ecc71", limit: 22.9 },
+        { label: "Body Fat (%)", actualData: bodyFatSeries.slice(0, bmiHistoryCount), predictedData: bodyFatSeries.slice(bmiHistoryCount), color: "#ff0000", limit: 20 }
       ], BMIlabels),
 
       graph("Cholesterol", [
-        { label: "HDL", ...splitData(hdl.series, hdl.historyCount), color: "#3498db" },
-        { label: "LDL", ...splitData(ldl.series, ldl.historyCount), color: "#e74c3c" },
-        { label: "Triglycerides", ...splitData(trig.series, trig.historyCount), color: "#8C00FF" }
+        { label: "HDL", ...splitData(hdl.series, hdl.historyCount), color: "#3498db", limit: 60 },
+        { label: "LDL", ...splitData(ldl.series, ldl.historyCount), color: "#e74c3c", limit: 100 },
+        { label: "Triglycerides", ...splitData(trig.series, trig.historyCount), color: "#8C00FF", limit: 150 }
       ], hdl.labels),
 
       graph("Lifestyle Metrics", [
-        { label: "Nutrition", ...splitData(nut.series, nut.historyCount), color: "#f1c40f" },
-        { label: "Fitness", ...splitData(fit.series, fit.historyCount), color: "#2ecc71" },
-        { label: "Sleep", ...splitData(slp.series, slp.historyCount), color: "#e74c3c" },
-        { label: "Stress", ...splitData(str.series, str.historyCount), color: "#2980b9" }
+        { label: "Nutrition", ...splitData(nut.series, nut.historyCount), color: "#f1c40f", limit: 90 },
+        { label: "Fitness", ...splitData(fit.series, fit.historyCount), color: "#2ecc71", limit: 90 },
+        { label: "Sleep", ...splitData(slp.series, slp.historyCount), color: "#e74c3c", limit: 90 },
+        { label: "Stress", ...splitData(str.series, str.historyCount), color: "#2980b9", limit: 90 }
       ], nut.labels),
     ];
 
