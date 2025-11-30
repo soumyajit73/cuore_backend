@@ -15,6 +15,7 @@ function generateNewCode(name) {
     return `${namePart}-${numPart}-${alphaPart}`;
 }
 
+// --- HELPER: Determine Color Status ---
 const getColorStatus = (val, type) => {
     if (val == null) return "normal"; // default
 
@@ -34,7 +35,7 @@ const getColorStatus = (val, type) => {
     }
 };
 
-// --- HELPER: Format Patient List Data ---
+// --- HELPER: Format Patient List Data (Updated with Colors) ---
 const formatPatientData = async (patientUser) => {
     if (!patientUser) return null;
     const onboardingDoc = await Onboarding.findOne({ userId: patientUser._id }).lean();
@@ -45,6 +46,12 @@ const formatPatientData = async (patientUser) => {
             name: patientUser.display_name,
             phone: patientUser.phone,
             sbp: null, dbp: null, hr: null, fbs: null, bspp: null, a1c: null, hscrp: null, tghdl: null, lifestyle: null,
+            
+            // Default colors for pending onboarding
+            sbpColor: "normal", dbpColor: "normal", hrColor: "normal", fbsColor: "normal", 
+            bsppColor: "normal", a1cColor: "normal", hscrpColor: "normal", tghdlColor: "normal", 
+            lifestyleColor: "normal",
+
             status: "Pending Onboarding",
             statusType: "inactive",
         };
@@ -66,10 +73,31 @@ const formatPatientData = async (patientUser) => {
         sobAlert: sobAlert,
         name: patientUser.display_name,
         phone: patientUser.phone,
-        sbp: o7.bp_upper || null, dbp: o7.bp_lower || null, hr: o7.pulse || null,
-        fbs: o7.bs_f || null, bspp: o7.bs_am || null, a1c: o7.A1C || null,
-        hscrp: o7.HsCRP || null, tghdl: metrics?.trigHDLRatio?.current || null, lifestyle: metrics?.lifestyle?.score || null,
-        status: status, statusType: "date",
+        
+        // Metrics
+        sbp: o7.bp_upper || null, 
+        dbp: o7.bp_lower || null, 
+        hr: o7.pulse || null,
+        fbs: o7.bs_f || null, 
+        bspp: o7.bs_am || null, 
+        a1c: o7.A1C || null,
+        hscrp: o7.HsCRP || null, 
+        tghdl: metrics?.trigHDLRatio?.current || null, 
+        lifestyle: metrics?.lifestyle?.score || null,
+
+        // --- Colors Added Here ---
+        sbpColor: getColorStatus(o7.bp_upper, 'sbp'),
+        dbpColor: getColorStatus(o7.bp_lower, 'dbp'),
+        hrColor: getColorStatus(o7.pulse, 'hr'),
+        fbsColor: getColorStatus(o7.bs_f, 'fbs'),
+        bsppColor: getColorStatus(o7.bs_am, 'bspp'),
+        a1cColor: getColorStatus(o7.A1C, 'a1c'),
+        hscrpColor: getColorStatus(o7.HsCRP, 'hscrp'),
+        tghdlColor: getColorStatus(metrics?.trigHDLRatio?.current, 'tghdl'),
+        lifestyleColor: getColorStatus(metrics?.lifestyle?.score, 'lifestyle'),
+
+        status: status, 
+        statusType: "date",
     };
 };
 
@@ -247,7 +275,7 @@ async function getPatientPredictionGraphs(onboardingDoc) {
     const hist = fetchHistory(onboardingDoc, dbKey || metric);
     const f = formulas[metric];
     
-    // Select correct boundary (Floor for decrease, Ceiling for increase)
+    // Crucial: Select Floor vs Ceiling based on direction
     const boundary = f.direction === "increase" 
       ? (METRIC_LIMITS[metric] || 100) 
       : (METRIC_FLOORS[metric] || 0);
