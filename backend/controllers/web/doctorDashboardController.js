@@ -15,6 +15,25 @@ function generateNewCode(name) {
     return `${namePart}-${numPart}-${alphaPart}`;
 }
 
+const getColorStatus = (val, type) => {
+    if (val == null) return "normal"; // default
+
+    const num = parseFloat(val);
+
+    switch (type) {
+        case "sbp": return (num <= 100 || num >= 150) ? "red" : "normal";
+        case "dbp": return (num <= 66 || num >= 100) ? "red" : "normal";
+        case "hr": return (num <= 60 || num >= 110) ? "red" : "normal";
+        case "fbs": return (num <= 80 || num >= 200) ? "red" : "normal";
+        case "bspp": return (num <= 110 || num >= 240) ? "red" : "normal";
+        case "a1c": return (num >= 9.0) ? "red" : "normal";
+        case "hscrp": return (num >= 0.3) ? "red" : "normal";
+        case "tghdl": return (num >= 4.0) ? "red" : "normal";
+        case "lifestyle": return (num <= 50) ? "red" : "normal";
+        default: return "normal";
+    }
+};
+
 // --- HELPER: Format Patient List Data ---
 const formatPatientData = async (patientUser) => {
     if (!patientUser) return null;
@@ -80,7 +99,7 @@ const METRIC_FLOORS = {
   a1c: 4.0
 };
 
-// --- Momentum Predict (Robust Logic with Floors/Ceilings) ---
+// --- Momentum Predict (Robust Logic) ---
 const momentumPredict = (B, A, direction, limit) => {
   A = Number(A) || 0;
   B = Number(B) || 0;
@@ -90,11 +109,11 @@ const momentumPredict = (B, A, direction, limit) => {
   let pred;
   if (direction === "increase") {
     pred = B + ((B - A) * 0.8);
-    // Clamp MAX (Ceiling)
+    // Clamp MAX
     if (pred > limit) pred = limit;
   } else {
     pred = B - ((A - B) * 0.8);
-    // Clamp MIN (Floor)
+    // Clamp MIN
     if (pred < limit) pred = limit; 
   }
 
@@ -456,11 +475,13 @@ const generateMedicalAlerts = (onboarding, lastConsultDate, metrics) => {
 // ====================================================================
 
 
-// --- HELPER: Build Patient Profile ---
+// --- HELPER: Build Patient Profile (Updated with Color Statuses) ---
 function buildPatientProfile(user, onboardingDoc, allMeds) {
   const o2 = onboardingDoc.o2Data || {};
   const o3 = onboardingDoc.o3Data || {};
   const o4 = onboardingDoc.o4Data || {};
+  const o7 = onboardingDoc.o7Data || {};
+  const metrics = calculateAllMetrics(onboardingDoc);
 
   const minDuration = 15 * 24 * 60 * 60 * 1000;
   const medications = allMeds
@@ -484,13 +505,48 @@ function buildPatientProfile(user, onboardingDoc, allMeds) {
 
   const pastHistory = processedHistory.length > 0 ? processedHistory.join(", ") : "None";
 
+  // --- Determine Colors ---
+  const sbpColor = getColorStatus(o7.bp_upper, 'sbp');
+  const dbpColor = getColorStatus(o7.bp_lower, 'dbp');
+  const hrColor = getColorStatus(o7.pulse, 'hr');
+  const fbsColor = getColorStatus(o7.bs_f, 'fbs');
+  const bsppColor = getColorStatus(o7.bs_am, 'bspp');
+  const a1cColor = getColorStatus(o7.A1C, 'a1c');
+  const hscrpColor = getColorStatus(o7.HsCRP, 'hscrp');
+  const tghdlColor = getColorStatus(metrics?.trigHDLRatio?.current, 'tghdl');
+  const lifestyleColor = getColorStatus(metrics?.lifestyle?.score, 'lifestyle');
+
   return {
     name: user?.display_name || "User",
     age: o2.age || null,
     smoker: o4.smoking || "N/A",
     pastHO: pastHistory,
     medications: medications.length > 0 ? medications.join(", ") : "None",
-    lastConsulted: onboardingDoc.lastConsultedDate || new Date().toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" }),
+    lastConsulted: onboardingDoc.lastConsultedDate 
+        ? new Date(onboardingDoc.lastConsultedDate).toLocaleDateString("en-US", { day: "numeric", month: "long", year: "numeric" })
+        : null,
+    
+    // --- Metric Values ---
+    sbp: o7.bp_upper || null,
+    dbp: o7.bp_lower || null,
+    hr: o7.pulse || null,
+    fbs: o7.bs_f || null,
+    bspp: o7.bs_am || null,
+    a1c: o7.A1C || null,
+    hscrp: o7.HsCRP || null,
+    tghdl: metrics?.trigHDLRatio?.current || null,
+    lifestyle: metrics?.lifestyle?.score || null,
+
+    // --- Color Statuses ---
+    sbpColor,
+    dbpColor,
+    hrColor,
+    fbsColor,
+    bsppColor,
+    a1cColor,
+    hscrpColor,
+    tghdlColor,
+    lifestyleColor
   };
 }
 
@@ -581,27 +637,16 @@ exports.getPatientDetails = async (req, res) => {
 
         const doctorInfo = { displayName: doctor.displayName, doctorCode: doctor.doctorCode };
         
+        // 5. --- BUILD DATA (UPDATED) ---
+        // Now returns flat structure with colors as requested
         const profileData = buildPatientProfile(patientProfile, onboardingDoc, allMeds);
+        
         const predictDataPoints = await getPatientPredictionGraphs(onboardingDoc);
         const summaryOfRecords = buildDummySummary();
 
         const lastConsultDate = onboardingDoc.lastConsultedDate || null; 
-        const o7 = onboardingDoc.o7Data || {};
         const metrics = calculateAllMetrics(onboardingDoc);
         const medicalAlerts = generateMedicalAlerts(onboardingDoc, lastConsultDate, metrics);
-
-        const TG_HDL = metrics.trigHDLRatio?.current;
-        const lifestyleScore = metrics.lifestyle?.score;
-
-        profileData.sbp = o7.bp_upper || null;
-        profileData.dbp = o7.bp_lower || null;
-        profileData.hr = o7.pulse || null;
-        profileData.fbs = o7.bs_f || null;
-        profileData.bspp = o7.bs_am || null;
-        profileData.a1c = o7.A1C || null;
-        profileData.hscrp = o7.HsCRP || null;
-        profileData.tghdl = TG_HDL || null;
-        profileData.lifestyle = lifestyleScore || null;
 
         res.status(200).json({
             doctorInfo,
