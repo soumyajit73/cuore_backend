@@ -15,26 +15,6 @@ function generateNewCode(name) {
     return `${namePart}-${numPart}-${alphaPart}`;
 }
 
-const getColorStatus = (val, type) => {
-    if (val == null) return "normal"; // default
-
-    const num = parseFloat(val);
-
-    switch (type) {
-        case "sbp": return (num <= 100 || num >= 150) ? "red" : "normal";
-        case "dbp": return (num <= 66 || num >= 100) ? "red" : "normal";
-        case "hr": return (num <= 60 || num >= 110) ? "red" : "normal";
-        case "fbs": return (num <= 80 || num >= 200) ? "red" : "normal";
-        case "bspp": return (num <= 110 || num >= 240) ? "red" : "normal";
-        case "a1c": return (num >= 9.0) ? "red" : "normal";
-        case "hscrp": return (num >= 0.3) ? "red" : "normal";
-        case "tghdl": return (num >= 4.0) ? "red" : "normal";
-        case "lifestyle": return (num <= 50) ? "red" : "normal";
-        default: return "normal";
-    }
-};
-
-
 // --- HELPER: Format Patient List Data ---
 const formatPatientData = async (patientUser) => {
     if (!patientUser) return null;
@@ -63,56 +43,262 @@ const formatPatientData = async (patientUser) => {
     const status = onboardingDoc.timestamp ? new Date(onboardingDoc.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : "No Date";
     
     return {
-    _id: patientUser._id,
-    sobAlert: sobAlert,
-    name: patientUser.display_name,
-    phone: patientUser.phone,
-
-    sbp: o7.bp_upper || null,
-    sbpColor: getColorStatus(o7.bp_upper, "sbp"),
-
-    dbp: o7.bp_lower || null,
-    dbpColor: getColorStatus(o7.bp_lower, "dbp"),
-
-    hr: o7.pulse || null,
-    hrColor: getColorStatus(o7.pulse, "hr"),
-
-    fbs: o7.bs_f || null,
-    fbsColor: getColorStatus(o7.bs_f, "fbs"),
-
-    bspp: o7.bs_am || null,
-    bsppColor: getColorStatus(o7.bs_am, "bspp"),
-
-    a1c: o7.A1C || null,
-    a1cColor: getColorStatus(o7.A1C, "a1c"),
-
-    hscrp: o7.HsCRP || null,
-    hscrpColor: getColorStatus(o7.HsCRP, "hscrp"),
-
-    tghdl: metrics?.trigHDLRatio?.current || null,
-    tghdlColor: getColorStatus(metrics?.trigHDLRatio?.current, "tghdl"),
-
-    lifestyle: metrics?.lifestyle?.score || null,
-    lifestyleColor: getColorStatus(metrics?.lifestyle?.score, "lifestyle"),
-
-    status: status,
-    statusType: "date",
+        _id: patientUser._id,
+        sobAlert: sobAlert,
+        name: patientUser.display_name,
+        phone: patientUser.phone,
+        sbp: o7.bp_upper || null, dbp: o7.bp_lower || null, hr: o7.pulse || null,
+        fbs: o7.bs_f || null, bspp: o7.bs_am || null, a1c: o7.A1C || null,
+        hscrp: o7.HsCRP || null, tghdl: metrics?.trigHDLRatio?.current || null, lifestyle: metrics?.lifestyle?.score || null,
+        status: status, statusType: "date",
+    };
 };
 
+// ====================================================================
+// PREDICTION LOGIC (Synced with predictController.js)
+// ====================================================================
+
+// --- CEILINGS (Upper Limits for 'increase' metrics) ---
+const METRIC_LIMITS = {
+  cuoreScore: 90, 
+  hdl: 80, 
+  nutrition: 90, fitness: 90, sleep: 90, stress: 90,
 };
 
+// --- FLOORS (Lower Limits for 'decrease' metrics) ---
+const METRIC_FLOORS = {
+  bpUpper: 90,      
+  bpLower: 60,      
+  heartRate: 50,    
+  bsFasting: 60,    
+  bsAfterMeals: 70, 
+  weight: 40,       
+  bmi: 18,
+  bodyFat: 5,
+  ldl: 50,
+  triglyceride: 50,
+  a1c: 4.0
+};
+
+// --- Momentum Predict (Robust Logic with Floors/Ceilings) ---
+const momentumPredict = (B, A, direction, limit) => {
+  A = Number(A) || 0;
+  B = Number(B) || 0;
+
+  if (A === B) return B; 
+
+  let pred;
+  if (direction === "increase") {
+    pred = B + ((B - A) * 0.8);
+    // Clamp MAX (Ceiling)
+    if (pred > limit) pred = limit;
+  } else {
+    pred = B - ((A - B) * 0.8);
+    // Clamp MIN (Floor)
+    if (pred < limit) pred = limit; 
+  }
+
+  return Math.max(0, pred);
+};
+
+// --- Generate Series Core ---
+const generateSeries = (history, X, initialFormula, direction, limit) => {
+  const h = history.filter(v => typeof v === "number" && !isNaN(v));
+  const n = h.length;
+  const out = new Array(6).fill(0);
+
+  // Case 0: No data
+  if (n === 0) return { series: out, historyCount: 0 };
+
+  // Case 1: 1 Actual
+  if (n === 1) {
+    const A = h[0];
+    const B = initialFormula(A, X);
+    out[0] = A;
+    out[1] = B;
+    out[2] = momentumPredict(B, A, direction, limit);
+    out[3] = momentumPredict(out[2], B, direction, limit);
+    out[4] = momentumPredict(out[3], out[2], direction, limit);
+    out[5] = momentumPredict(out[4], out[3], direction, limit);
+    return { series: out, historyCount: 1 };
+  }
+
+  // Case 2: 2 Actual
+  if (n === 2) {
+    const A = h[0], B = h[1];
+    out[0] = A;
+    out[1] = B;
+    out[2] = momentumPredict(B, A, direction, limit);
+    out[3] = momentumPredict(out[2], B, direction, limit);
+    out[4] = momentumPredict(out[3], out[2], direction, limit);
+    out[5] = momentumPredict(out[4], out[3], direction, limit);
+    return { series: out, historyCount: 2 };
+  }
+
+  // Case 3+: Last 3 Actual
+  const A = h[n - 3], B = h[n - 2], C = h[n - 1];
+  out[0] = A;
+  out[1] = B;
+  out[2] = C;
+  out[3] = momentumPredict(C, B, direction, limit);
+  out[4] = momentumPredict(out[3], C, direction, limit);
+  out[5] = momentumPredict(out[4], out[3], direction, limit);
+  return { series: out, historyCount: 3 };
+};
+
+// --- Date Helpers ---
+const formatDateLabel = (date) => {
+  const d = new Date(date);
+  return isNaN(d) ? "" : d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+};
+
+const addMonths = (date, months) => {
+  const d = new Date(date);
+  d.setMonth(d.getMonth() + months);
+  return d;
+};
+
+const buildLabels = (historyArray, historyCount) => {
+  const labels = ["", "", "", "", "", ""];
+  if (!historyArray.length) return labels;
+
+  const dates = historyArray.map(h => h.date || h.createdAt || h.timestamp || null).filter(Boolean);
+  if (!dates.length) return labels;
+
+  for (let i = 0; i < historyCount; i++) {
+    labels[i] = formatDateLabel(dates[dates.length - historyCount + i]);
+  }
+
+  let last = new Date(dates[dates.length - 1]);
+  let m = 2;
+  for (let i = historyCount; i < 6; i++) {
+    labels[i] = formatDateLabel(addMonths(last, m));
+    m += 2;
+  }
+  return labels;
+};
+
+// --- Fetch History Helper ---
+const fetchHistory = (onboarding, key) => {
+  const clean = v => typeof v === "number" ? v : (typeof v === "string" ? parseFloat(v) : undefined);
+  let arr = [];
+  switch (key) {
+    case "cuoreScore": arr = onboarding.scoreHistory || []; return arr.map(h => clean(h.data?.cuoreScore));
+    case "weight_kg": arr = onboarding.o2History || []; return arr.map(h => clean(h.data?.weight_kg));
+    case "bmi": arr = onboarding.o2History || []; return arr.map(h => clean(h.data?.bmi));
+    case "nutrition": arr = onboarding.o5History || []; return arr.map(h => clean(h.data?.foodScore));
+    case "fitness": arr = onboarding.o5History || []; return arr.map(h => clean(h.data?.exerciseScore));
+    case "sleep": arr = onboarding.o6History || []; return arr.map(h => clean(h.data?.sleepScore));
+    case "stress": arr = onboarding.o6History || []; return arr.map(h => clean(h.data?.stressScore));
+    default: arr = onboarding.o7History || []; return arr.map(h => clean(h.data?.[key]));
+  }
+};
+
+// --- Formulas ---
+const formulas = {
+  cuoreScore:    { B: (A, X) => A + (10 * X), direction: "increase" },
+  bpUpper:       { B: (A, X) => A - (5 * X),  direction: "decrease" },
+  bpLower:       { B: (A, X) => A - (3 * X),  direction: "decrease" },
+  heartRate:     { B: (A, X) => A - (2 * X),  direction: "decrease" },
+  bsFasting:     { B: (A, X) => A - (20 * X), direction: "decrease" },
+  bsAfterMeals:  { B: (A, X) => A - (20 * X), direction: "decrease" },
+  weight:        { B: (A, X) => A - (2 * X),  direction: "decrease" },
+  hdl:           { B: (A, X) => A + (5 * X),  direction: "increase" },
+  ldl:           { B: (A, X) => A - (8 * X),  direction: "decrease" },
+  triglyceride:  { B: (A, X) => A - (9 * X),  direction: "decrease" },
+  nutrition:     { B: (A, X) => A + (5 * X),  direction: "increase" },
+  fitness:       { B: (A, X) => A + (5 * X),  direction: "increase" },
+  sleep:         { B: (A, X) => A + (5 * X),  direction: "increase" },
+  stress:        { B: (A, X) => A + (5 * X),  direction: "increase" },
+};
+
+// --- Main Prediction Generator (Replaces old logic) ---
+async function getPatientPredictionGraphs(onboardingDoc) {
+  if (!onboardingDoc) return { chartData: {}, metrics: [] };
+
+  const cs = onboardingDoc.scores?.cuoreScore || 0;
+  let X = cs < 50 ? 0.9 : cs > 70 ? 0.3 : 0.6;
+
+  const heightM = (onboardingDoc.o2Data?.height_cm || 1) / 100;
+  const age = onboardingDoc.o2Data?.age || 30;
+  const gender = (onboardingDoc.o2Data?.gender || "").toLowerCase();
+
+  // Helper to build series
+  const build = (metric, dbKey) => {
+    const hist = fetchHistory(onboardingDoc, dbKey || metric);
+    const f = formulas[metric];
+    
+    // Select correct boundary (Floor for decrease, Ceiling for increase)
+    const boundary = f.direction === "increase" 
+      ? (METRIC_LIMITS[metric] || 100) 
+      : (METRIC_FLOORS[metric] || 0);
+
+    const { series, historyCount } = generateSeries(hist, X, f.B, f.direction, boundary);
+    
+    const roundedSeries = series.map(v => Math.round(v * 100) / 100);
+    
+    const labels = buildLabels(
+      onboardingDoc.o7History || onboardingDoc.scoreHistory || onboardingDoc.o2History || [],
+      historyCount
+    );
+
+    return { series: roundedSeries, labels, historyCount };
+  };
+
+  // 1. Generate Series
+  const cuore = build("cuoreScore", "cuoreScore");
+  const bpU = build("bpUpper", "bp_upper");
+  const bpL = build("bpLower", "bp_lower");
+  const hr  = build("heartRate", "pulse");
+  const bsF = build("bsFasting", "bs_f");
+  const bsA = build("bsAfterMeals", "bs_am");
+  const w   = build("weight", "weight_kg");
+  const hdl = build("hdl", "HDL");
+  const ldl = build("ldl", "LDL");
+  const trig = build("triglyceride", "Trig");
+  const nut = build("nutrition", "nutrition");
+  const fit = build("fitness", "fitness");
+  const slp = build("sleep", "sleep");
+  const str = build("stress", "stress");
+
+  // 2. Derived Series
+  const bmiSeries = w.series.map(wv => Math.round((wv / (heightM * heightM)) * 100) / 100);
+  const a1cSeries = bsF.series.map(v => Math.round(((v + 46.7) / 28.7) * 100) / 100);
+
+  // 3. Package for Dashboard (ChartData format)
+  // Note: The dashboard expects a specific structure for 'metrics' and 'chartData' objects
+  const chartData = {
+    bp: bpU.labels.map((day, i) => ({ day, sys: bpU.series[i], dia: bpL.series[i], hr: hr.series[i] })),
+    weight: w.labels.map((day, i) => ({ day, weight: w.series[i] })),
+    sugar: bsF.labels.map((day, i) => ({ day, fasting: bsF.series[i], pp: bsA.series[i] })),
+    cholesterol: hdl.labels.map((day, i) => ({ day, ldl: ldl.series[i], hdl: hdl.series[i], trig: trig.series[i] })),
+    a1c: bsF.labels.map((day, i) => ({ day, a1c: a1cSeries[i] })),
+    lifestyle: nut.labels.map((day, i) => ({ day, nutrition: nut.series[i], fitness: fit.series[i], sleep: slp.series[i], stress: str.series[i] })),
+    bmi: w.labels.map((day, i) => ({ day, bmi: bmiSeries[i] }))
+  };
+
+  // 4. Metrics Metadata
+  const metricsData = [
+    { key: "bp", title: "Blood Pressure & Heart Rate", dataKey: chartData.bp, lines: [{ key: "sys", label: "Systolic", stroke: "#FF4D4D" }, { key: "dia", label: "Diastolic", stroke: "#4D79FF" }, { key: "hr", label: "Heart Rate", stroke: "#10B981" }], domain: [50, 160] }, 
+    { key: "weight", title: "Weight", dataKey: chartData.weight, lines: [{ key: "weight", label: "Weight (kg)", stroke: "#FFA500" }], domain: [40, 150] }, 
+    { key: "sugar", title: "Blood Sugar", dataKey: chartData.sugar, lines: [{ key: "fasting", label: "Fasting", stroke: "#FF7F7F" }, { key: "pp", label: "PP", stroke: "#1E90FF" }], domain: [60, 250] }, 
+    { key: "a1c", title: "A1C", dataKey: chartData.a1c, lines: [{ key: "a1c", label: "A1C %", stroke: "#9b59b6" }], domain: [4, 12] }, 
+    { key: "cholesterol", title: "Cholesterol", dataKey: chartData.cholesterol, lines: [{ key: "ldl", label: "LDL", stroke: "#FFA500" }, { key: "hdl", label: "HDL", stroke: "#10B981" }, { key: "trig", label: "Triglycerides", stroke: "#FF4D4D" }], domain: [20, 300] }, 
+    { key: "lifestyle", title: "Lifestyle Metrics", dataKey: chartData.lifestyle, lines: [{ key: "nutrition", label: "Nutrition", stroke: "#f1c40f" }, { key: "fitness", label: "Fitness", stroke: "#2ecc71" }, { key: "sleep", label: "Sleep", stroke: "#e74c3c" }, { key: "stress", label: "Stress", stroke: "#2980b9" }], domain: [0, 100] }
+  ];
+
+  return { chartData, metrics: metricsData };
+}
 
 // ====================================================================
-// START: NEW ALERT LOGIC HELPER (Message Removed from Output)
-// ====================================================================
-// ====================================================================
-// START: NEW ALERT LOGIC HELPER (With Message & CuoreMD Colors)
+// ALERT LOGIC HELPER (Updated with CuoreMD Colors)
 // ====================================================================
 const generateMedicalAlerts = (onboarding, lastConsultDate, metrics) => {
   const alertMap = {};
   const today = new Date();
 
-  // Helper: Includes 'message' in the saved object now
+  // Helper: addAlert(Level, Message, Label)
+  // If Label exists, we only upgrade Orange -> Red. 
   const addAlert = (level, message, label) => {
     const existing = alertMap[label];
 
@@ -121,7 +307,6 @@ const generateMedicalAlerts = (onboarding, lastConsultDate, metrics) => {
       return;
     }
 
-    // Upgrade to Red if existing was Orange
     if (existing.level === 'Orange' && level === 'Red') {
       alertMap[label] = { level, message, label, timestamp: new Date() };
     }
@@ -162,9 +347,8 @@ const generateMedicalAlerts = (onboarding, lastConsultDate, metrics) => {
   }
 
   // ======================================================
-  // GROUP 1: BLOOD PRESSURE 
+  // GROUP 1: BLOOD PRESSURE (Label: Abnormal BP)
   // ======================================================
-  
   const bpUpper = o7.bp_upper;
   if (bpUpper) {
     if (bpUpper >= 150 || bpUpper <= 100) {
@@ -183,7 +367,7 @@ const generateMedicalAlerts = (onboarding, lastConsultDate, metrics) => {
     }
   }
 
-  // --- 8. Pulse Rate (HR) ---
+  // --- 8. Pulse Rate (Label: Abnormal HR) ---
   const pulse = o7.pulse;
   if (pulse) {
     if (pulse <= 60 || pulse >= 110) {
@@ -194,9 +378,8 @@ const generateMedicalAlerts = (onboarding, lastConsultDate, metrics) => {
   }
 
   // ============================================================
-  // GROUP 2: GLUCOSE 
+  // GROUP 2: GLUCOSE (Label: Abnormal glucose)
   // ============================================================
-
   const bsF = o7.bs_f;
   if (bsF) {
     if (bsF <= 80 || bsF >= 200) {
@@ -215,7 +398,7 @@ const generateMedicalAlerts = (onboarding, lastConsultDate, metrics) => {
     }
   }
 
-  // --- A1C ---
+  // --- A1C (Label: High A1C) ---
   const a1c = o7.A1C;
   if (a1c) {
     if (a1c >= 9.0) {
@@ -229,23 +412,23 @@ const generateMedicalAlerts = (onboarding, lastConsultDate, metrics) => {
   // OTHER VITALS
   // ============================================================
 
-  // --- 12. O2 Saturation ---
+  // --- 12. O2 Saturation (Label: O2 Saturation) ---
   const o2 = o7.o2_sat;
   if (o2) {
     if (o2 < 91) {
-      addAlert('Red', "O2 sat <91%", "O2 sat <91%");
+      addAlert('Red', "O2 sat <91%", "O2 Saturation");
     } else if (o2 >= 91 && o2 <= 94) {
-      addAlert('Orange', "Low O2 sat%", "Low O2 sat%");
+      addAlert('Orange', "Low O2 sat%", "O2 Saturation");
     }
   }
 
-  // --- 13. HsCRP ---
+  // --- 13. HsCRP (Label: High HsCRP) ---
   const hscrp = o7.HsCRP;
   if (hscrp && hscrp >= 0.3) { 
     addAlert('Red', "High HsCRP", "High HsCRP");
   }
 
-  // --- 14. TG/HDL Ratio ---
+  // --- 14. TG/HDL Ratio (Label: Hyperlipidaemia) ---
   const tgHdl = metrics?.trigHDLRatio?.current;
   if (tgHdl) {
      if (tgHdl >= 4.0) {
@@ -255,13 +438,14 @@ const generateMedicalAlerts = (onboarding, lastConsultDate, metrics) => {
      }
   }
 
-  // --- 15. Lifestyle Score ---
+  // --- 15. Lifestyle Score (Label: Lifestyle) ---
   const lifestyle = metrics?.lifestyle?.score;
   if (lifestyle !== undefined && lifestyle !== null) {
       if (lifestyle <= 50) {
-          addAlert('Red', "Poor Lifestyle", "Poor Lifestyle");
+          // Message: "Poor Lifestyle", Label: "Lifestyle" (Avoids duplication)
+          addAlert('Red', "Poor Lifestyle", "Lifestyle"); 
       } else if (lifestyle <= 70) {
-          addAlert('Orange', "Poor Lifestyle", "Poor Lifestyle");
+          addAlert('Orange', "Poor Lifestyle", "Lifestyle");
       }
   }
 
@@ -270,10 +454,6 @@ const generateMedicalAlerts = (onboarding, lastConsultDate, metrics) => {
 // ====================================================================
 // END: NEW ALERT LOGIC HELPER
 // ====================================================================
-// ====================================================================
-// END: NEW ALERT LOGIC HELPER
-// ====================================================================
-
 
 
 // --- HELPER: Build Patient Profile ---
@@ -306,7 +486,6 @@ function buildPatientProfile(user, onboardingDoc, allMeds) {
 
   return {
     name: user?.display_name || "User",
-    id: user?._id || null,
     age: o2.age || null,
     smoker: o4.smoking || "N/A",
     pastHO: pastHistory,
@@ -315,15 +494,6 @@ function buildPatientProfile(user, onboardingDoc, allMeds) {
   };
 }
 
-// --- PREDICTION GRAPH HELPERS (UNCHANGED) ---
-const METRIC_LIMITS = { cuoreScore: 90, bpUpper: 122, bpLower: 80, bsFasting: 100, bsAfterMeals: 140, a1c: 5.7, weight: 70, bmi: 22.9, bodyFat: 20, hdl: 60, ldl: 100, triglyceride: 150, nutrition: 90, fitness: 90, sleep: 90, stress: 90, heartRate: 80 };
-const momentumPredict = (B, A, direction, limit) => { A = A || 0; B = B || 0; if (A === B) { if (direction === 'increase') return Math.min(B, limit); else return Math.max(B, limit); } let prediction; if (direction === 'increase') { prediction = B + ((B - A) * 0.8); prediction = Math.min(prediction, limit); } else { prediction = B - ((A - B) * 0.8); prediction = Math.max(prediction, limit); } return Math.max(0, prediction); };
-const generatePredictionSeries = (history, X, initialBFormula, direction, limit, isO7Metric = false) => { const points = new Array(6).fill(0); const validHistory = history.filter(val => typeof val === 'number' && !isNaN(val)); const n = validHistory.length; const predictNext = (B, A) => momentumPredict(B, A, direction, limit); const latestRawValue = history.length > 0 ? history[history.length - 1] : undefined; if (isO7Metric && (latestRawValue === null || latestRawValue === undefined)) return { series: points, historyCount: 0 }; if (n === 0) return { series: points, historyCount: 0 }; else if (n === 1) { points[0] = validHistory[0]; let initialB = initialBFormula(points[0], X); if (direction === 'increase') initialB = Math.min(initialB, limit); else initialB = Math.max(initialB, limit); points[1] = Math.max(0, initialB); points[2] = predictNext(points[1], points[0]); points[3] = predictNext(points[2], points[1]); points[4] = predictNext(points[3], points[2]); points[5] = predictNext(points[4], points[3]); return { series: points.map(p => Math.round(Math.max(0, p) * 100) / 100), historyCount: 1 }; } else if (n === 2) { points[0] = validHistory[0]; points[1] = validHistory[1]; points[2] = predictNext(points[1], points[0]); points[3] = predictNext(points[2], points[1]); points[4] = predictNext(points[3], points[2]); points[5] = predictNext(points[4], points[3]); return { series: points.map(p => Math.round(Math.max(0, p) * 100) / 100), historyCount: 2 }; } else { points[0] = validHistory[n - 3]; points[1] = validHistory[n - 2]; points[2] = validHistory[n - 1]; points[3] = predictNext(points[2], points[1]); points[4] = predictNext(points[3], points[2]); points[5] = predictNext(points[4], points[3]); return { series: points.map(p => Math.round(Math.max(0, p) * 100) / 100), historyCount: 3 }; } };
-const formatDateLabel = (date) => { const d = new Date(date); if (isNaN(d)) return ""; return d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" }); };
-const addMonths = (date, months) => { const d = new Date(date); d.setMonth(d.getMonth() + months); return d; };
-const buildDateLabels = (historyArray, historyCount) => { const labels = new Array(6).fill(""); if (!historyArray || historyArray.length === 0) return labels; const dates = historyArray.map(h => h.date || h.createdAt || h.updatedAt || h.timestamp || null).filter(Boolean); if (dates.length === 0) return labels; const lastDate = new Date(dates[dates.length - 1]); if (historyCount === 1) labels[0] = formatDateLabel(dates[dates.length - 1]); else if (historyCount === 2) { labels[0] = formatDateLabel(dates[dates.length - 2]); labels[1] = formatDateLabel(dates[dates.length - 1]); } else if (historyCount >= 3) { labels[0] = formatDateLabel(dates[dates.length - 3]); labels[1] = formatDateLabel(dates[dates.length - 2]); labels[2] = formatDateLabel(dates[dates.length - 1]); } let monthsToAdd = 2; for (let i = historyCount; i < 6; i++) { labels[i] = formatDateLabel(addMonths(lastDate, monthsToAdd)); monthsToAdd += 2; } return labels; };
-const fetchHistory = (onboarding, metricKey) => { let historyArray = []; const allowNumericString = (val) => { if (val === null || val === undefined) return undefined; if (typeof val === 'number') return val; if (typeof val === 'string') { const num = parseFloat(val.trim()); if (!isNaN(num)) return num; } return undefined; }; switch (metricKey) { case 'cuoreScore': historyArray = onboarding.scoreHistory || []; return historyArray.map(h => allowNumericString(h.data?.cuoreScore)); case 'weight_kg': historyArray = onboarding.o2History || []; return historyArray.map(h => allowNumericString(h.data?.weight_kg)); case 'bmi': historyArray = onboarding.o2History || []; return historyArray.map(h => allowNumericString(h.data?.bmi)); case 'nutrition': historyArray = onboarding.o5History || []; return historyArray.map(h => allowNumericString(h.data?.foodScore)); case 'fitness': historyArray = onboarding.o5History || []; return historyArray.map(h => allowNumericString(h.data?.exerciseScore)); case 'sleep': historyArray = onboarding.o6History || []; return historyArray.map(h => allowNumericString(h.data?.sleepScore)); case 'stress': historyArray = onboarding.o6History || []; return historyArray.map(h => allowNumericString(h.data?.stressScore)); default: historyArray = onboarding.o7History || []; return historyArray.map(h => { const val = h.data ? h.data[metricKey] : undefined; return allowNumericString(val); }); } };
-async function getPatientPredictionGraphs(onboardingDoc) { if (!onboardingDoc) return { chartData: {}, metrics: [] }; const onboarding = onboardingDoc; const cuoreScore = onboarding.scores?.cuoreScore || 0; let X; if (cuoreScore < 50) X = 0.9; else if (cuoreScore > 70) X = 0.3; else X = 0.6; const formulas = { bpUpper: { initialB: (A, X) => A - (4 * X), direction: 'decrease' }, bpLower: { initialB: (A, X) => A - (2 * X), direction: 'decrease' }, heartRate: { initialB: (A, X) => A - (2 * X), direction: 'decrease' }, bsFasting: { initialB: (A, X) => A - (20 * X), direction: 'decrease' }, bsAfterMeals: { initialB: (A, X) => A - (20 * X), direction: 'decrease' }, weight: { initialB: (A, X) => A - (2 * X), direction: 'decrease' }, hdl: { initialB: (A, X) => A + (2 * X), direction: 'increase' }, ldl: { initialB: (A, X) => A - (5 * X), direction: 'decrease' }, triglyceride: { initialB: (A, X) => A - (5 * X), direction: 'decrease' }, nutrition: { initialB: (A, X) => A + (5 * X), direction: 'increase' }, fitness: { initialB: (A, X) => A + (5 * X), direction: 'increase' }, sleep: { initialB: (A, X) => A + (5 * X), direction: 'increase' }, stress: { initialB: (A, X) => A + (5 * X), direction: 'increase' } }; const generateArgs = (key, dbKey, isO7 = false) => [fetchHistory(onboarding, dbKey || key), X, formulas[key].initialB, formulas[key].direction, METRIC_LIMITS[key], isO7]; const { series: bpUpperSeries, historyCount: bpUpperHist } = generatePredictionSeries(...generateArgs('bpUpper', 'bp_upper', true)); const { series: bpLowerSeries, historyCount: bpLowerHist } = generatePredictionSeries(...generateArgs('bpLower', 'bp_lower', true)); const { series: hrSeries, historyCount: hrHist } = generatePredictionSeries(...generateArgs('heartRate', 'pulse', true)); const { series: bsFastingSeries, historyCount: bsFastingHist } = generatePredictionSeries(...generateArgs('bsFasting', 'bs_f', true)); const { series: bsAfterMealsSeries, historyCount: bsAfterMealsHist } = generatePredictionSeries(...generateArgs('bsAfterMeals', 'bs_am', true)); const a1cFormula = (sugar) => sugar > 0 ? (sugar + 46.7) / 28.7 : 0; const a1cSeries = bsFastingSeries.map(sugarVal => Math.round(Math.min(Math.max(0, a1cFormula(sugarVal)), METRIC_LIMITS.a1c) * 100) / 100); const { series: weightSeries, historyCount: weightHist } = generatePredictionSeries(...generateArgs('weight', 'weight_kg')); const { series: hdlSeries, historyCount: hdlHist } = generatePredictionSeries(...generateArgs('hdl', 'HDL', true)); const { series: ldlSeries, historyCount: ldlHist } = generatePredictionSeries(...generateArgs('ldl', 'LDL', true)); const { series: trigSeries, historyCount: trigHist } = generatePredictionSeries(...generateArgs('triglyceride', 'Trig', true)); const { series: nutritionSeries, historyCount: nutritionHist } = generatePredictionSeries(...generateArgs('nutrition', 'nutrition')); const { series: fitnessSeries, historyCount: fitnessHist } = generatePredictionSeries(...generateArgs('fitness', 'fitness')); const { series: sleepSeries, historyCount: sleepHist } = generatePredictionSeries(...generateArgs('sleep', 'sleep')); const { series: stressSeries, historyCount: stressHist } = generatePredictionSeries(...generateArgs('stress', 'stress')); const o7HistoryRaw = onboarding.o7History || []; const o2HistoryRaw = onboarding.o2History || []; const o5HistoryRaw = onboarding.o5History || []; const bpLabels = buildDateLabels(o7HistoryRaw, bpUpperHist); const sugarLabels = buildDateLabels(o7HistoryRaw, bsFastingHist); const weightLabels = buildDateLabels(o2HistoryRaw, weightHist); const cholesterolLabels = buildDateLabels(o7HistoryRaw, hdlHist); const lifestyleLabels = buildDateLabels(o5HistoryRaw, nutritionHist); const a1cLabels = sugarLabels; const chartData = { bp: bpLabels.map((day, i) => ({ day, sys: bpUpperSeries[i], dia: bpLowerSeries[i], hr: hrSeries[i] })), weight: weightLabels.map((day, i) => ({ day, weight: weightSeries[i] })), sugar: sugarLabels.map((day, i) => ({ day, fasting: bsFastingSeries[i], pp: bsAfterMealsSeries[i] })), cholesterol: cholesterolLabels.map((day, i) => ({ day, ldl: ldlSeries[i], hdl: hdlSeries[i], trig: trigSeries[i] })), a1c: a1cLabels.map((day, i) => ({ day, a1c: a1cSeries[i] })), lifestyle: lifestyleLabels.map((day, i) => ({ day, nutrition: nutritionSeries[i], fitness: fitnessSeries[i], sleep: sleepSeries[i], stress: stressSeries[i] })) }; const metrics = [{ key: "bp", title: "Blood Pressure & Heart Rate", dataKey: chartData.bp, lines: [{ key: "sys", label: "Systolic", stroke: "#FF4D4D" }, { key: "dia", label: "Diastolic", stroke: "#4D79FF" }, { key: "hr", label: "Heart Rate", stroke: "#10B981" }], domain: [50, 160] }, { key: "weight", title: "Weight", dataKey: chartData.weight, lines: [{ key: "weight", label: "Weight (kg)", stroke: "#FFA500" }], domain: [60, 100] }, { key: "sugar", title: "Blood Sugar", dataKey: chartData.sugar, lines: [{ key: "fasting", label: "Fasting", stroke: "#FF7F7F" }, { key: "pp", label: "PP", stroke: "#1E90FF" }], domain: [80, 250] }, { key: "a1c", title: "A1C", dataKey: chartData.a1c, lines: [{ key: "a1c", label: "A1C %", stroke: "#9b59b6" }], domain: [4, 10] }, { key: "cholesterol", title: "Cholesterol", dataKey: chartData.cholesterol, lines: [{ key: "ldl", label: "LDL", stroke: "#FFA500" }, { key: "hdl", label: "HDL", stroke: "#10B981" }, { key: "trig", label: "Triglycerides", stroke: "#FF4D4D" }], domain: [20, 300] }, { key: "lifestyle", title: "Lifestyle Metrics", dataKey: chartData.lifestyle, lines: [{ key: "nutrition", label: "Nutrition", stroke: "#f1c40f" }, { key: "fitness", label: "Fitness", stroke: "#2ecc71" }, { key: "sleep", label: "Sleep", stroke: "#e74c3c" }, { key: "stress", label: "Stress", stroke: "#2980b9" }], domain: [0, Math.max(100, ...nutritionSeries, ...fitnessSeries, ...sleepSeries, ...stressSeries) + 2] }]; return { chartData, metrics }; }
 function buildDummySummary() { const presentDate = new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }); const formattedDate = `Uploaded on ${presentDate}`; return { summary: { history: "Cholecystectomy (Gallbladder removal)\nLeft thigh fracture", medications: "Diabetes on metformin\nHypertension (HTN) on Cardace", labs: "RBS: 230" }, diseaseProgressionRisk: "You have a 52% risk of developing a diabetes + kidney decline cluster within 4 years.", healthRecords: [{ _id: "dummy_presc_1", type: "Prescription", date: formattedDate, url: "#" }, { _id: "dummy_presc_2", type: "Prescription", date: formattedDate, url: "#" }] }; }
 
 // --- EXPORTS ---
@@ -383,15 +553,23 @@ exports.addPatientLink = async (req, res) => {
 exports.getPatientDetails = async (req, res) => {
     try {
         const { patientId } = req.params;
-        const doctor = req.doctor;
+        const doctorUser = req.doctor || req.user;
 
-        // 1. Security Check
-        const isPatientLinked = doctor.patients.some(id => id.toString() === patientId);
+        if (!doctorUser || !doctorUser._id) {
+             return res.status(401).json({ error: "Unauthorized: Doctor not identified." });
+        }
+
+        const doctor = await Doctor.findById(doctorUser._id);
+        if (!doctor) {
+            return res.status(404).json({ error: "Doctor profile not found." });
+        }
+
+        const patientList = doctor.patients || [];
+        const isPatientLinked = patientList.some(id => id.toString() === patientId);
         if (!isPatientLinked) {
             return res.status(403).json({ error: "You are not authorized to view this patient." });
         }
 
-        // 2. Fetch Data
         const [patientProfile, onboardingDoc, allMeds] = await Promise.all([
             User.findById(patientId).lean(),
             Onboarding.findOne({ userId: patientId }).lean(),
@@ -403,18 +581,15 @@ exports.getPatientDetails = async (req, res) => {
 
         const doctorInfo = { displayName: doctor.displayName, doctorCode: doctor.doctorCode };
         
-        // 3. Build Data
         const profileData = buildPatientProfile(patientProfile, onboardingDoc, allMeds);
         const predictDataPoints = await getPatientPredictionGraphs(onboardingDoc);
         const summaryOfRecords = buildDummySummary();
 
-        // 4. --- NEW ALERT GENERATION ---
         const lastConsultDate = onboardingDoc.lastConsultedDate || null; 
-        const medicalAlerts = generateMedicalAlerts(onboardingDoc, lastConsultDate);
-
-        // 5. Add Raw Values to Profile
         const o7 = onboardingDoc.o7Data || {};
         const metrics = calculateAllMetrics(onboardingDoc);
+        const medicalAlerts = generateMedicalAlerts(onboardingDoc, lastConsultDate, metrics);
+
         const TG_HDL = metrics.trigHDLRatio?.current;
         const lifestyleScore = metrics.lifestyle?.score;
 
@@ -427,17 +602,6 @@ exports.getPatientDetails = async (req, res) => {
         profileData.hscrp = o7.HsCRP || null;
         profileData.tghdl = TG_HDL || null;
         profileData.lifestyle = lifestyleScore || null;
-
-        profileData.sbpColor = getColorStatus(o7.bp_upper, "sbp");
-profileData.dbpColor = getColorStatus(o7.bp_lower, "dbp");
-profileData.hrColor = getColorStatus(o7.pulse, "hr");
-profileData.fbsColor = getColorStatus(o7.bs_f, "fbs");
-profileData.bsppColor = getColorStatus(o7.bs_am, "bspp");
-profileData.a1cColor = getColorStatus(o7.A1C, "a1c");
-profileData.hscrpColor = getColorStatus(o7.HsCRP, "hscrp");
-profileData.tghdlColor = getColorStatus(TG_HDL, "tghdl");
-profileData.lifestyleColor = getColorStatus(lifestyleScore, "lifestyle");
-
 
         res.status(200).json({
             doctorInfo,
@@ -509,6 +673,65 @@ exports.getDoctorProfile = async (req, res) => {
     }
 };
 
+// --- SEARCH DOCTORS FOR MOBILE APP ---
+exports.getAllDoctors = async (req, res) => {
+  try {
+    const searchQuery = req.query.q || "";
+    let query = {};
+
+    // If a search term is provided, filter by name (case-insensitive)
+    if (searchQuery) {
+      query = {
+        displayName: { $regex: searchQuery, $options: "i" }
+      };
+    }
+
+    // 1. Fetch doctors from the DB
+    // We only select the fields we need for the list view.
+    // We lean() for performance as we don't need Mongoose document methods.
+    const doctors = await Doctor.find(query)
+      .select("displayName address fees patients")
+      .lean();
+
+    // 2. Format the data for the frontend
+    const formattedDoctors = doctors.map((doc) => {
+      // Calculate number of linked patients
+      const linkedPatientsCount = doc.patients ? doc.patients.length : 0;
+
+      // Format fees. Assuming 'fees' is a string like "₹500 for 6 months, ₹800 for 12 months"
+      // You might need to adjust this based on how you store 'fees'.
+      // If fees is an object { sixMonths: 500, twelveMonths: 800 }, you'd format it here.
+      let formattedFees = "Fees not specified";
+      if (doc.fees) {
+        // Example: If doc.fees is a simple string from your previous code
+        formattedFees = doc.fees;
+        
+        // Example: If doc.fees was an object (a better approach for the future):
+        // if (typeof doc.fees === 'object') {
+        //   formattedFees = `6 months: ₹${doc.fees.sixMonths}, 12 months: ₹${doc.fees.twelveMonths}`;
+        // }
+      }
+
+      return {
+        _id: doc._id,
+        name: doc.displayName,
+        address: doc.address || "No address provided",
+        linkedPatients: linkedPatientsCount,
+        feeString: formattedFees,
+      };
+    });
+
+    res.status(200).json({
+      count: formattedDoctors.length,
+      doctors: formattedDoctors,
+    });
+  } catch (error) {
+    console.error("Error in getAllDoctors:", error);
+    res.status(500).json({ error: "Server error fetching doctor list." });
+  }
+};
+
+// --- DOCTOR REQUEST CHECKIN (Restored) ---
 exports.doctorRequestCheckin = async (req, res) => {
   try {
     const { userId, message } = req.body;
@@ -538,25 +761,3 @@ exports.doctorRequestCheckin = async (req, res) => {
     res.status(500).json({ message: "Internal server error" });
   }
 };
-
-
-// exports.clearDoctorCheckin = async (req, res) => {
-//   try {
-//     const userId = req.user.userId;
-
-//     const onboarding = await Onboarding.findOne({ userId });
-//     if (!onboarding) return res.status(404).json({ message: "User not found" });
-
-//     onboarding.doctorRequestedCheckin = false;
-//     onboarding.doctorRequestedAt = null;
-//     onboarding.doctorMessage = null;
-
-//     await onboarding.save();
-
-//     res.status(200).json({ status: "cleared" });
-//   } catch (error) {
-//     console.error("Error clearing doctor check-in:", error);
-//     res.status(500).json({ error: "Internal server error" });
-//   }
-// };
-
