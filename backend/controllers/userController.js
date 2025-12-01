@@ -17,8 +17,8 @@ exports.updateProfile = async (req, res) => {
     consent_flags,
     caregiver_name,
     caregiver_mobile,
-    // doctor_name,  <-- Removed from input, we will auto-fill this
-    // doctor_phone, <-- Removed from input, we will auto-fill this
+    doctor_name,   // ✅ Restored manual entry
+    doctor_phone,  // ✅ Restored manual entry
     doctor_code
   } = req.body;
 
@@ -31,16 +31,22 @@ exports.updateProfile = async (req, res) => {
       }
     };
 
+    // 1. Assign standard fields
     safeAssign("display_name", display_name);
     safeAssign("phone", phone);
     safeAssign("caregiver_name", caregiver_name);
     safeAssign("caregiver_mobile", caregiver_mobile);
     
+    // 2. Assign manual doctor details (if provided)
+    safeAssign("doctor_name", doctor_name);
+    safeAssign("doctor_phone", doctor_phone);
+    safeAssign("doctor_code", doctor_code);
+    
     // -----------------------------------------------------------
-    // ⭐ DOCTOR LINKING LOGIC
+    // ⭐ DOCTOR LINKING LOGIC (Priority Overwrite)
     // -----------------------------------------------------------
     if (doctor_code) {
-        // 1. Check if Doctor exists
+        // Check if Doctor exists
         const doctor = await Doctor.findOne({ doctorCode: doctor_code });
 
         if (!doctor) {
@@ -50,12 +56,14 @@ exports.updateProfile = async (req, res) => {
             });
         }
 
-        // 2. Auto-fill Doctor Details into User Profile
+        // ✅ AUTO-FILL: Overwrite manual entries with verified Doctor data
+        // This ensures that even if the user sends only 'doctor_code', 
+        // the name and phone are populated automatically.
         updateFields["doctor_code"] = doctor_code;
         updateFields["doctor_name"] = doctor.displayName;
         updateFields["doctor_phone"] = doctor.mobileNumber;
 
-        // 3. Add Patient to Doctor's List (if not already there)
+        // Link Patient to Doctor's List
         await Doctor.updateOne(
             { _id: doctor._id },
             { $addToSet: { patients: userIdFromToken } }
@@ -67,10 +75,12 @@ exports.updateProfile = async (req, res) => {
 
     if (consent_flags) updateFields.consent_flags = consent_flags;
 
+    // 3. Validation: Ensure there is at least one field to update
     if (Object.keys(updateFields).length === 0) {
-      return res.status(400).json({ error: "No valid fields provided." });
+      return res.status(400).json({ error: "No valid fields provided for update." });
     }
 
+    // 4. Perform Update
     const updatedUser = await User.findByIdAndUpdate(
       userIdFromToken,
       { $set: updateFields },
@@ -87,7 +97,6 @@ exports.updateProfile = async (req, res) => {
     return res.status(500).json({ error: "Internal server error." });
   }
 };
-
 
 
 exports.getProfile = async (req, res) => {
