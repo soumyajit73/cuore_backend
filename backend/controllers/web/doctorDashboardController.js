@@ -107,24 +107,27 @@ const formatPatientData = async (patientUser) => {
 
 // --- CEILINGS (Upper Limits for 'increase' metrics) ---
 const METRIC_LIMITS = {
-  cuoreScore: 90, 
-  hdl: 80, 
-  nutrition: 90, fitness: 90, sleep: 90, stress: 90,
+  cuoreScore: 90,
+  hdl: 58,
+  nutrition: 90,
+  fitness: 90,
+  sleep: 90,
+  stress: 90
 };
 
 // --- FLOORS (Lower Limits for 'decrease' metrics) ---
 const METRIC_FLOORS = {
-  bpUpper: 90,      
-  bpLower: 60,      
-  heartRate: 50,    
-  bsFasting: 60,    
-  bsAfterMeals: 70, 
-  weight: 40,       
-  bmi: 18,
-  bodyFat: 5,
-  ldl: 50,
-  triglyceride: 50,
-  a1c: 4.0
+  bpUpper: 122,
+  bpLower: 80,
+  heartRate: 82,
+  bsFasting: 100,
+  bsAfterMeals: 140,
+  a1c: 5.6,
+  weight: null,    // user-specific — keep null
+  bmi: 22.5,
+  bodyFat: null,   // handled separately using gender formula
+  ldl: 130,
+  triglyceride: 130
 };
 
 // --- Momentum Predict (Robust Logic) ---
