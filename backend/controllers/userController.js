@@ -17,8 +17,8 @@ exports.updateProfile = async (req, res) => {
     consent_flags,
     caregiver_name,
     caregiver_mobile,
-    doctor_name,
-    doctor_phone,
+    // doctor_name,  <-- Removed from input, we will auto-fill this
+    // doctor_phone, <-- Removed from input, we will auto-fill this
     doctor_code
   } = req.body;
 
@@ -35,9 +35,35 @@ exports.updateProfile = async (req, res) => {
     safeAssign("phone", phone);
     safeAssign("caregiver_name", caregiver_name);
     safeAssign("caregiver_mobile", caregiver_mobile);
-    safeAssign("doctor_name", doctor_name);
-    safeAssign("doctor_phone", doctor_phone);
-    safeAssign("doctor_code", doctor_code);
+    
+    // -----------------------------------------------------------
+    // ⭐ DOCTOR LINKING LOGIC
+    // -----------------------------------------------------------
+    if (doctor_code) {
+        // 1. Check if Doctor exists
+        const doctor = await Doctor.findOne({ doctorCode: doctor_code });
+
+        if (!doctor) {
+            return res.status(400).json({ 
+                error: "INVALID_DOCTOR_CODE", 
+                message: "The Doctor Code you entered does not exist." 
+            });
+        }
+
+        // 2. Auto-fill Doctor Details into User Profile
+        updateFields["doctor_code"] = doctor_code;
+        updateFields["doctor_name"] = doctor.displayName;
+        updateFields["doctor_phone"] = doctor.mobileNumber;
+
+        // 3. Add Patient to Doctor's List (if not already there)
+        await Doctor.updateOne(
+            { _id: doctor._id },
+            { $addToSet: { patients: userIdFromToken } }
+        );
+        
+        console.log(`[LINK] User ${userIdFromToken} linked to Doctor ${doctor.doctorCode} via Profile Update`);
+    }
+    // -----------------------------------------------------------
 
     if (consent_flags) updateFields.consent_flags = consent_flags;
 
@@ -61,8 +87,6 @@ exports.updateProfile = async (req, res) => {
     return res.status(500).json({ error: "Internal server error." });
   }
 };
-
-
 
 
 
