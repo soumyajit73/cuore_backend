@@ -1773,6 +1773,14 @@ exports.getCuoreScoreDetails = async (req, res) => {
         main_focus: metrics?.mainFocus ?? [],
       },
     };
+    const formattedDate = new Date().toLocaleDateString("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+
+responseBody.current_date = formattedDate;
+
 
     return res.status(200).json(responseBody);
 
