@@ -116,16 +116,35 @@ const generateSeries = (
   }
 
   // Case 3+ → last 3 actual
-  const A = h[n - 3], B = h[n - 2], C = h[n - 1];
+// Case 3+ → last 3 actual but apply formula to B & C
+let A = h[n - 3];
+let B_raw = h[n - 2];
+let C_raw = h[n - 1];
 
-  out[0] = A;
-  out[1] = B;
-  out[2] = C;
-  out[3] = momentumPredict(C, B, direction, limit);
-  out[4] = momentumPredict(out[3], C, direction, limit);
-  out[5] = momentumPredict(out[4], out[3], direction, limit);
+// Apply formula to B and C
+let B = initialFormula(B_raw, X);
+let C = initialFormula(C_raw, X);
 
-  return { series: out, historyCount: 3 };
+// Clamp to limits
+if (direction === "decrease") {
+  if (B < limit) B = limit;
+  if (C < limit) C = limit;
+} else {
+  if (B > limit) B = limit;
+  if (C > limit) C = limit;
+}
+
+out[0] = A;
+out[1] = B;
+out[2] = C;
+
+// Apply momentum
+out[3] = momentumPredict(C, B, direction, limit);
+out[4] = momentumPredict(out[3], C, direction, limit);
+out[5] = momentumPredict(out[4], out[3], direction, limit);
+
+return { series: out, historyCount: 3 };
+
 };
 
 /*
