@@ -213,26 +213,32 @@ const fetchHistory = (onboarding, key) => {
 ----------------------------------------------------
 */
 const formulas = {
-  cuoreScore:    { B: (A, X) => A + (10 * X), direction: "increase" },
+  cuoreScore:    { B: (A, X) => (A > 88 ? A : A + (10 * X)), direction: "increase" },
 
-  bpUpper:       { B: (A, X) => A - (5 * X),  direction: "decrease" },
-  bpLower:       { B: (A, X) => A - (3 * X),  direction: "decrease" },
-  heartRate:     { B: (A, X) => A - (2 * X),  direction: "decrease" },
+  bpUpper:       { B: (A, X) => (A < 110 ? A : A - (5 * X)), direction: "decrease" },
+  bpLower:       { B: (A, X) => (A < 80  ? A : A - (3 * X)), direction: "decrease" },
 
-  bsFasting:     { B: (A, X) => A - (20 * X), direction: "decrease" },
-  bsAfterMeals:  { B: (A, X) => A - (20 * X), direction: "decrease" },
+  heartRate:     { B: (A, X) => (A < 82 ? A : A - (2 * X)), direction: "decrease" },
 
-  weight:        { B: (A, X) => A - (2 * X), direction: "decrease" },
+  bsFasting:     { B: (A, X) => (A < 105 ? A : A - (15 * X)), direction: "decrease" },
+  bsAfterMeals:  { B: (A, X) => (A < 150 ? A : A - (20 * X)), direction: "decrease" },
 
-  hdl:           { B: (A, X) => A + (5 * X),  direction: "increase" },
-  ldl:           { B: (A, X) => A - (8 * X),  direction: "decrease" },
-  triglyceride:  { B: (A, X) => A - (9 * X),  direction: "decrease" },
+  a1c:           { B: (A, X) => (A < 6 ? A : A - (0.9 * X)), direction: "decrease" },
 
-  nutrition:     { B: (A, X) => A + (5 * X),  direction: "increase" },
-  fitness:       { B: (A, X) => A + (5 * X),  direction: "increase" },
-  sleep:         { B: (A, X) => A + (5 * X),  direction: "increase" },
-  stress:        { B: (A, X) => A + (5 * X),  direction: "increase" },
+  weight:        { B: (A, X) => A - (2 * X),  direction: "decrease" },
+  bmi:           { B: (A, X) => A - (0.2 * X), direction: "decrease" },
+  bodyFat:       { B: (A, X) => A - (0.2 * X), direction: "decrease" },
+
+  hdl:           { B: (A, X) => (A > 56 ? A : A + (2 * X)), direction: "increase" },
+  ldl:           { B: (A, X) => (A < 130 ? A : A - (8 * X)), direction: "decrease" },
+  triglyceride:  { B: (A, X) => (A < 130 ? A : A - (9 * X)), direction: "decrease" },
+
+  nutrition:     { B: (A, X) => (A > 80 ? A : A + (5 * X)), direction: "increase" },
+  fitness:       { B: (A, X) => (A > 80 ? A : A + (4 * X)), direction: "increase" },
+  sleep:         { B: (A, X) => (A > 80 ? A : A + (3 * X)), direction: "increase" },
+  stress:        { B: (A, X) => (A > 80 ? A : A + (3 * X)), direction: "increase" }
 };
+
 
 /*
 ----------------------------------------------------
