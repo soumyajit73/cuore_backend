@@ -1698,7 +1698,8 @@ const getStatus = (val, type, o3Data = {}) => {
           return "red";
 
         case "hscrp":
-          if (num < 0.3) return "green";
+          if (num < 0.1) return "green";
+          else if(num >=0.1 && num <=0.29) return "orange";
           return "red";
 
         default:
