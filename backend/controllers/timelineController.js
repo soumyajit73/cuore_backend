@@ -1588,111 +1588,94 @@ exports.getCuoreScoreDetails = async (req, res) => {
 // ------------------------------
 
 const getStatus = (val, type, o3Data = {}) => {
-  if (val == null || val === "") return "unknown";
-  const num = parseFloat(val);
+      if (val == null || val === "") return "unknown";
+      const num = parseFloat(val);
 
-  switch (type) {
+      switch (type) {
 
-    // -------------------------------
-    // 🔶 FASTING BLOOD SUGAR (FBS)
-    // -------------------------------
-    case "bs_f":
-      if (o3Data.hasDiabetes) {
-        // O3 answered YES
-        if (num < 100 || num > 170) return "red";
-        if (num >= 100 && num <= 139) return "green";
-        return "orange";
-      } else {
-        // O3 answered NO
-        if (num < 100) return "green";
-        if (num <= 125) return "orange";
-        return "red";
+        case "bs_f":
+          if (o3Data.hasDiabetes) {
+            if (num < 100 || num > 170) return "red";
+            if (num >= 100 && num <= 139) return "green";
+            return "orange";
+          } else {
+            if (num < 100) return "green";
+            if (num <= 125) return "orange";
+            return "red";
+          }
+
+        case "bs_pp":
+          if (o3Data.hasDiabetes) {
+            if (num < 130 || num > 220) return "red";
+            if (num >= 170 && num <= 220) return "orange";
+            return "green";
+          } else {
+            if (num < 140) return "green";
+            if (num <= 200) return "orange";
+            return "red";
+          }
+
+        case "a1c":
+          if (num < 5.8) return "green";
+          if (num <= 9.0) return "orange";
+          return "red";
+
+        case "tg_hdl":
+          if (num < 2.8) return "green";
+          if (num <= 4.0) return "orange";
+          return "red";
+
+        case "hscrp":
+          if (num <= 3.0) return "green";
+          return "red";
+
+        default:
+          return "unknown";
       }
+    };
 
-    // -------------------------------
-    // 🔶 AFTER MEAL (PP) BLOOD SUGAR
-    // -------------------------------
-    case "bs_pp":
-      if (o3Data.hasDiabetes) {
-        // O3 answered YES
-        if (num < 130 || num > 220) return "red";
-        if (num >= 170 && num <= 220) return "orange";
-        return "green";
-      } else {
-        // O3 answered NO
-        if (num < 140) return "green";
-        if (num <= 200) return "orange";
-        return "red";
-      }
+    const getHrStatus = (val) => {
+      if (val == null || val === "") return "unknown";
+      const num = parseFloat(val);
 
-    // -------------------------------
-    // 🔶 A1C
-    // -------------------------------
-    case "a1c":
-      if (num < 5.8) return "green";
-      if (num <= 9.0) return "orange";
+      if (num >= 64 && num <= 82) return "green";
+      if (num < 64 || (num >= 82 && num <= 95)) return "orange";
       return "red";
+    };
 
-    // -------------------------------
-    // 🔶 TG/HDL RATIO
-    // -------------------------------
-    case "tg_hdl":
-      if (num < 2.8) return "green";
-      if (num <= 4.0) return "orange";
-      return "red";
+    // ------------------------------
+    // ⭐ BP Combined Logic
+    // ------------------------------
 
-    // -------------------------------
-    // 🔶 HsCRP (as per chart)
-    // -------------------------------
-    case "hscrp":
-      if (num <= 3.0) return "green";
-      return "red";
+    let bpString = null;
+    let bpStatus = "unknown";
 
-    default:
-      return "unknown";
-  }
-};
+    if (o7.bp_upper && o7.bp_lower) {
+      const sys = parseFloat(o7.bp_upper);
+      const dia = parseFloat(o7.bp_lower);
 
-// ------------------------------
-// ⭐ HEART RATE LOGIC
-// ------------------------------
-const getHrStatus = (val) => {
-  if (val == null || val === "") return "unknown";
-  const num = parseFloat(val);
+      bpString = `${sys}/${dia}`;
 
-  if (num >= 64 && num <= 82) return "green";
-  if (num < 64 || (num >= 82 && num <= 95)) return "orange";
-  return "red";
-};
+      const sysStatus =
+        sys < 100 ? "orange" :
+        sys <= 130 ? "green" :
+        sys <= 145 ? "orange" :
+        "red";
 
-// ------------------------------
-// ⭐ BP Combined Logic (Uses Chart)
-// ------------------------------
-let bpString = null;
-let bpStatus = "unknown";
+      const diaStatus =
+        dia < 64 ? "orange" :
+        dia <= 82 ? "green" :
+        dia <= 95 ? "orange" :
+        "red";
 
-if (o7.bp_upper && o7.bp_lower) {
-  const sys = parseFloat(o7.bp_upper);
-  const dia = parseFloat(o7.bp_lower);
+      if (sysStatus === "red" || diaStatus === "red") bpStatus = "red";
+      else if (sysStatus === "orange" || diaStatus === "orange") bpStatus = "orange";
+      else bpStatus = "green";
+    }
 
-  bpString = `${sys}/${dia}`;
-
-  const sysStatus =
-    sys < 100 ? "orange" :
-    sys <= 130 ? "green" :
-    sys <= 145 ? "orange" :
-    "red";
-
-  const diaStatus =
-    dia < 64 ? "orange" :
-    dia <= 82 ? "green" :
-    dia <= 95 ? "orange" :
-    "red";
-
-  if (sysStatus === "red" || diaStatus === "red") bpStatus = "red";
-  else if (sysStatus === "orange" || diaStatus === "orange") bpStatus = "orange";
-  else bpStatus = "green";
-}
+    // ⭐ FIX: ADD MISSING TG/HDL VARIABLES
+    const tg_hdl_ratio = metrics?.trigHDLRatio?.current ?? null;
+    const tgStatus = getStatus(tg_hdl_ratio, "tg_hdl", o3);
 
 
     // ------------------------------
