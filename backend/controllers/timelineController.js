@@ -1583,68 +1583,117 @@ exports.getCuoreScoreDetails = async (req, res) => {
     // ⭐ UNIFIED COLOR LOGIC STARTS
     // ------------------------------
 
-    const getStatus = (val, type) => {
-      if (val == null || val === "") return "unknown";
-      const num = parseFloat(val);
+   // ------------------------------
+// ⭐ UPDATED COLOR LOGIC (Cuore Rules)
+// ------------------------------
 
-      switch (type) {
-        case "bs_pp":
-          return num <= 140 ? "green" : "red";
+const getStatus = (val, type, o3Data = {}) => {
+  if (val == null || val === "") return "unknown";
+  const num = parseFloat(val);
 
-        case "a1c":
-          return num <= 5.6 ? "green" : "red";
+  switch (type) {
 
-        case "tg_hdl":
-          if (num > 4.0) return "red";
-          if (num >= 2.8) return "orange";
-          return "green";
-
-        case "hscrp":
-          return num > 0.3 ? "red" : "green";
-
-        default:
-          return "unknown";
+    // -------------------------------
+    // 🔶 FASTING BLOOD SUGAR (FBS)
+    // -------------------------------
+    case "bs_f":
+      if (o3Data.hasDiabetes) {
+        // O3 answered YES
+        if (num < 100 || num > 170) return "red";
+        if (num >= 100 && num <= 139) return "green";
+        return "orange";
+      } else {
+        // O3 answered NO
+        if (num < 100) return "green";
+        if (num <= 125) return "orange";
+        return "red";
       }
-    };
 
-    const getHrStatus = (val) => {
-      if (val == null || val === "") return "unknown";
-      const num = parseFloat(val);
-      if (num < 50 || num > 120) return "red";
-      if ((num >= 50 && num <= 60) || (num >= 110 && num <= 120)) return "orange";
-      return "green";
-    };
+    // -------------------------------
+    // 🔶 AFTER MEAL (PP) BLOOD SUGAR
+    // -------------------------------
+    case "bs_pp":
+      if (o3Data.hasDiabetes) {
+        // O3 answered YES
+        if (num < 130 || num > 220) return "red";
+        if (num >= 170 && num <= 220) return "orange";
+        return "green";
+      } else {
+        // O3 answered NO
+        if (num < 140) return "green";
+        if (num <= 200) return "orange";
+        return "red";
+      }
 
-    // ⭐ BP Combined Logic
-    let bpString = null;
-    let bpStatus = "unknown";
+    // -------------------------------
+    // 🔶 A1C
+    // -------------------------------
+    case "a1c":
+      if (num < 5.8) return "green";
+      if (num <= 9.0) return "orange";
+      return "red";
 
-    if (o7.bp_upper && o7.bp_lower) {
-      const sys = parseFloat(o7.bp_upper);
-      const dia = parseFloat(o7.bp_lower);
+    // -------------------------------
+    // 🔶 TG/HDL RATIO
+    // -------------------------------
+    case "tg_hdl":
+      if (num < 2.8) return "green";
+      if (num <= 4.0) return "orange";
+      return "red";
 
-      bpString = `${sys}/${dia}`;
+    // -------------------------------
+    // 🔶 HsCRP (as per chart)
+    // -------------------------------
+    case "hscrp":
+      if (num <= 3.0) return "green";
+      return "red";
 
-      const sysStatus =
-        sys < 100 ? "orange" :
-        sys <= 130 ? "green" :
-        sys <= 145 ? "orange" :
-        "red";
+    default:
+      return "unknown";
+  }
+};
 
-      const diaStatus =
-        dia < 64 ? "orange" :
-        dia <= 82 ? "green" :
-        dia <= 95 ? "orange" :
-        "red";
+// ------------------------------
+// ⭐ HEART RATE LOGIC
+// ------------------------------
+const getHrStatus = (val) => {
+  if (val == null || val === "") return "unknown";
+  const num = parseFloat(val);
 
-      if (sysStatus === "red" || diaStatus === "red") bpStatus = "red";
-      else if (sysStatus === "orange" || diaStatus === "orange") bpStatus = "orange";
-      else bpStatus = "green";
-    }
+  if (num >= 64 && num <= 82) return "green";
+  if (num < 64 || (num >= 82 && num <= 95)) return "orange";
+  return "red";
+};
 
-    // ⭐ TG/HDL
-    const tg_hdl_ratio = metrics?.trigHDLRatio?.current;
-    let tgStatus = getStatus(tg_hdl_ratio, "tg_hdl");
+// ------------------------------
+// ⭐ BP Combined Logic (Uses Chart)
+// ------------------------------
+let bpString = null;
+let bpStatus = "unknown";
+
+if (o7.bp_upper && o7.bp_lower) {
+  const sys = parseFloat(o7.bp_upper);
+  const dia = parseFloat(o7.bp_lower);
+
+  bpString = `${sys}/${dia}`;
+
+  const sysStatus =
+    sys < 100 ? "orange" :
+    sys <= 130 ? "green" :
+    sys <= 145 ? "orange" :
+    "red";
+
+  const diaStatus =
+    dia < 64 ? "orange" :
+    dia <= 82 ? "green" :
+    dia <= 95 ? "orange" :
+    "red";
+
+  if (sysStatus === "red" || diaStatus === "red") bpStatus = "red";
+  else if (sysStatus === "orange" || diaStatus === "orange") bpStatus = "orange";
+  else bpStatus = "green";
+}
+
 
     // ------------------------------
     // ⭐ UNIFIED COLOR LOGIC ENDS
