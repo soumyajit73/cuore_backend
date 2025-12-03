@@ -1578,6 +1578,7 @@ exports.getCuoreScoreDetails = async (req, res) => {
         : {};
 
     const o7 = onboardingDoc.o7Data || {};
+     const o3 = onboardingDoc.o3Data || {};
 
     // ------------------------------
     // ⭐ UNIFIED COLOR LOGIC STARTS
