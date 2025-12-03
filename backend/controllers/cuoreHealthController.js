@@ -81,104 +81,110 @@ exports.getCuoreHealthData = async (req, res) => {
     const metrics = model.calculateAllMetrics(onboardingDoc);
 
     // --- HELPER: Determine Generic Status Logic ---
-    const getStatus = (val, type) => {
-      if (val == null || val === "") return "unknown";
-      const num = parseFloat(val);
+    const getStatus = (val, type, o3Data = {}) => {
+if (val == null || val === "") return "unknown";
+const num = parseFloat(val);
 
-      switch (type) {
-        case "bs_pp": // Blood Sugar Post Prandial
-          return num <= 140 ? "green" : "red";
-        case "a1c":   // HbA1c
-          return num <= 5.6 ? "green" : "red";
-        case "tg_hdl": // TG/HDL Ratio
-          if (num > 4.0) return "red";
-          if (num >= 2.8) return "orange";
-          return "green";
-        case "hscrp": // HsCRP
-          return num > 0.3 ? "red" : "green"; 
-        default:
-          return "unknown";
-      }
-    };
 
-    // --- HELPER: Heart Rate Logic ---
-    const getHrStatus = (val) => {
-        if (val == null || val === "") return "unknown";
-        const num = parseFloat(val);
-        if (num < 50 || num > 120) return "red";
-        if ((num >= 50 && num <= 60) || (num >= 110 && num <= 120)) return "orange";
-        return "green";
-    };
+switch (type) {
+case "a1c":
+if (num < 5.8) return "green";
+if (num <= 9.0) return "orange";
+return "red";
 
-    // --- HELPER: Blood Pressure Logic (Combined) ---
-    let bpString = null;
-    let bpStatus = "unknown";
 
-    if (o7Data.bp_upper && o7Data.bp_lower) {
-      bpString = `${o7Data.bp_upper}/${o7Data.bp_lower}`;
-      const sys = parseFloat(o7Data.bp_upper);
-      const dia = parseFloat(o7Data.bp_lower);
+case "tg_hdl":
+if (num < 2.8) return "green";
+if (num <= 4.0) return "orange";
+return "red";
 
-      // Individual logic from reference
-      const sysStatus = sys < 100 ? "orange" : sys <= 130 ? "green" : sys <= 145 ? "orange" : "red";
-      const diaStatus = dia < 64 ? "orange" : dia <= 82 ? "green" : dia <= 95 ? "orange" : "red";
 
-      // Overall logic: Red takes priority, then Orange, then Green
-      if (sysStatus === "red" || diaStatus === "red") bpStatus = "red";
-      else if (sysStatus === "orange" || diaStatus === "orange") bpStatus = "orange";
-      else bpStatus = "green";
-    }
+case "hscrp":
+if (num <= 3.0) return "green";
+return "red";
 
-    // --- TG/HDL Value ---
-    const tgHdlValue = metrics.trigHDLRatio?.current;
+
+case "bs_pp":
+if (o3Data.hasDiabetes) {
+if (num < 130 || num > 220) return "red";
+if (num >= 170 && num <= 220) return "orange";
+return "green";
+} else {
+if (num < 140) return "green";
+if (num <= 200) return "orange";
+return "red";
+}
+
+
+default:
+return "unknown";
+}
+};
+
+
+const getHrStatus = (val) => {
+if (val == null || val === "") return "unknown";
+const num = parseFloat(val);
+if (num >= 64 && num <= 82) return "green";
+if (num < 64 || (num >= 82 && num <= 95)) return "orange";
+return "red";
+};
+
+
+let bpString = null;
+let bpStatus = "unknown";
+
+
+const tgHdlValue = metrics.trigHDLRatio?.current;
 
     // --- ASSEMBLE OBSERVATIONS ---
-    const healthObservations = {
-      heartRate: {
-        value: o7Data.pulse || null,
-        status: getHrStatus(o7Data.pulse)
-      },
-      bloodPressure: {
-        value: bpString,
-        status: bpStatus
-      },
-      bloodSugarPP: {
-        value: o7Data.bs_am || null,
-        status: getStatus(o7Data.bs_am, "bs_pp")
-      },
-      HbA1c: {
-        value: o7Data.A1C || null,
-        status: getStatus(o7Data.A1C, "a1c")
-      },
-      TG_HDL_Ratio: {
-        value: tgHdlValue || null,
-        status: getStatus(tgHdlValue, "tg_hdl")
-      },
-      HsCRP: {
-        value: o7Data.HsCRP || null,
-        status: getStatus(o7Data.HsCRP, "hscrp")
-      },
-      lifestyleScore: {
-        value: metrics.lifestyle?.score || null,
-        status: metrics.lifestyle?.status || "unknown"
-      },
-    };
+   const healthObservations = {
+heartRate: {
+value: o7Data.pulse || null,
+status: getHrStatus(o7Data.pulse)
+},
+bloodPressure: {
+value: bpString,
+status: bpStatus
+},
+bloodSugarPP: {
+value: o7Data.bs_am || null,
+status: getStatus(o7Data.bs_am, "bs_pp", o3Data)
+},
+HbA1c: {
+value: o7Data.A1C || null,
+status: getStatus(o7Data.A1C, "a1c", o3Data)
+},
+TG_HDL_Ratio: {
+value: tgHdlValue || null,
+status: getStatus(tgHdlValue, "tg_hdl")
+},
+HsCRP: {
+value: o7Data.HsCRP || null,
+status: getStatus(o7Data.HsCRP, "hscrp")
+},
+lifestyleScore: {
+value: metrics.lifestyle?.score || null,
+status: metrics.lifestyle?.status || "unknown"
+},
+};
 
-    // --- 4. ASSEMBLE FINAL RESPONSE ---
-    const responseBody = {
-      profile: profileData,
-      healthObservations: healthObservations,
-      healthRecords: {
-        summary: null,
-        diseaseProgressionRisk: null,
-      },
-    };
 
-    return res.status(200).json({ status: "success", data: responseBody });
-  } catch (error) {
-    console.error("Error in getCuoreHealthData:", error);
-    return res.status(500).json({ error: "Internal server error." });
-  }
+const responseBody = {
+profile: profileData,
+healthObservations: healthObservations,
+healthRecords: {
+summary: null,
+diseaseProgressionRisk: null,
+},
+};
+
+
+return res.status(200).json({ status: "success", data: responseBody });
+} catch (error) {
+console.error("Error in getCuoreHealthData:", error);
+return res.status(500).json({ error: "Internal server error." });
+}
 };
 
 exports.updateLastConsultedDate = async (req, res) => {
