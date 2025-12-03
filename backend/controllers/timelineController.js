@@ -1828,10 +1828,11 @@ const getStatus = (val, type, o3Data = {}) => {
 
           blood_sugar: {
             fasting: {
-              value: bs_f,
-              target: 100,
-              status: bs_f == null ? "unknown" : bs_f <= 100 ? "green" : "red",
-            },
+  value: bs_f,
+  target: 100,
+  status: getStatus(bs_f, "bs_f", o3),
+},
+
             after_meal: {
               value: bs_am,
               target: 140,
