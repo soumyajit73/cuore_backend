@@ -403,7 +403,7 @@ if (onboarding.doctorRequestedCheckin) {
 
   // --- Red Alerts (Critical) ---
   if (o3Data.q5) {
-    alerts.push({ type: 'red', text: 'Consult your doctor promptly.', action: 'Consult' });
+    alerts.push({ type: 'red', text: 'Consult your doctor promptly for SOB.', action: 'Consult' });
   }
   if (o7Data.bp_upper > 170 || o7Data.bp_upper < 90 || o7Data.bp_lower > 110 || o7Data.bp_lower < 60) {
     alerts.push({ type: 'red', text: 'Consult your doctor for BP.', action: 'Consult' });
@@ -412,7 +412,7 @@ if (onboarding.doctorRequestedCheckin) {
     alerts.push({ type: 'red', text: 'Consult your doctor for heart rate.', action: 'Consult' });
   }
   if (o7Data.o2_sat < 91) {
-    alerts.push({ type: 'red', text: 'Consult your doctor for O2 Sat.', action: 'Consult' });
+    alerts.push({ type: 'red', text: 'Consult your doctor for low O2', action: 'Consult' });
   }
 
   // --- Orange Alerts (Important) ---
