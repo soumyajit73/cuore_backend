@@ -383,68 +383,131 @@ const calculateHealthMetrics = (onboardingDoc) => {
     };
 };
 
+// Helper: consider a question "answered" only when it's not
+// the literal "false" (string), not boolean false, not null/undefined, and not an empty string.
+const isAnswered = (v) => {
+  if (v === null || v === undefined) return false;
+  const s = String(v).trim().toLowerCase();
+  if (s === "" || s === "false") return false;
+  return true;
+};
+
+// Helper: strict affirmative (if your data uses explicit "Yes"/"No" or "true"/"false")
+// You probably don't need this for q5 since UI stores descriptive text.
+const isAffirmative = (v) => {
+  if (!isAnswered(v)) return false;
+  const s = String(v).trim().toLowerCase();
+  return s === "yes" || s === "true" || s.startsWith("yes");
+};
+
+
 // Alerts function
 const getAlerts = async (userId) => {
   const alerts = [];
   const onboarding = await Onboarding.findOne({ userId }).lean();
   if (!onboarding) return [];
 
-  const { scores, o3Data, o7Data } = onboarding;
+  const { scores, o3Data = {}, o7Data = {} } = onboarding;
   const now = dayjs();
 
-// 🔴 If doctor requested check-in, show RED alert
-if (onboarding.doctorRequestedCheckin) {
-  alerts.push({
-    type: "red",
-    text:"Check-in requested by doctor.",
-    action: "Check-in"
-  });
-}
-
-  // --- Red Alerts (Critical) ---
-  if (o3Data.q5) {
-    alerts.push({ type: 'red', text: 'Consult your doctor promptly for SOB.', action: 'Consult' });
+  // 🔴 If doctor requested check-in
+  if (onboarding.doctorRequestedCheckin) {
+    alerts.push({
+      type: "red",
+      text: "Check-in requested by doctor.",
+      action: "Check-in"
+    });
   }
-  if (o7Data.bp_upper > 170 || o7Data.bp_upper < 90 || o7Data.bp_lower > 110 || o7Data.bp_lower < 60) {
+
+  // ------------------------
+  // 🔴 RED ALERTS (CRITICAL)
+  // ------------------------
+
+  // SOB alert (q5)
+  if (isAnswered(o3Data.q5)) {
+    alerts.push({
+      type: 'red',
+      text: 'Consult your doctor promptly for SOB.',
+      action: 'Consult'
+    });
+  }
+
+  if (o7Data.bp_upper > 170 || o7Data.bp_upper < 90 || 
+      o7Data.bp_lower > 110 || o7Data.bp_lower < 60) {
     alerts.push({ type: 'red', text: 'Consult your doctor for BP.', action: 'Consult' });
   }
+
   if (o7Data.pulse < 50 || o7Data.pulse > 120) {
     alerts.push({ type: 'red', text: 'Consult your doctor for heart rate.', action: 'Consult' });
   }
+
   if (o7Data.o2_sat < 91) {
-    alerts.push({ type: 'red', text: 'Consult your doctor for low O2', action: 'Consult' });
+    alerts.push({
+      type: 'red',
+      text: 'Consult your doctor for low O2.',
+      action: 'Consult'
+    });
   }
 
-  // --- Orange Alerts (Important) ---
-  if (o3Data.q6) {
-    alerts.push({ type: 'orange', text: 'Consult your doctor for diabetes.', action: 'Consult' });
+  // ---------------------------
+  // 🟠 ORANGE ALERTS (IMPORTANT)
+  // ---------------------------
+
+  // Diabetes-related question (q6)
+  if (isAnswered(o3Data.q6)) {
+    alerts.push({
+      type: 'orange',
+      text: 'Consult your doctor for diabetes.',
+      action: 'Consult'
+    });
   }
-  if ((o7Data.bp_upper >= 150 && o7Data.bp_upper <= 170) || (o7Data.bp_upper >= 90 && o7Data.bp_upper <= 100) ||
-      (o7Data.bp_lower >= 100 && o7Data.bp_lower <= 110) || (o7Data.bp_lower >= 60 && o7Data.bp_lower <= 66)) {
+
+  if ((o7Data.bp_upper >= 150 && o7Data.bp_upper <= 170) ||
+      (o7Data.bp_upper >= 90 && o7Data.bp_upper <= 100) ||
+      (o7Data.bp_lower >= 100 && o7Data.bp_lower <= 110) ||
+      (o7Data.bp_lower >= 60 && o7Data.bp_lower <= 66)) {
     alerts.push({ type: 'orange', text: 'Consult your doctor for BP.', action: 'Consult' });
   }
-  if (o7Data.bs_f > 240 || o7Data.bs_f < 100 || o7Data.bs_am > 260 || o7Data.bs_am < 120) {
-    alerts.push({ type: 'orange', text: 'Monitor sugar & consult your doctor.', action: 'Monitor' });
-  }
-  if (o7Data.HDL < 45 || o7Data.LDL > 180 || o7Data.Trig > 200) {
-    alerts.push({ type: 'orange', text: 'Consult your doctor for Cholesterol.', action: 'Consult' });
+
+  if (o7Data.bs_f > 240 || o7Data.bs_f < 100 ||
+      o7Data.bs_am > 260 || o7Data.bs_am < 120) {
+    alerts.push({
+      type: 'orange',
+      text: 'Monitor sugar & consult your doctor.',
+      action: 'Monitor'
+    });
   }
 
-  // --- Yellow Alerts (Warning) ---
-  if ((o7Data.bp_upper >= 140 && o7Data.bp_upper <= 150) || (o7Data.bp_upper >= 100 && o7Data.bp_upper <= 110) ||
-      (o7Data.bp_lower >= 88 && o7Data.bp_lower <= 100) || (o7Data.bp_lower >= 66 && o7Data.bp_lower <= 74)) {
+  if (o7Data.HDL < 45 || o7Data.LDL > 180 || o7Data.Trig > 200) {
+    alerts.push({
+      type: 'orange',
+      text: 'Consult your doctor for Cholesterol.',
+      action: 'Consult'
+    });
+  }
+
+  // ---------------------------
+  // 🟡 YELLOW ALERTS (WARNING)
+  // ---------------------------
+
+  if ((o7Data.bp_upper >= 140 && o7Data.bp_upper <= 150) ||
+      (o7Data.bp_upper >= 100 && o7Data.bp_upper <= 110) ||
+      (o7Data.bp_lower >= 88 && o7Data.bp_lower <= 100) ||
+      (o7Data.bp_lower >= 66 && o7Data.bp_lower <= 74)) {
     alerts.push({ type: 'yellow', text: 'Monitor BP.', action: 'Monitor' });
   }
-  if ((o7Data.bs_f >= 200 && o7Data.bs_f <= 240) || (o7Data.bs_f >= 100 && o7Data.bs_f <= 140) ||
-      (o7Data.bs_am >= 220 && o7Data.bs_am <= 260) || (o7Data.bs_am >= 120 && o7Data.bs_am <= 160)) {
+
+  if ((o7Data.bs_f >= 200 && o7Data.bs_f <= 240) ||
+      (o7Data.bs_f >= 100 && o7Data.bs_f <= 140) ||
+      (o7Data.bs_am >= 220 && o7Data.bs_am <= 260) ||
+      (o7Data.bs_am >= 120 && o7Data.bs_am <= 160)) {
     alerts.push({ type: 'yellow', text: 'Monitor sugar.', action: 'Monitor' });
   }
 
-  // 🟡 Exercise-Meal Timing Alert (within ±90 mins)
+  // 🟡 Exercise-Meal Timing Alert
   try {
     const day = dayjs().startOf('day');
 
-    // exercise time from onboarding
     const ex12 = onboarding?.o5Data?.preferred_ex_time;
     const wake12 = onboarding?.o6Data?.wake_time || "07:00 AM";
 
@@ -476,13 +539,20 @@ if (onboarding.doctorRequestedCheckin) {
     console.error("Error checking exercise-meal alert:", e);
   }
 
-  // --- Pale Yellow Alerts (Advisory) ---
+  // -------------------------------
+  // 🟡 Advisory (Pale Yellow)
+  // -------------------------------
   if (!onboarding.doctor_code) {
-    alerts.push({ type: 'yellow', text: 'Connect to a doctor for alert monitoring.', action: 'Connect' });
+    alerts.push({
+      type: 'yellow',
+      text: 'Connect to a doctor for alert monitoring.',
+      action: 'Connect'
+    });
   }
 
-  // Sort & return highest severity first
-  const severityOrder = { 'red': 1, 'orange': 2, 'yellow': 3 };
+  // Sort by severity
+  const severityOrder = { red: 1, orange: 2, yellow: 3 };
+
   if (alerts.length > 0) {
     alerts.sort((a, b) => severityOrder[a.type] - severityOrder[b.type]);
     return alerts;
@@ -490,6 +560,7 @@ if (onboarding.doctorRequestedCheckin) {
 
   return [];
 };
+
 
 // -----------------------------------------------------
 // Generate Timeline Cards
