@@ -91,7 +91,7 @@ exports.getCuoreHealthData = async (req, res) => {
           return "red";
 
         case "hscrp":
-          if (num <= 3.0) return "green";
+          if (num < 0.3) return "green";
           return "red";
 
         case "bs_pp":
