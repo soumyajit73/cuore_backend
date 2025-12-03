@@ -39,6 +39,11 @@ const getColorStatus = (val, type) => {
 const formatPatientData = async (patientUser) => {
     if (!patientUser) return null;
     const onboardingDoc = await Onboarding.findOne({ userId: patientUser._id }).lean();
+    // --- NEW FIELDS (fallback null) ---
+let lapsed = null;
+let pending = null;
+let approaching = null;
+
     if (!onboardingDoc) {
         return {
             _id: patientUser._id,
@@ -66,7 +71,19 @@ const formatPatientData = async (patientUser) => {
     const isSelected = (val) => val && typeof val === "string" && val.trim() !== "" && val.toLowerCase() !== "false";
     const sobAlert = isSelected(o3.q5);
 
-    const status = onboardingDoc.timestamp ? new Date(onboardingDoc.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: '2-digit' }) : "No Date";
+    // --- FIX: status date = lastConsultedDate ---
+const lastConsulted = onboardingDoc.lastConsultedDate
+  ? new Date(onboardingDoc.lastConsultedDate)
+  : null;
+
+const status = lastConsulted
+  ? lastConsulted.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "2-digit"
+    })
+  : "No Consult";
+
     
     return {
         _id: patientUser._id,
@@ -632,6 +649,9 @@ exports.getPatientList = async (req, res) => {
     res.status(200).json({
       doctorInfo: { displayName: req.doctor.displayName, doctorCode: req.doctor.doctorCode },
       count: patientList.length,
+      lapsed: null,
+pending: null,
+approaching: null,
       patients: patientList,
       currentDate
     });
