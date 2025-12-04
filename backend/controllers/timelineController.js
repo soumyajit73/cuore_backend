@@ -1674,6 +1674,70 @@ exports.completeCard = async (req, res) => {
   }
 };
 
+// -----------------------------------------------------
+// Mark Notification / Alarm as Checked
+// -----------------------------------------------------
+exports.markAlarmNotified = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { reminderId } = req.params;   // <-- now consistent
+    const { time } = req.body;
+
+    if (!reminderId) {
+      return res.status(400).json({ error: "Missing reminderId in URL." });
+    }
+
+    // 🔹 Convert "7:45 AM" → Date
+    let alarmNotifiedAt = new Date();
+
+    if (time && typeof time === "string") {
+      const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+      const combined = `${today} ${time}`;
+      const parsed = new Date(combined);
+
+      if (!isNaN(parsed.getTime())) {
+        alarmNotifiedAt = parsed;
+      }
+    }
+
+    // 1️⃣ Update the timeline card (reminderId actually refers to a card)
+    const card = await TimelineCard.findOneAndUpdate(
+      { _id: reminderId, userId },  // <-- FIXED
+      {
+        $set: {
+          alarm_notified: true,
+          alarm_notified_at: alarmNotifiedAt,
+          alarm_notified_time: time || null
+        }
+      },
+      { new: true }
+    );
+
+    if (!card) {
+      return res.status(404).json({ error: "Card not found or not accessible." });
+    }
+
+    // 2️⃣ Return full updated timeline
+    const allCards = await TimelineCard.find({ userId })
+      .sort({ date: -1 })
+      .lean();
+return res.status(200).json({
+  status: "success",
+  message: "Alarm marked as notified.",
+  card
+});
+
+
+  } catch (err) {
+    console.error("Error marking alarm notified:", err);
+    return res.status(500).json({
+      error: "Internal server error while marking alarm notified."
+    });
+  }
+};
+
+
+
 
 
 

@@ -18,6 +18,8 @@ router.get('/:userId/reminders', protect, timelineController.getEntries);
 // PUT /api/v1/users/:userId/reminders/:reminderId - Update a Reminder
 router.put('/:userId/reminders/:reminderId', protect, timelineController.updateEntry);
 
+
+
 // PUT /api/v1/users/:userId/medications/:medId - Update a Medication
 // router.put('/:userId/medications/:medId', protect, timelineController.updateEntry);
 
@@ -37,6 +39,9 @@ router.get('/:userId/cuore-score-details' , protect, timelineController.getCuore
 router.delete('/:userId/reminders/:reminderId', protect, timelineController.deleteReminder);
 
 router.put("/:userId/complete/:reminderId", protect, timelineController.completeCard);
+
+// Mark alarm as notified (bell icon pressed)
+router.put('/:userId/notified/:reminderId', protect, timelineController.markAlarmNotified);
 
 // router.post('/:userId/clear-checkin', protect, timelineController.clearDoctorCheckin);
 module.exports = router;

@@ -29,6 +29,11 @@ const timelineCardSchema = new mongoose.Schema({
     completionTime: { type: Date, default: null },
     isMissed: { type: Boolean, default: false },
 
+    alarm_notified: { type: Boolean, default: false },
+alarm_notified_at: { type: Date, default: null },
+alarm_notified_time: { type: String, default: null }, // "7:45 AM"
+
+
     // Links to source data (for user reminders/medications)
     sourceId: { type: mongoose.Schema.Types.ObjectId, default: null },
 
