@@ -256,31 +256,70 @@ exports.verifyNewUserOtp = async (req, res) => {
 // Existing User Login Flow Endpoints (Modified)
 exports.requestOtp = async (req, res) => {
     const { phone } = req.body;
-    
+
     if (!phone || !phone.startsWith('+')) {
-        return res.status(400).json({ error: "Please enter a valid mobile number in international format eg: +91.... ." });
+        return res.status(400).json({
+            error: "Please enter a valid mobile number in international format eg: +91.... ."
+        });
     }
 
     try {
+        // --- NEW: Check if phone belongs to a caregiver ---
+        const caregiverOwner = await User.findOne({ caregiver_mobile: phone }).lean();
+
+        if (caregiverOwner) {
+            const otp = generateSimpleOtp();
+            const otpHash = hashOtp(otp);
+            const requestId = typeof nanoid !== "undefined"
+                ? nanoid()
+                : require("crypto").randomBytes(16).toString("hex");
+
+            const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+            await OtpRequest.create({
+                request_id: requestId,
+                phone,
+                otpHash,
+                expiresAt,
+                lastRequestedAt: new Date(),
+                context: {
+                    role: "caregiver",
+                    userId: caregiverOwner._id        // patient’s userId
+                }
+            });
+
+            console.log(`[AUTH][CAREGIVER] OTP for caregiver ${phone}: ${otp}`);
+
+            return res.status(202).json({
+                request_id: requestId,
+                test_otp_code: otp,
+                retry_after_seconds: RETRY_AFTER,
+                caregiver: true,
+               linkedDoctorCode: null, 
+                message: "A login code has been sent to your caregiver number."
+            });
+        }
+
+        // --- Existing User Check ---
         const existingUser = await User.findOne({ phone });
 
-        // --- MODIFIED LOGIC: Check for doctor link if user not found ---
         if (!existingUser) {
-            // User not found. Check if they are a new, pre-linked patient.
             const patientLink = await PatientLink.findOne({ patientMobile: phone });
-            
+
             return res.status(404).json({
                 error: "USER_NOT_FOUND",
                 message: "Mobile number not registered, please sign up.",
-                // This NEW field tells the frontend to auto-fill the doctor code
-                linkedDoctorCode: patientLink ? patientLink.doctorCode : null 
+                linkedDoctorCode: patientLink ? patientLink.doctorCode : null
             });
         }
-        
-        // --- (This is the original logic for an EXISTING user) ---
+
+        // --- NORMAL USER OTP FLOW ---
         const otp = generateSimpleOtp();
         const otpHash = hashOtp(otp);
-        const requestId = typeof nanoid !== 'undefined' ? nanoid() : require('crypto').randomBytes(16).toString('hex');
+        const requestId = typeof nanoid !== 'undefined'
+            ? nanoid()
+            : require('crypto').randomBytes(16).toString('hex');
+
         const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
         await OtpRequest.create({
@@ -289,28 +328,32 @@ exports.requestOtp = async (req, res) => {
             otpHash,
             expiresAt,
             lastRequestedAt: new Date(),
+            context: { role: "user", userId: existingUser._id }  // ADDED CONTEXT
         });
-        
-        console.log(`[AUTH] Test OTP for ${phone}: ${otp} (Request ID: ${requestId})`);
 
-        return res.status(202).json({ 
-            request_id: requestId, 
+        console.log(`[AUTH] Test OTP for ${phone}: ${otp}`);
+
+        return res.status(202).json({
+            request_id: requestId,
             test_otp_code: otp,
             retry_after_seconds: RETRY_AFTER,
-            message: "A login code has been sent to your registered number.",
-            // We also send null here so the frontend knows not to auto-fill for logins
-            linkedDoctorCode: null 
+            linkedDoctorCode: null,
+            caregiver: false,
+            message: "A login code has been sent to your registered number."
         });
 
     } catch (error) {
         console.error("Error requesting OTP:", error);
-        return res.status(500).json({ error: "Something went wrong. Please try again." });
+        return res.status(500).json({
+            error: "Something went wrong. Please try again."
+        });
     }
 };
 
+
 exports.verifyOtp = async (req, res) => {
     const { request_id, otp_code } = req.body;
-    
+
     if (!request_id || !otp_code) {
         return res.status(400).json({ error: "Missing required fields." });
     }
@@ -319,43 +362,83 @@ exports.verifyOtp = async (req, res) => {
         const otpEntry = await OtpRequest.findOne({ request_id });
 
         if (!otpEntry) {
-            return res.status(401).json({ error: "OTP_INVALID (That code didn't match try again.)" });
+            return res.status(401).json({
+                error: "OTP_INVALID (That code didn't match try again.)"
+            });
         }
-        
+
         if (otpEntry.expiresAt < new Date()) {
             await OtpRequest.deleteOne({ request_id });
-            return res.status(410).json({ error: "OTP_EXPIRED (This code has expired. Request a new one.)" });
+            return res.status(410).json({
+                error: "OTP_EXPIRED (This code has expired. Request a new one.)"
+            });
         }
 
         const isOtpValid = compareOtp(otp_code, otpEntry.otpHash);
-        
         if (!isOtpValid) {
-            return res.status(401).json({ error: "OTP_INVALID (That code didn't match try again.)" });
+            return res.status(401).json({
+                error: "OTP_INVALID (That code didn't match try again.)"
+            });
         }
 
-        const phone = otpEntry.phone;
-        const user = await User.findOne({ phone });
+        // --- NEW: Caregiver login handling ---
+        if (otpEntry.context?.role === "caregiver") {
+            const patientUserId = otpEntry.context.userId;
 
-        if (!user) {
-            // This is a new user flow fallback (should use verifyNewUserOtp ideally)
-            const newUser = await User.create({ phone });
+            const patientUser = await User.findById(patientUserId);
+            if (!patientUser) {
+                await OtpRequest.deleteOne({ request_id });
+                return res.status(404).json({ error: "LINKED_USER_NOT_FOUND" });
+            }
+
             await OtpRequest.deleteOne({ request_id });
-            
-            const { accessToken, refreshToken } = generateTokens(newUser._id);
-            
+
+            const accessToken = jwt.sign(
+                { userId: patientUserId, role: "caregiver" },
+                JWT_ACCESS_SECRET,
+                { expiresIn: ACCESS_EXPIRY }
+            );
+
+            const refreshToken = jwt.sign(
+                { userId: patientUserId, role: "caregiver" },
+                JWT_REFRESH_SECRET,
+                { expiresIn: REFRESH_EXPIRY }
+            );
+
             return res.status(200).json({
-                user_id: newUser._id,
-                new_user: true, 
-                onboardingStatus: "incomplete", 
+                caregiver_login: true,
+                user_id: patientUserId,
                 access_token: accessToken,
                 refresh_token: refreshToken,
                 expires_in: 18000
             });
         }
-        
+
+        // -----------------------------------------------------
+        // NORMAL USER FLOW (unchanged)
+        // -----------------------------------------------------
+
+        const phone = otpEntry.phone;
+        const user = await User.findOne({ phone });
+
+        if (!user) {
+            const newUser = await User.create({ phone });
+            await OtpRequest.deleteOne({ request_id });
+
+            const { accessToken, refreshToken } = generateTokens(newUser._id);
+
+            return res.status(200).json({
+                user_id: newUser._id,
+                new_user: true,
+                onboardingStatus: "incomplete",
+                access_token: accessToken,
+                refresh_token: refreshToken,
+                expires_in: 18000
+            });
+        }
+
         await OtpRequest.deleteOne({ request_id });
 
-        // --- Check for onboarding status for existing users ---
         const onboardingDoc = await Onboarding.findOne({ userId: user._id });
         const onboardingStatus = onboardingDoc ? "complete" : "incomplete";
 
@@ -363,8 +446,8 @@ exports.verifyOtp = async (req, res) => {
 
         return res.status(200).json({
             user_id: user._id,
-            new_user: false, 
-            onboardingStatus: onboardingStatus, 
+            new_user: false,
+            onboardingStatus,
             access_token: accessToken,
             refresh_token: refreshToken,
             expires_in: 18000
@@ -372,7 +455,9 @@ exports.verifyOtp = async (req, res) => {
 
     } catch (error) {
         console.error("Error verifying OTP:", error);
-        return res.status(500).json({ error: "SERVER_ERROR (Something went wrong. Please try again.)" });
+        return res.status(500).json({
+            error: "SERVER_ERROR (Something went wrong. Please try again.)"
+        });
     }
 };
 
