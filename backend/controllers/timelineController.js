@@ -407,10 +407,11 @@ const getAlerts = async (userId) => {
   const onboarding = await Onboarding.findOne({ userId }).lean();
   if (!onboarding) return [];
 
-  const { scores, o3Data = {}, o7Data = {} } = onboarding;
-  const now = dayjs();
+  const { o3Data = {}, o7Data = {}, scores = {} } = onboarding;
 
-  // 🔴 If doctor requested check-in
+  const isYes = (v) => v && v !== "false" && v.trim().length > 0;
+
+  // 1️⃣ DOCTOR CHECK-IN REQUEST
   if (onboarding.doctorRequestedCheckin) {
     alerts.push({
       type: "red",
@@ -419,94 +420,140 @@ const getAlerts = async (userId) => {
     });
   }
 
-  // ------------------------
-  // 🔴 RED ALERTS (CRITICAL)
-  // ------------------------
-
-  // SOB alert (q5)
-  if (isAnswered(o3Data.q5)) {
+  // 2️⃣ SOB (critical)
+  if (isYes(o3Data.q5)) {
     alerts.push({
-      type: 'red',
-      text: 'Consult your doctor promptly for SOB.',
-      action: 'Consult'
+      type: "red",
+      text: "Consult your doctor promptly for SOB.",
+      action: "Consult"
     });
   }
 
-  if (o7Data.bp_upper > 170 || o7Data.bp_upper < 90 || 
-      o7Data.bp_lower > 110 || o7Data.bp_lower < 60) {
-    alerts.push({ type: 'red', text: 'Consult your doctor for BP.', action: 'Consult' });
+  // 3️⃣ Diabetes symptoms (IMPORTANT)
+  if (isYes(o3Data.q6)) {
+    alerts.push({
+      type: "orange",
+      text: "Consult your doctor for diabetes.",
+      action: "Consult"
+    });
   }
 
+  // -----------------------------------------
+  // 4️⃣ BP UPPER (exact ranges)
+  // -----------------------------------------
+  if (o7Data.bp_upper > 170 || o7Data.bp_upper < 90) {
+    alerts.push({ type: "red", text: "Consult your doctor for BP.", action: "Consult" });
+  } else if (
+    (o7Data.bp_upper >= 150 && o7Data.bp_upper <= 170) ||
+    (o7Data.bp_upper >= 90 && o7Data.bp_upper <= 100)
+  ) {
+    alerts.push({ type: "orange", text: "Consult your doctor for BP.", action: "Consult" });
+  } else if (
+    (o7Data.bp_upper >= 140 && o7Data.bp_upper <= 150) ||
+    (o7Data.bp_upper >= 100 && o7Data.bp_upper <= 110)
+  ) {
+    alerts.push({ type: "yellow", text: "Monitor BP.", action: "Monitor" });
+  }
+
+  // -----------------------------------------
+  // 5️⃣ BP LOWER (exact ranges)
+  // -----------------------------------------
+  if (o7Data.bp_lower > 110 || o7Data.bp_lower < 60) {
+    alerts.push({ type: "red", text: "Consult your doctor for BP.", action: "Consult" });
+  } else if (
+    (o7Data.bp_lower >= 100 && o7Data.bp_lower <= 110) ||
+    (o7Data.bp_lower >= 60 && o7Data.bp_lower <= 66)
+  ) {
+    alerts.push({ type: "orange", text: "Consult your doctor for BP.", action: "Consult" });
+  } else if (
+    (o7Data.bp_lower >= 88 && o7Data.bp_lower <= 100) ||
+    (o7Data.bp_lower >= 66 && o7Data.bp_lower <= 74)
+  ) {
+    alerts.push({ type: "yellow", text: "Monitor BP.", action: "Monitor" });
+  }
+
+  // 6️⃣ Pulse Rate
   if (o7Data.pulse < 50 || o7Data.pulse > 120) {
-    alerts.push({ type: 'red', text: 'Consult your doctor for heart rate.', action: 'Consult' });
+    alerts.push({ type: "red", text: "Consult your doctor for heart rate.", action: "Consult" });
+  } else if ((o7Data.pulse >= 50 && o7Data.pulse <= 60) ||
+             (o7Data.pulse >= 110 && o7Data.pulse <= 120)) {
+    alerts.push({ type: "orange", text: "Monitor heart rate.", action: "Monitor" });
   }
 
+  // -----------------------------------------
+  // 7️⃣ Blood Sugar – Fasting
+  // -----------------------------------------
+  if (o7Data.bs_f > 240 || o7Data.bs_f < 100) {
+    alerts.push({
+      type: "orange",
+      text: "Monitor sugar & consult your doctor.",
+      action: "Monitor"
+    });
+  } else if (
+    (o7Data.bs_f >= 200 && o7Data.bs_f <= 240) ||
+    (o7Data.bs_f >= 100 && o7Data.bs_f <= 140)
+  ) {
+    alerts.push({
+      type: "yellow",
+      text: "Monitor sugar.",
+      action: "Monitor"
+    });
+  }
+
+  // -----------------------------------------
+  // 8️⃣ Blood Sugar – After Meal
+  // -----------------------------------------
+  if (o7Data.bs_am > 260 || o7Data.bs_am < 120) {
+    alerts.push({
+      type: "orange",
+      text: "Monitor sugar & consult your doctor.",
+      action: "Monitor"
+    });
+  } else if (
+    (o7Data.bs_am >= 220 && o7Data.bs_am <= 260) ||
+    (o7Data.bs_am >= 120 && o7Data.bs_am <= 160)
+  ) {
+    alerts.push({
+      type: "yellow",
+      text: "Monitor sugar.",
+      action: "Monitor"
+    });
+  }
+
+  // -----------------------------------------
+  // 9️⃣ "No diabetes" + high sugar (point 7)
+  // -----------------------------------------
+  const userSaysNoDiabetes = !o3Data.hasDiabetes || o3Data.hasDiabetes === false;
+
+  if (userSaysNoDiabetes) {
+    if (o7Data.bs_f > 120 || o7Data.bs_am > 160) {
+      alerts.push({
+        type: "orange",
+        text: "Monitor sugar & consult your doctor.",
+        action: "Monitor"
+      });
+    }
+  }
+
+  // 1️⃣0️⃣ O2 Saturation
   if (o7Data.o2_sat < 91) {
+    alerts.push({ type: "red", text: "Consult your doctor for O2 Sat.", action: "Consult" });
+  } else if (o7Data.o2_sat >= 91 && o7Data.o2_sat <= 94) {
+    alerts.push({ type: "orange", text: "Monitor your O2 saturation", action: "Monitor" });
+  }
+
+  // 1️⃣1️⃣ HsCRP
+  if (o7Data.HsCRP > 0.3 || o7Data.HsCRP > 3) {
     alerts.push({
-      type: 'red',
-      text: 'Consult your doctor for low O2.',
-      action: 'Consult'
+      type: "orange",
+      text: "Consult your doctor for high HsCRP.",
+      action: "Consult"
     });
   }
 
-  // ---------------------------
-  // 🟠 ORANGE ALERTS (IMPORTANT)
-  // ---------------------------
-
-  // Diabetes-related question (q6)
-  if (isAnswered(o3Data.q6)) {
-    alerts.push({
-      type: 'orange',
-      text: 'Consult your doctor for diabetes.',
-      action: 'Consult'
-    });
-  }
-
-  if ((o7Data.bp_upper >= 150 && o7Data.bp_upper <= 170) ||
-      (o7Data.bp_upper >= 90 && o7Data.bp_upper <= 100) ||
-      (o7Data.bp_lower >= 100 && o7Data.bp_lower <= 110) ||
-      (o7Data.bp_lower >= 60 && o7Data.bp_lower <= 66)) {
-    alerts.push({ type: 'orange', text: 'Consult your doctor for BP.', action: 'Consult' });
-  }
-
-  if (o7Data.bs_f > 240 || o7Data.bs_f < 100 ||
-      o7Data.bs_am > 260 || o7Data.bs_am < 120) {
-    alerts.push({
-      type: 'orange',
-      text: 'Monitor sugar & consult your doctor.',
-      action: 'Monitor'
-    });
-  }
-
-  if (o7Data.HDL < 45 || o7Data.LDL > 180 || o7Data.Trig > 200) {
-    alerts.push({
-      type: 'orange',
-      text: 'Consult your doctor for Cholesterol.',
-      action: 'Consult'
-    });
-  }
-
-  // ---------------------------
-  // 🟡 YELLOW ALERTS (WARNING)
-  // ---------------------------
-
-  if ((o7Data.bp_upper >= 140 && o7Data.bp_upper <= 150) ||
-      (o7Data.bp_upper >= 100 && o7Data.bp_upper <= 110) ||
-      (o7Data.bp_lower >= 88 && o7Data.bp_lower <= 100) ||
-      (o7Data.bp_lower >= 66 && o7Data.bp_lower <= 74)) {
-    alerts.push({ type: 'yellow', text: 'Monitor BP.', action: 'Monitor' });
-  }
-
-  if ((o7Data.bs_f >= 200 && o7Data.bs_f <= 240) ||
-      (o7Data.bs_f >= 100 && o7Data.bs_f <= 140) ||
-      (o7Data.bs_am >= 220 && o7Data.bs_am <= 260) ||
-      (o7Data.bs_am >= 120 && o7Data.bs_am <= 160)) {
-    alerts.push({ type: 'yellow', text: 'Monitor sugar.', action: 'Monitor' });
-  }
-
-  // 🟡 Exercise-Meal Timing Alert
+  // 1️⃣2️⃣ Exercise timing
   try {
-    const day = dayjs().startOf('day');
+    const day = dayjs().startOf("day");
 
     const ex12 = onboarding?.o5Data?.preferred_ex_time;
     const wake12 = onboarding?.o6Data?.wake_time || "07:00 AM";
@@ -514,52 +561,27 @@ const getAlerts = async (userId) => {
     const ex24 = ex12 ? convertTo24Hour(ex12) : null;
     const wake24 = convertTo24Hour(wake12);
 
-    const exerciseTime = ex24 ? dayjs(`${day.format('YYYY-MM-DD')} ${ex24}`) : null;
-    const wakeTime = dayjs(`${day.format('YYYY-MM-DD')} ${wake24}`);
+    const exerciseTime = ex24 ? dayjs(`${day.format("YYYY-MM-DD")} ${ex24}`) : null;
+    const wakeTime = dayjs(`${day.format("YYYY-MM-DD")} ${wake24}`);
 
-    const breakfast = wakeTime.add(105, "minute");
-    const lunch = wakeTime.add(390, "minute");
-    const dinner = lunch.add(390, "minute");
+    const breakfast = wakeTime.add(60, "minute"); // exactly per document
 
-    const within90 = (meal, exercise) =>
-      Math.abs(meal.diff(exercise, "minute")) < 90;
-
-    if (exerciseTime && (
-        within90(breakfast, exerciseTime) ||
-        within90(lunch, exerciseTime) ||
-        within90(dinner, exerciseTime)
-    )) {
+    if (exerciseTime && Math.abs(exerciseTime.diff(breakfast, "minute")) < 60) {
       alerts.push({
         type: "yellow",
-        text: "Avoid exercising within 90 minutes of a meal.",
+        text: "Avoid exercising within 60 minutes of eating.",
         action: "Adjust Time"
       });
     }
-  } catch (e) {
-    console.error("Error checking exercise-meal alert:", e);
-  }
+  } catch {}
 
-  // -------------------------------
-  // 🟡 Advisory (Pale Yellow)
-  // -------------------------------
-  if (!onboarding.doctor_code) {
-    alerts.push({
-      type: 'yellow',
-      text: 'Connect to a doctor for alert monitoring.',
-      action: 'Connect'
-    });
-  }
+  // 🔶 Sort SEVERITY
+  const rank = { red: 1, orange: 2, yellow: 3 };
+  alerts.sort((a, b) => rank[a.type] - rank[b.type]);
 
-  // Sort by severity
-  const severityOrder = { red: 1, orange: 2, yellow: 3 };
-
-  if (alerts.length > 0) {
-    alerts.sort((a, b) => severityOrder[a.type] - severityOrder[b.type]);
-    return alerts;
-  }
-
-  return [];
+  return alerts;
 };
+
 
 
 // -----------------------------------------------------
