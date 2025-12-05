@@ -627,7 +627,7 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       hasDiabetes: false
     };
 
-    // NOTE: important — do not default incomingO3 to {} because we must detect "not provided"
+    // Do NOT default incomingO3 to {} — we must detect absence vs presence
     const incomingO3 = payload.o3Data; // may be undefined
 
     console.log("🔵 [O3] Incoming payload from frontend:", JSON.stringify(incomingO3, null, 2));
@@ -665,23 +665,17 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
         } else {
           const incomingArr = incomingO3.selectedOptions;
 
-          // If empty array + no clear flag -> PRESERVE existing selectedOptions
-          if (incomingArr.length === 0 && !incomingO3.clearSelectedOptions) {
-            console.log("🟠 [O3] incoming selectedOptions empty but no clearSelectedOptions -> PRESERVE existing selectedOptions");
-            // keep mergedO3.selectedOptions as-is
-          }
-
-          // If empty array + clear flag -> explicitly clear
-          else if (incomingArr.length === 0 && incomingO3.clearSelectedOptions) {
-            console.log("🔴 [O3] explicit clearSelectedOptions -> clearing O3");
+          // --- NEW BEHAVIOR: If user sent selectedOptions: [] -> treat as CLEAR
+          if (incomingArr.length === 0) {
+            console.log("🔴 [O3] incoming selectedOptions is empty -> user cleared O3 (interpreted as intentional)");
             mergedO3.selectedOptions = [];
             mergedO3.q1 = mergedO3.q2 = mergedO3.q3 = mergedO3.q4 = mergedO3.q5 = mergedO3.q6 = null;
             mergedO3.hasHypertension = false;
             mergedO3.hasDiabetes = false;
           }
 
-          // Normal update -> replace selectedOptions and wipe q-fields to rebuild
-          else if (incomingArr.length > 0) {
+          // Normal update -> non-empty array
+          else {
             console.log("🟢 [O3] updating selectedOptions ->", incomingArr);
             mergedO3.selectedOptions = incomingArr.slice();
             mergedO3.q1 = mergedO3.q2 = mergedO3.q3 = mergedO3.q4 = mergedO3.q5 = mergedO3.q6 = null;
@@ -692,7 +686,7 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       }
     }
 
-    // ===== NEW: If selectedOptions is empty but q-fields exist (legacy docs), reconstruct selectedOptions from q-fields
+    // ===== Reconstruct selectedOptions from q1..q6 if selectedOptions empty but q-fields exist (legacy docs)
     const qFields = ["q1","q2","q3","q4","q5","q6"];
     const qTexts = {
       q1: "One of my parents was diagnosed with diabetes before the age of 60",
@@ -705,7 +699,6 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
 
     const hasQValue = qFields.some(k => !!mergedO3[k]);
     if ((!Array.isArray(mergedO3.selectedOptions) || mergedO3.selectedOptions.length === 0) && hasQValue) {
-      // reconstruct from q-fields preserving legacy values
       mergedO3.selectedOptions = qFields.reduce((arr, k) => {
         if (mergedO3[k]) arr.push(qTexts[k]);
         return arr;
@@ -732,14 +725,13 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       o7Data: { ...existingData.o7Data },
     };
 
-    // --- CONTINUE your O7 logic, snapshots and scoring exactly as before ---
+    // --- CONTINUE your O7 logic, snapshots and scoring (unchanged) ---
     const o2Metrics = validateAndCalculateScores(mergedData.o2Data);
     const o4Metrics = processO4Data(mergedData.o4Data);
     const o5Metrics = processO5Data(mergedData.o5Data);
     const o6Metrics = processO6Data(mergedData.o6Data);
 
-    // (retain your existing O7 snapshot/build logic here; omitted in this paste for brevity)
-    // Build finalDataToSave exactly as you previously did but ensuring you use computed metrics:
+    // Build finalDataToSave (use the same snapshot / history logic you already have)
     const finalDataToSave = {
       userId,
       onboardingVersion: "7",
@@ -757,7 +749,7 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       finalDataToSave.onboardedAt = new Date();
     }
 
-    // Update DB (if you push histories, keep that logic; this is the minimal safe setter)
+    // Update DB (apply your history push logic if necessary)
     const finalOnboardingDoc = await OnboardingModel.findOneAndUpdate(
       { userId },
       { $set: finalDataToSave },
@@ -773,6 +765,7 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     throw new Error("Internal Server Error");
   }
 };
+
 
 
 
