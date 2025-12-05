@@ -578,11 +578,12 @@ const calculateCuoreScore = (allData, allScores) => {
 // ... (your existing imports, ValidationError, helper functions like validateAndCalculateScores, etc.) ...
 // ... (Make sure OnboardingModel is imported/defined)
 
+// Replace existing exports.processAndSaveFinalSubmission with this full function
 exports.processAndSaveFinalSubmission = async (userId, payload) => {
   try {
     const existingDoc = await OnboardingModel.findOne({ userId });
 
-    // ⭐ Ensure onboarding date is set only once
+    // Ensure onboarding date is set only once
     if (!existingDoc?.onboardedAt) {
       if (existingDoc) {
         existingDoc.onboardedAt = new Date();
@@ -599,7 +600,7 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     // --- SAFE MERGE HELPER ---
     const safeMerge = (existing = {}, incoming = {}) => {
       const result = { ...existing };
-      for (const [key, value] of Object.entries(incoming)) {
+      for (const [key, value] of Object.entries(incoming || {})) {
         if (
           value === undefined ||
           value === "" ||
@@ -616,9 +617,8 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     const existingData = existingDoc ? existingDoc.toObject() : {};
 
     // -----------------------------
-    // ⭐⭐⭐ FULL O3 FIX BEGINS ⭐⭐⭐
+    // O3 handling (defensive + reconstruction)
     // -----------------------------
-
     const existingO3 = existingData.o3Data || {
       q1: null, q2: null, q3: null, q4: null, q5: null, q6: null,
       selectedOptions: [],
@@ -627,72 +627,64 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       hasDiabetes: false
     };
 
-    const incomingO3 = payload.o3Data; // important: DO NOT use "|| {}"
+    // NOTE: important — do not default incomingO3 to {} because we must detect "not provided"
+    const incomingO3 = payload.o3Data; // may be undefined
 
     console.log("🔵 [O3] Incoming payload from frontend:", JSON.stringify(incomingO3, null, 2));
 
-    // ⭐ STEP 1: Start mergedO3 with existing values
+    // Start mergedO3 from existing stored values
     let mergedO3 = {
-      q1: existingO3.q1,
-      q2: existingO3.q2,
-      q3: existingO3.q3,
-      q4: existingO3.q4,
-      q5: existingO3.q5,
-      q6: existingO3.q6,
-      selectedOptions: Array.isArray(existingO3.selectedOptions)
-        ? [...existingO3.selectedOptions]
-        : [],
-      other_conditions: existingO3.other_conditions || "",
+      q1: existingO3.q1 ?? null,
+      q2: existingO3.q2 ?? null,
+      q3: existingO3.q3 ?? null,
+      q4: existingO3.q4 ?? null,
+      q5: existingO3.q5 ?? null,
+      q6: existingO3.q6 ?? null,
+      selectedOptions: Array.isArray(existingO3.selectedOptions) ? [...existingO3.selectedOptions] : [],
+      other_conditions: existingO3.other_conditions ?? "",
       hasHypertension: !!existingO3.hasHypertension,
       hasDiabetes: !!existingO3.hasDiabetes
     };
 
-    console.log("🟡 [O3] Starting mergedO3:", mergedO3);
+    console.log("🟡 [O3] Starting mergedO3:", JSON.stringify(mergedO3, null, 2));
 
-    // ⭐ STEP 2: If incomingO3 is undefined → user did NOT touch O3 → preserve existing
+    // If frontend did not send o3Data at all -> preserve existing O3 unchanged
     if (incomingO3 === undefined) {
-      console.log("🟠 [O3] No o3Data sent → PRESERVING existing O3.");
-    }
-
-    else {
-      // ⭐ STEP 3: Merge other_conditions ONLY if present
+      console.log("🟠 [O3] No o3Data present in payload -> preserve existing O3");
+      // nothing to do here
+    } else {
+      // Merge other_conditions if sent (explicit null means clear)
       if (Object.prototype.hasOwnProperty.call(incomingO3, "other_conditions")) {
         mergedO3.other_conditions = incomingO3.other_conditions ?? "";
       }
 
-      // ⭐ STEP 4: Handle selectedOptions
+      // If client provided selectedOptions property, handle it explicitly
       if (Object.prototype.hasOwnProperty.call(incomingO3, "selectedOptions")) {
-        
-        // must be array
         if (!Array.isArray(incomingO3.selectedOptions)) {
-          console.warn("⚠️ [O3] selectedOptions invalid → ignored.");
-        }
-
-        else {
+          console.warn("⚠️ [O3] incoming selectedOptions invalid type -> ignored");
+        } else {
           const incomingArr = incomingO3.selectedOptions;
 
-          // ⭐ CASE A: Empty array but no explicit clear → PRESERVE
+          // If empty array + no clear flag -> PRESERVE existing selectedOptions
           if (incomingArr.length === 0 && !incomingO3.clearSelectedOptions) {
-            console.log("🟠 [O3] Empty selectedOptions WITHOUT clear flag → PRESERVE existing.");
-            // leave mergedO3.selectedOptions as existing
+            console.log("🟠 [O3] incoming selectedOptions empty but no clearSelectedOptions -> PRESERVE existing selectedOptions");
+            // keep mergedO3.selectedOptions as-is
           }
 
-          // ⭐ CASE B: Empty WITH clear flag → CLEAR ALL
+          // If empty array + clear flag -> explicitly clear
           else if (incomingArr.length === 0 && incomingO3.clearSelectedOptions) {
-            console.log("🔴 [O3] Explicit CLEAR request detected!");
+            console.log("🔴 [O3] explicit clearSelectedOptions -> clearing O3");
             mergedO3.selectedOptions = [];
-            mergedO3.q1 = mergedO3.q2 = mergedO3.q3 = mergedO3.q4 =
-            mergedO3.q5 = mergedO3.q6 = null;
+            mergedO3.q1 = mergedO3.q2 = mergedO3.q3 = mergedO3.q4 = mergedO3.q5 = mergedO3.q6 = null;
             mergedO3.hasHypertension = false;
             mergedO3.hasDiabetes = false;
           }
 
-          // ⭐ CASE C: Normal update (non-empty array)
+          // Normal update -> replace selectedOptions and wipe q-fields to rebuild
           else if (incomingArr.length > 0) {
-            console.log("🟢 [O3] Updating selectedOptions to:", incomingArr);
-            mergedO3.selectedOptions = incomingArr;
-            mergedO3.q1 = mergedO3.q2 = mergedO3.q3 = mergedO3.q4 =
-            mergedO3.q5 = mergedO3.q6 = null;
+            console.log("🟢 [O3] updating selectedOptions ->", incomingArr);
+            mergedO3.selectedOptions = incomingArr.slice();
+            mergedO3.q1 = mergedO3.q2 = mergedO3.q3 = mergedO3.q4 = mergedO3.q5 = mergedO3.q6 = null;
             mergedO3.hasHypertension = false;
             mergedO3.hasDiabetes = false;
           }
@@ -700,88 +692,88 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       }
     }
 
+    // ===== NEW: If selectedOptions is empty but q-fields exist (legacy docs), reconstruct selectedOptions from q-fields
+    const qFields = ["q1","q2","q3","q4","q5","q6"];
+    const qTexts = {
+      q1: "One of my parents was diagnosed with diabetes before the age of 60",
+      q2: "One of my parents had a heart attack before the age of 60",
+      q3: "I have Hypertension (High blood pressure)",
+      q4: "I have Diabetes (High blood sugar)",
+      q5: "I feel short of breath or experience chest discomfort even during mild activity or at rest",
+      q6: "I've noticed an increase in hunger, thirst, or the need to urinate frequently"
+    };
+
+    const hasQValue = qFields.some(k => !!mergedO3[k]);
+    if ((!Array.isArray(mergedO3.selectedOptions) || mergedO3.selectedOptions.length === 0) && hasQValue) {
+      // reconstruct from q-fields preserving legacy values
+      mergedO3.selectedOptions = qFields.reduce((arr, k) => {
+        if (mergedO3[k]) arr.push(qTexts[k]);
+        return arr;
+      }, []);
+      console.log("🔄 [O3] reconstructed selectedOptions from q-fields:", JSON.stringify(mergedO3.selectedOptions, null, 2));
+    }
+
     console.log("🟡 [O3] Final mergedO3 BEFORE processO3Data:", JSON.stringify(mergedO3, null, 2));
 
-    // ⭐ STEP 5: Calculate final O3 using canonical builder
+    // Compute canonical O3 using processO3Data (which uses selectedOptions as source)
     const o3Metrics = processO3Data(mergedO3);
 
-    console.log("🟢 [O3] Final computed O3:", JSON.stringify(o3Metrics.o3Data, null, 2));
+    console.log("🟢 [O3] Final computed O3 (canonical):", JSON.stringify(o3Metrics.o3Data, null, 2));
 
-    // -----------------------------
-    // ⭐⭐⭐ FULL O3 FIX ENDS ⭐⭐⭐
-    // -----------------------------
-
-    // --- SAFE MERGE FOR OTHER ONBOARDING DATA ---
+    // --- MERGE OTHER SECTIONS SAFELY ---
     const mergedData = {
       ...existingData,
       ...payload,
       o2Data: safeMerge(existingData.o2Data, payload.o2Data),
-      o3Data: o3Metrics.o3Data, // ⭐ always save canonical O3
+      o3Data: o3Metrics.o3Data, // SAVE canonical o3Data (safe)
       o4Data: safeMerge(existingData.o4Data, payload.o4Data),
       o5Data: safeMerge(existingData.o5Data, payload.o5Data),
       o6Data: safeMerge(existingData.o6Data, payload.o6Data),
       o7Data: { ...existingData.o7Data },
     };
 
-    // ---------------------
-    // ⭐ Your O7 logic unchanged
-    // ---------------------
-
+    // --- CONTINUE your O7 logic, snapshots and scoring exactly as before ---
     const o2Metrics = validateAndCalculateScores(mergedData.o2Data);
     const o4Metrics = processO4Data(mergedData.o4Data);
     const o5Metrics = processO5Data(mergedData.o5Data);
     const o6Metrics = processO6Data(mergedData.o6Data);
 
-    // your O7 logic continues here (unchanged) ...
-
-    // ---------------------
-    // ⭐ Build finalDataToSave (O3 correct)
-    // ---------------------
+    // (retain your existing O7 snapshot/build logic here; omitted in this paste for brevity)
+    // Build finalDataToSave exactly as you previously did but ensuring you use computed metrics:
     const finalDataToSave = {
       userId,
       onboardingVersion: "7",
-
       o2Data: o2Metrics.o2Data,
       derivedMetrics: o2Metrics.derivedMetrics,
-
       o3Data: o3Metrics.o3Data,
       o3Score: o3Metrics.o3Score,
-
       o4Data: o4Metrics.o4Data,
       o5Data: o5Metrics.o5Data,
       o6Data: o6Metrics.o6Data,
-
       timestamp: new Date(),
     };
 
-    // ⭐ PRESERVE ONBOARDING DATE
     if (!existingData.onboardedAt) {
       finalDataToSave.onboardedAt = new Date();
     }
 
-    // ⭐ Your history logic remains unchanged...
-    // ⭐ Your DB update logic remains unchanged...
-
+    // Update DB (if you push histories, keep that logic; this is the minimal safe setter)
     const finalOnboardingDoc = await OnboardingModel.findOneAndUpdate(
       { userId },
       { $set: finalDataToSave },
       { new: true, upsert: true, runValidators: true }
     );
 
-    if (!finalOnboardingDoc)
-      throw new ValidationError("Failed to save onboarding data.");
+    if (!finalOnboardingDoc) throw new ValidationError("Failed to save onboarding data.");
 
     return finalOnboardingDoc;
   } catch (error) {
-    console.error(
-      "Error in processAndSaveFinalSubmission:",
-      error.name,
-      error.message
-    );
+    console.error("Error in processAndSaveFinalSubmission:", error.name, error.message);
     if (error.name === "ValidationError") throw error;
     throw new Error("Internal Server Error");
   }
 };
+
 
 
 
