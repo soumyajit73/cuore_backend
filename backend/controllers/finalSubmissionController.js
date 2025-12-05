@@ -134,7 +134,7 @@ exports.getOnboardingData = async (req, res) => {
 
         const rawO3 = onboardingData.o3Data || {};
 
-        // 1️⃣ Define the EXACT strings your frontend expects for the options
+        // 1️⃣ Exact option strings
         const Q_TEXTS = {
             q1: "One of my parents was diagnosed with diabetes before the age of 60",
             q2: "One of my parents had a heart attack before the age of 60",
@@ -144,24 +144,30 @@ exports.getOnboardingData = async (req, res) => {
             q6: "I've noticed an increase in hunger, thirst, or the need to urinate frequently"
         };
 
-        // 2️⃣ Reconstruct selectedOptions dynamically
-        // We do NOT trust rawO3.selectedOptions from the DB because it might be out of sync.
-        // We check if q1...q6 exists (is not null/false) and push the text.
-        const reconstructedOptions = [];
-        
-        // Helper to check if a field is "truthy" (either the string text or boolean true)
+        // Helper
         const isSelected = (val) => val && val !== "false" && val !== false;
 
-        if (isSelected(rawO3.q1)) reconstructedOptions.push(Q_TEXTS.q1);
-        if (isSelected(rawO3.q2)) reconstructedOptions.push(Q_TEXTS.q2);
-        if (isSelected(rawO3.q3)) reconstructedOptions.push(Q_TEXTS.q3);
-        if (isSelected(rawO3.q4)) reconstructedOptions.push(Q_TEXTS.q4);
-        if (isSelected(rawO3.q5)) reconstructedOptions.push(Q_TEXTS.q5);
-        if (isSelected(rawO3.q6)) reconstructedOptions.push(Q_TEXTS.q6);
+        // 2️⃣ ✔️ SAFE: Use EXACT DB selectedOptions if present & valid
+        let finalSelectedOptions = [];
 
-        // 3️⃣ Normalize the O3 Object
+        if (Array.isArray(rawO3.selectedOptions) && rawO3.selectedOptions.length > 0) {
+            // DB already has clean selectedOptions → trust it
+            finalSelectedOptions = rawO3.selectedOptions;
+        } else {
+            // 3️⃣ Fallback (legacy docs only): reconstruct from q-fields
+            const reconstructed = [];
+            if (isSelected(rawO3.q1)) reconstructed.push(Q_TEXTS.q1);
+            if (isSelected(rawO3.q2)) reconstructed.push(Q_TEXTS.q2);
+            if (isSelected(rawO3.q3)) reconstructed.push(Q_TEXTS.q3);
+            if (isSelected(rawO3.q4)) reconstructed.push(Q_TEXTS.q4);
+            if (isSelected(rawO3.q5)) reconstructed.push(Q_TEXTS.q5);
+            if (isSelected(rawO3.q6)) reconstructed.push(Q_TEXTS.q6);
+
+            finalSelectedOptions = reconstructed;
+        }
+
+        // 4️⃣ Normalize O3 object for frontend
         const normalizedO3 = {
-            // If the field has data, send the Text String (truthy), otherwise false.
             q1: isSelected(rawO3.q1) ? Q_TEXTS.q1 : false,
             q2: isSelected(rawO3.q2) ? Q_TEXTS.q2 : false,
             q3: isSelected(rawO3.q3) ? Q_TEXTS.q3 : false,
@@ -169,20 +175,20 @@ exports.getOnboardingData = async (req, res) => {
             q5: isSelected(rawO3.q5) ? Q_TEXTS.q5 : false,
             q6: isSelected(rawO3.q6) ? Q_TEXTS.q6 : false,
 
-            // Send the reconstructed array so the Frontend List pre-fills correctly
-            selectedOptions: reconstructedOptions,
+            selectedOptions: finalSelectedOptions,
 
             other_conditions: rawO3.other_conditions || "",
             hasHypertension: !!rawO3.hasHypertension,
             hasDiabetes: !!rawO3.hasDiabetes
         };
 
+        // 5️⃣ Return normalized payload
         return res.status(200).json({
             status: "success",
             message: "Onboarding data retrieved",
             data: {
                 o2Data: onboardingData.o2Data || {},
-                o3Data: normalizedO3, // Use our fixed object
+                o3Data: normalizedO3,
                 o4Data: onboardingData.o4Data || {},
                 o5Data: onboardingData.o5Data || {},
                 o6Data: onboardingData.o6Data || {},
