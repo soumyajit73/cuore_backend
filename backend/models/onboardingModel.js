@@ -621,9 +621,22 @@ if (!existingDoc?.onboardedAt) {
   // --- 3️⃣ SMART MERGE FOR O3 DATA (THE ZOMBIE DATA FIX) ---
     const existingO3 = existingData.o3Data || {};
     const incomingO3 = payload.o3Data || {};
+    // ================= DEBUG LOGS FOR O3 =================
+console.log("🔵 [O3] Incoming payload from frontend:", JSON.stringify(incomingO3, null, 2));
+console.log("🔵 [O3] Type of selectedOptions:", Array.isArray(incomingO3.selectedOptions) ? "Array" : typeof incomingO3.selectedOptions);
+console.log("🔵 [O3] selectedOptions value:", incomingO3.selectedOptions);
+// ======================================================
+
     
     // Start with existing data...
     const mergedO3 = { ...existingO3 };
+    // ================= DEBUG LOGS FOR MERGED =================
+console.log("🟡 [O3] Merged O3 before processO3Data:", JSON.stringify(mergedO3, null, 2));
+if (Array.isArray(mergedO3.selectedOptions)) {
+  console.log("🟡 [O3] Merged selectedOptions length:", mergedO3.selectedOptions.length);
+}
+// =========================================================
+
 
     // 🔥 THE FIX: If the payload contains a "selectedOptions" array (even empty),
     // it becomes the single source of truth. We MUST wipe the old specific fields.
@@ -690,6 +703,11 @@ if (!existingDoc?.onboardedAt) {
     // These objects (o5Metrics, o6Metrics) now contain the sub-scores
     const o2Metrics = validateAndCalculateScores(mergedData.o2Data);
     const o3Metrics = processO3Data(mergedData.o3Data);
+// ================= DEBUG LOGS FOR FINAL SAVE =================
+console.log("🟢 [O3] Final computed O3 (after processO3Data):", JSON.stringify(o3Metrics.o3Data, null, 2));
+console.log("🟢 [O3] Final selectedOptions:", o3Metrics.o3Data.selectedOptions);
+// =============================================================
+
     const o4Metrics = processO4Data(mergedData.o4Data);
     const o5Metrics = processO5Data(mergedData.o5Data);
     const o6Metrics = processO6Data(mergedData.o6Data);
