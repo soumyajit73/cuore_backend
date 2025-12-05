@@ -57,6 +57,7 @@ exports.getCuoreHealthData = async (req, res) => {
 
     if (isSelected(o3Data.q3)) processedHistory.push("HTN");
     if (isSelected(o3Data.q4)) processedHistory.push("DM");
+    if (isSelected(o3Data.other_conditions)) processedHistory.push(o3Data.other_conditions);
 
     const pastHistory = processedHistory.join(", ");
     const smokerStatus = onboardingDoc.o4Data?.smoking || "N/A";
