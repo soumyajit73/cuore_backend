@@ -630,8 +630,6 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     // Do NOT default incomingO3 to {} — we must detect absence vs presence
     const incomingO3 = payload.o3Data; // may be undefined
 
-    console.log("🔵 [O3] Incoming payload from frontend:", JSON.stringify(incomingO3, null, 2));
-
     // Start mergedO3 from existing stored values
     let mergedO3 = {
       q1: existingO3.q1 ?? null,
@@ -646,12 +644,9 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       hasDiabetes: !!existingO3.hasDiabetes
     };
 
-    console.log("🟡 [O3] Starting mergedO3:", JSON.stringify(mergedO3, null, 2));
-
     // If frontend did not send o3Data at all -> preserve existing O3 unchanged
     if (incomingO3 === undefined) {
-      console.log("🟠 [O3] No o3Data present in payload -> preserve existing O3");
-      // nothing to do here
+      // preserve
     } else {
       // Merge other_conditions if sent (explicit null means clear)
       if (Object.prototype.hasOwnProperty.call(incomingO3, "other_conditions")) {
@@ -660,28 +655,25 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
 
       // If client provided selectedOptions property, handle it explicitly
       if (Object.prototype.hasOwnProperty.call(incomingO3, "selectedOptions")) {
-        if (!Array.isArray(incomingO3.selectedOptions)) {
-          console.warn("⚠️ [O3] incoming selectedOptions invalid type -> ignored");
-        } else {
+        if (Array.isArray(incomingO3.selectedOptions)) {
           const incomingArr = incomingO3.selectedOptions;
 
-          // --- NEW BEHAVIOR: If user sent selectedOptions: [] -> treat as CLEAR
+          // If user sent empty array -> treat as clear (intentional)
           if (incomingArr.length === 0) {
-            console.log("🔴 [O3] incoming selectedOptions is empty -> user cleared O3 (interpreted as intentional)");
             mergedO3.selectedOptions = [];
             mergedO3.q1 = mergedO3.q2 = mergedO3.q3 = mergedO3.q4 = mergedO3.q5 = mergedO3.q6 = null;
             mergedO3.hasHypertension = false;
             mergedO3.hasDiabetes = false;
-          }
-
-          // Normal update -> non-empty array
-          else {
-            console.log("🟢 [O3] updating selectedOptions ->", incomingArr);
+          } else {
+            // Normal update -> non-empty array
             mergedO3.selectedOptions = incomingArr.slice();
             mergedO3.q1 = mergedO3.q2 = mergedO3.q3 = mergedO3.q4 = mergedO3.q5 = mergedO3.q6 = null;
             mergedO3.hasHypertension = false;
             mergedO3.hasDiabetes = false;
           }
+        } else {
+          // ignore invalid shape
+          console.warn("⚠️ [O3] incoming selectedOptions invalid type -> ignored");
         }
       }
     }
@@ -703,15 +695,10 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
         if (mergedO3[k]) arr.push(qTexts[k]);
         return arr;
       }, []);
-      console.log("🔄 [O3] reconstructed selectedOptions from q-fields:", JSON.stringify(mergedO3.selectedOptions, null, 2));
     }
-
-    console.log("🟡 [O3] Final mergedO3 BEFORE processO3Data:", JSON.stringify(mergedO3, null, 2));
 
     // Compute canonical O3 using processO3Data (which uses selectedOptions as source)
     const o3Metrics = processO3Data(mergedO3);
-
-    console.log("🟢 [O3] Final computed O3 (canonical):", JSON.stringify(o3Metrics.o3Data, null, 2));
 
     // --- MERGE OTHER SECTIONS SAFELY ---
     const mergedData = {
@@ -725,13 +712,91 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       o7Data: { ...existingData.o7Data },
     };
 
-    // --- CONTINUE your O7 logic, snapshots and scoring (unchanged) ---
+    // --- scoring for o2/o4/o5/o6 ---
     const o2Metrics = validateAndCalculateScores(mergedData.o2Data);
     const o4Metrics = processO4Data(mergedData.o4Data);
     const o5Metrics = processO5Data(mergedData.o5Data);
     const o6Metrics = processO6Data(mergedData.o6Data);
 
-    // Build finalDataToSave (use the same snapshot / history logic you already have)
+    // --- O7 (biomarker) processing restored and made robust ---
+    const o7Payload = payload.o7Data || {};
+    // Treat any o7Data presence as manual update (keys except auto_filled count as manual)
+    const manuallyEnteredFields = Object.keys(o7Payload).filter((k) => k !== "auto_filled");
+
+    let processedO7Data;
+    if (manuallyEnteredFields.length > 0) {
+      // Build processedO7Data: use values from payload (empty string -> null)
+      processedO7Data = {
+        ...getAutofillData(0), // default shape to ensure fields exist
+        ...Object.fromEntries(
+          manuallyEnteredFields.map((field) => [
+            field,
+            o7Payload[field] === "" ? null : o7Payload[field],
+          ])
+        ),
+        manual_fields: manuallyEnteredFields,
+        auto_filled: false,
+      };
+
+      // If bs_f and bs_am provided but A1C missing, compute A1C (same as earlier logic)
+      if (processedO7Data.bs_f && processedO7Data.bs_am && !processedO7Data.A1C) {
+        processedO7Data.A1C = roundTo(
+          ((processedO7Data.bs_f + processedO7Data.bs_am) / 2 + 46.7) / 28.7,
+          2
+        );
+      }
+      // compute trig_hdl_ratio if possible
+      if (processedO7Data.Trig && processedO7Data.HDL && !processedO7Data.trig_hdl_ratio) {
+        processedO7Data.trig_hdl_ratio = roundTo(processedO7Data.Trig / processedO7Data.HDL, 2);
+      }
+    } else {
+      // No manual fields provided -> autofill path (existing logic)
+      const tempScores = {
+        ...o2Metrics.scores,
+        o3Score: o3Metrics.o3Score,
+        o4Score: o4Metrics.o4Score,
+        o5Score: o5Metrics.o5Score,
+        o6Score: o6Metrics.o6Score,
+      };
+
+      const totalScoreBeforeO7 = Object.values(tempScores)
+        .filter((s) => typeof s === "number")
+        .reduce((a, b) => a + b, 0);
+
+      processedO7Data = {
+        ...getAutofillData(totalScoreBeforeO7),
+        manual_fields: [],
+        auto_filled: true,
+      };
+    }
+
+    // --- O7 SCORE CALCULATION ---
+    const o7Score =
+      score_o2_sat(processedO7Data.o2_sat) +
+      score_hr(processedO7Data.pulse) +
+      (score_bp_upper(processedO7Data.bp_upper) +
+        score_bp_lower(processedO7Data.bp_lower)) /
+        2 +
+      (score_bs_f(processedO7Data.bs_f) +
+        score_bs_am(processedO7Data.bs_am) +
+        score_a1c(processedO7Data.A1C)) /
+        3 +
+      score_hdl(processedO7Data.HDL) +
+      score_ldl(processedO7Data.LDL) +
+      score_trig(processedO7Data.Trig) +
+      score_hscrp(processedO7Data.HsCRP) +
+      score_trig_hdl_ratio(processedO7Data.trig_hdl_ratio);
+
+    const allScores = {
+      ...o2Metrics.scores,
+      o3Score: o3Metrics.o3Score,
+      o4Score: o4Metrics.o4Score,
+      o5Score: o5Metrics.o5Score,
+      o6Score: o6Metrics.o6Score,
+      o7Score,
+    };
+
+    // --- BUILD finalDataToSave (including O7 manual fields or nulls) ---
     const finalDataToSave = {
       userId,
       onboardingVersion: "7",
@@ -745,14 +810,101 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
       timestamp: new Date(),
     };
 
+    // Build o7Data in final save: for each expected key, pick manual if present else null
+    const allO7Keys = [
+      "o2_sat",
+      "pulse",
+      "bp_upper",
+      "bp_lower",
+      "bs_f",
+      "bs_am",
+      "A1C",
+      "HDL",
+      "LDL",
+      "Trig",
+      "HsCRP",
+      "trig_hdl_ratio",
+    ];
+
+    finalDataToSave.o7Data = {};
+    for (const key of allO7Keys) {
+      // If manual_fields includes key, use processedO7Data value (could be null)
+      finalDataToSave.o7Data[key] = processedO7Data.manual_fields.includes(key)
+        ? processedO7Data[key] ?? null
+        : null;
+    }
+    finalDataToSave.o7Data.manual_fields = processedO7Data.manual_fields;
+    finalDataToSave.o7Data.auto_filled = processedO7Data.auto_filled;
+
+    // --- CUORE SCORE & scores attach ---
+    allScores.cuoreScore = calculateCuoreScore(finalDataToSave, allScores);
+    finalDataToSave.scores = allScores;
+
     if (!existingData.onboardedAt) {
       finalDataToSave.onboardedAt = new Date();
     }
 
-    // Update DB (apply your history push logic if necessary)
+    // --- HISTORY SNAPSHOTS & push logic ---
+    const submissionTimestamp = finalDataToSave.timestamp;
+
+    const o2Snapshot = {
+      data: {
+        weight_kg: finalDataToSave.o2Data.weight_kg,
+        bmi: finalDataToSave.derivedMetrics.bmi,
+      },
+      timestamp: submissionTimestamp,
+    };
+
+    const o5Snapshot = {
+      data: {
+        o5Score: finalDataToSave.scores.o5Score,
+        foodScore: o5Metrics.foodScore,
+        exerciseScore: o5Metrics.exerciseScore,
+      },
+      timestamp: submissionTimestamp,
+    };
+
+    const o6Snapshot = {
+      data: {
+        o6Score: finalDataToSave.scores.o6Score,
+        sleepScore: o6Metrics.sleepScore,
+        stressScore: o6Metrics.stressScore,
+      },
+      timestamp: submissionTimestamp,
+    };
+
+    const o7Snapshot = {
+      data: { ...finalDataToSave.o7Data },
+      timestamp: submissionTimestamp,
+    };
+
+    const scoreSnapshot = {
+      data: { cuoreScore: finalDataToSave.scores.cuoreScore },
+      timestamp: submissionTimestamp,
+    };
+
+    // Build update operation
+    const updateOperation = { $set: finalDataToSave };
+    const pushOperations = {};
+
+    if (payload.o2Data && Object.keys(payload.o2Data).length > 0)
+      pushOperations.o2History = o2Snapshot;
+    if (payload.o5Data && Object.keys(payload.o5Data).length > 0)
+      pushOperations.o5History = o5Snapshot;
+    if (payload.o6Data && Object.keys(payload.o6Data).length > 0)
+      pushOperations.o6History = o6Snapshot;
+    // Push o7History if user sent o7Data
+    if (payload.o7Data && Object.keys(payload.o7Data).length > 0)
+      pushOperations.o7History = o7Snapshot;
+
+    pushOperations.scoreHistory = scoreSnapshot;
+    if (Object.keys(pushOperations).length > 0)
+      updateOperation.$push = pushOperations;
+
+    // --- FINAL DB UPDATE ---
     const finalOnboardingDoc = await OnboardingModel.findOneAndUpdate(
       { userId },
-      { $set: finalDataToSave },
+      updateOperation,
       { new: true, upsert: true, runValidators: true }
     );
 
@@ -765,6 +917,7 @@ exports.processAndSaveFinalSubmission = async (userId, payload) => {
     throw new Error("Internal Server Error");
   }
 };
+
 
 
 
