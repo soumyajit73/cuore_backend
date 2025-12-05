@@ -124,44 +124,55 @@ exports.getOnboardingData = async (req, res) => {
     try {
         const userId = req.user?.userId;
         if (!userId) {
-            return res.status(401).json({
-                status: "error",
-                message: "User ID missing"
-            });
+            return res.status(401).json({ status: "error", message: "User ID missing" });
         }
 
         const onboardingData = await model.getOnboardingDataByUserId(userId);
         if (!onboardingData) {
-            return res.status(404).json({
-                status: "error",
-                message: "No onboarding data found"
-            });
+            return res.status(404).json({ status: "error", message: "No onboarding data found" });
         }
 
-      const rawO3 = onboardingData.o3Data || {};
+        const rawO3 = onboardingData.o3Data || {};
 
-        // Helper to clean "false" strings from DB
-        const cleanBool = (val) => {
-             if (val === "false") return false; // Catches the string "false"
-             if (!val) return false;
-             return val; // Returns the actual text string
+        // 1️⃣ Define the EXACT strings your frontend expects for the options
+        const Q_TEXTS = {
+            q1: "One of my parents was diagnosed with diabetes before the age of 60",
+            q2: "One of my parents had a heart attack before the age of 60",
+            q3: "I have Hypertension (High blood pressure)",
+            q4: "I have Diabetes (High blood sugar)",
+            q5: "I feel short of breath or experience chest discomfort even during mild activity or at rest",
+            q6: "I've noticed an increase in hunger, thirst, or the need to urinate frequently"
         };
 
-        // ⭐ VERY IMPORTANT: Use EXACT saved values from DB
-        const normalizedO3 = {
-            q1: cleanBool(rawO3.q1),
-            q2: cleanBool(rawO3.q2),
-            q3: cleanBool(rawO3.q3),
-            q4: cleanBool(rawO3.q4),
-            q5: cleanBool(rawO3.q5),
-            q6: cleanBool(rawO3.q6),
+        // 2️⃣ Reconstruct selectedOptions dynamically
+        // We do NOT trust rawO3.selectedOptions from the DB because it might be out of sync.
+        // We check if q1...q6 exists (is not null/false) and push the text.
+        const reconstructedOptions = [];
+        
+        // Helper to check if a field is "truthy" (either the string text or boolean true)
+        const isSelected = (val) => val && val !== "false" && val !== false;
 
-            selectedOptions: Array.isArray(rawO3.selectedOptions)
-                ? rawO3.selectedOptions
-                : [],
+        if (isSelected(rawO3.q1)) reconstructedOptions.push(Q_TEXTS.q1);
+        if (isSelected(rawO3.q2)) reconstructedOptions.push(Q_TEXTS.q2);
+        if (isSelected(rawO3.q3)) reconstructedOptions.push(Q_TEXTS.q3);
+        if (isSelected(rawO3.q4)) reconstructedOptions.push(Q_TEXTS.q4);
+        if (isSelected(rawO3.q5)) reconstructedOptions.push(Q_TEXTS.q5);
+        if (isSelected(rawO3.q6)) reconstructedOptions.push(Q_TEXTS.q6);
+
+        // 3️⃣ Normalize the O3 Object
+        const normalizedO3 = {
+            // If the field has data, send the Text String (truthy), otherwise false.
+            q1: isSelected(rawO3.q1) ? Q_TEXTS.q1 : false,
+            q2: isSelected(rawO3.q2) ? Q_TEXTS.q2 : false,
+            q3: isSelected(rawO3.q3) ? Q_TEXTS.q3 : false,
+            q4: isSelected(rawO3.q4) ? Q_TEXTS.q4 : false,
+            q5: isSelected(rawO3.q5) ? Q_TEXTS.q5 : false,
+            q6: isSelected(rawO3.q6) ? Q_TEXTS.q6 : false,
+
+            // Send the reconstructed array so the Frontend List pre-fills correctly
+            selectedOptions: reconstructedOptions,
 
             other_conditions: rawO3.other_conditions || "",
-
             hasHypertension: !!rawO3.hasHypertension,
             hasDiabetes: !!rawO3.hasDiabetes
         };
@@ -171,7 +182,7 @@ exports.getOnboardingData = async (req, res) => {
             message: "Onboarding data retrieved",
             data: {
                 o2Data: onboardingData.o2Data || {},
-                o3Data: normalizedO3,
+                o3Data: normalizedO3, // Use our fixed object
                 o4Data: onboardingData.o4Data || {},
                 o5Data: onboardingData.o5Data || {},
                 o6Data: onboardingData.o6Data || {},
