@@ -531,76 +531,65 @@ const getAlerts = async (userId) => {
   // 5️⃣ BLOOD SUGAR (Corrected Rules — Final Verified Logic)
   // ---------------------------------------------------------------------
 
-  const bsF = n(o7Data.bs_f);
-  const bsA = n(o7Data.bs_am);
+ // -------------------------
+// BLOOD SUGAR (robust, uses hasDiabetes)
+// -------------------------
+const bsF = n(o7Data.bs_f);
+const bsA = n(o7Data.bs_am);
 
-  const answeredQ4 = isAnswered(o3Data.q4);
-  const affirmedQ4 = isAffirmative(o3Data.q4);
+// Debug info (temporary)
+console.log("[DBG] o3Data.q4:", o3Data.q4, "o3Data.hasDiabetes:", o3Data.hasDiabetes);
+console.log("[DBG] parsed bsF:", bsF, "bsA:", bsA);
 
-  const hasDiabetes = affirmedQ4;
-  const noDiabetes = answeredQ4 && !affirmedQ4;
+const answeredQ4 = isAnswered(o3Data.q4);
+const hasDiabetes = o3Data.hasDiabetes === true;
+const noDiabetes = answeredQ4 && o3Data.hasDiabetes === false;
 
-  let bsWorst = null;
+let bsWorst = null;
 
-  // -------------------------
-  // CASE 1: HAS DIABETES
-  // -------------------------
-  if (hasDiabetes) {
-    const bsFStatus = (() => {
-      if (bsF == null) return null;
-      if (bsF > 240 || bsF < 100) return "orange";
-      if (bsF >= 200 && bsF <= 240) return "yellow";
-      if (bsF >= 100 && bsF <= 140) return "yellow";
-      return null;
-    })();
+if (hasDiabetes) {
+  const bsFStatus = (() => {
+    if (bsF == null) return null;
+    if (bsF > 240 || bsF < 100) return "orange";
+    if ((bsF >= 200 && bsF <= 240) || (bsF >= 100 && bsF <= 140)) return "yellow";
+    return null;
+  })();
 
-    const bsAStatus = (() => {
-      if (bsA == null) return null;
-      if (bsA > 260 || bsA < 120) return "orange";
-      if (bsA >= 220 && bsA <= 260) return "yellow";
-      if (bsA >= 120 && bsA <= 160) return "yellow";
-      return null;
-    })();
+  const bsAStatus = (() => {
+    if (bsA == null) return null;
+    if (bsA > 260 || bsA < 120) return "orange";
+    if ((bsA >= 220 && bsA <= 260) || (bsA >= 120 && bsA <= 160)) return "yellow";
+    return null;
+  })();
 
-    bsWorst = worst(bsFStatus, bsAStatus);
-  }
-
-  // -------------------------
-  // CASE 2: NO DIABETES
-  // Only one rule applies:
-  // FBS >120 OR PP >160 → Orange
-  // Otherwise → Normal
-  // -------------------------
-  else if (noDiabetes) {
-    if ((bsF != null && bsF > 120) || (bsA != null && bsA > 160)) {
-      bsWorst = "orange";
-    } else {
-      bsWorst = null; // NO ALERT
-    }
-  }
-
-  // -------------------------
-  // CASE 3: User never answered Q4
-  // → treat as normal (no alert)
-  // -------------------------
-  else {
+  bsWorst = worst(bsFStatus, bsAStatus);
+  console.log("[DBG] hasDiabetes path -> bsFStatus:", bsFStatus, "bsAStatus:", bsAStatus, "bsWorst:", bsWorst);
+} else if (noDiabetes) {
+  // Only one rule applies for explicit NO
+  if ((bsF != null && bsF > 120) || (bsA != null && bsA > 160)) {
+    bsWorst = "orange";
+  } else {
     bsWorst = null;
   }
+  console.log("[DBG] noDiabetes path -> bsWorst:", bsWorst);
+} else {
+  bsWorst = null; // unanswered -> no alert
+  console.log("[DBG] Q4 unanswered -> no sugar alert");
+}
 
-  // Add final sugar alert
-  if (bsWorst === "orange") {
-    alerts.push({
-      type: "orange",
-      text: "Monitor sugar & consult your doctor.",
-      action: "Monitor",
-    });
-  } else if (bsWorst === "yellow") {
-    alerts.push({
-      type: "yellow",
-      text: "Monitor sugar.",
-      action: "Monitor",
-    });
-  }
+if (bsWorst === "orange") {
+  alerts.push({
+    type: "orange",
+    text: "Monitor sugar & consult your doctor.",
+    action: "Monitor",
+  });
+} else if (bsWorst === "yellow") {
+  alerts.push({
+    type: "yellow",
+    text: "Monitor sugar.",
+    action: "Monitor",
+  });
+}
 
   // ---------------------------------------------------------------------
   // 6️⃣ O2 Saturation
