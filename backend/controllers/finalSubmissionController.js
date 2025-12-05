@@ -138,16 +138,23 @@ exports.getOnboardingData = async (req, res) => {
             });
         }
 
-        const rawO3 = onboardingData.o3Data || {};
+      const rawO3 = onboardingData.o3Data || {};
+
+        // Helper to clean "false" strings from DB
+        const cleanBool = (val) => {
+             if (val === "false") return false; // Catches the string "false"
+             if (!val) return false;
+             return val; // Returns the actual text string
+        };
 
         // ⭐ VERY IMPORTANT: Use EXACT saved values from DB
         const normalizedO3 = {
-            q1: rawO3.q1 ?? false,
-            q2: rawO3.q2 ?? false,
-            q3: rawO3.q3 ?? false,
-            q4: rawO3.q4 ?? false,
-            q5: rawO3.q5 ?? false,
-            q6: rawO3.q6 ?? false,
+            q1: cleanBool(rawO3.q1),
+            q2: cleanBool(rawO3.q2),
+            q3: cleanBool(rawO3.q3),
+            q4: cleanBool(rawO3.q4),
+            q5: cleanBool(rawO3.q5),
+            q6: cleanBool(rawO3.q6),
 
             selectedOptions: Array.isArray(rawO3.selectedOptions)
                 ? rawO3.selectedOptions

@@ -333,13 +333,14 @@ const processO3Data = (o3Data) => {
 
   // **NEW**: Create the final object with the full string for selected options, or `false` if not selected.
   const mappedO3Data = {
-    q1: q1_selected ? Q1_TEXT : false,
-    q2: q2_selected ? Q2_TEXT : false,
-    q3: q3_selected ? Q3_TEXT : false,
-    q4: q4_selected ? Q4_TEXT : false,
-    q5: q5_selected ? Q5_TEXT : false,
-    q6: q6_selected ? Q6_TEXT : false,
+    q1: q1_selected ? Q1_TEXT : null,
+    q2: q2_selected ? Q2_TEXT : null,
+    q3: q3_selected ? Q3_TEXT : null,
+    q4: q4_selected ? Q4_TEXT : null,
+    q5: q5_selected ? Q5_TEXT : null,
+    q6: q6_selected ? Q6_TEXT : null,
     other_conditions: originalOtherConditions,
+    selectedOptions: selectedOptions, // Ensure selectedOptions is preserved
     ...updatedFlags,
   };
 
@@ -757,24 +758,25 @@ if (!existingDoc?.onboardedAt) {
     // --- 7️⃣ BUILD FINAL DATA TO SAVE ---
    // ⭐ ALWAYS PRESERVE EXACT USER O3 SELECTIONS — DO NOT REWRITE THEM
 const finalDataToSave = {
-  userId,
-  onboardingVersion: "7",
-
-  o2Data: o2Metrics.o2Data,
-  derivedMetrics: o2Metrics.derivedMetrics,
-
-  // 🔥 FIX: Use mergedO3 (exact user selections)
-  o3Data: mergedO3,
-
-  // store only the score from O3 processor
-  o3Score: o3Metrics.o3Score,
-
-  o4Data: o4Metrics.o4Data,
-  o5Data: o5Metrics.o5Data,
-  o6Data: o6Metrics.o6Data,
-
-  timestamp: new Date(),
-};
+      userId,
+      onboardingVersion: "7",
+    
+      o2Data: o2Metrics.o2Data,
+      derivedMetrics: o2Metrics.derivedMetrics,
+    
+      // 🔥 FIX 2: Do NOT use mergedO3. Use o3Metrics.o3Data.
+      // mergedO3 contains the "dirty merge" of old history.
+      // o3Metrics.o3Data contains the clean state calculated from selectedOptions.
+      o3Data: o3Metrics.o3Data, 
+    
+      o3Score: o3Metrics.o3Score,
+    
+      o4Data: o4Metrics.o4Data,
+      o5Data: o5Metrics.o5Data,
+      o6Data: o6Metrics.o6Data,
+    
+      timestamp: new Date(),
+    };
 
 
     const { manual_fields } = processedO7Data;
