@@ -298,26 +298,12 @@ const processO3Data = (o3Data) => {
   const Q5_TEXT = "I feel short of breath or experience chest discomfort even during mild activity or at rest";
   const Q6_TEXT = "I've noticed an increase in hunger, thirst, or the need to urinate frequently";
 
-  // 1️⃣ SAFETY SYNC: Re-hydrate selectedOptions from q-fields if they exist
-  // This prevents data loss if selectedOptions is empty but q3="Hypertension" exists in the merge.
-  let selectedOptions = Array.isArray(o3Data.selectedOptions) 
-    ? [...o3Data.selectedOptions] 
+  // 1️⃣ SOURCE OF TRUTH: The selectedOptions array.
+  // We do not look at o3Data.q1 etc. because the Merge step has handled that.
+  const selectedOptions = Array.isArray(o3Data.selectedOptions) 
+    ? o3Data.selectedOptions 
     : [];
 
-  const Q_MAP = {
-      q1: Q1_TEXT, q2: Q2_TEXT, q3: Q3_TEXT, q4: Q4_TEXT, q5: Q5_TEXT, q6: Q6_TEXT
-  };
-
-  // Check each Q field. If it has a "truthy" string value (and not "false"), ensure it's in the list.
-  Object.entries(Q_MAP).forEach(([key, text]) => {
-      const val = o3Data[key];
-      // Check if value exists, is not boolean false, is not string "false", and not already in list
-      if (val && val !== false && val !== "false" && !selectedOptions.includes(text)) {
-           selectedOptions.push(text);
-      }
-  });
-
-  // 2️⃣ Proceed with calculation using the robust selectedOptions array
   const q1_selected = selectedOptions.includes(Q1_TEXT);
   const q2_selected = selectedOptions.includes(Q2_TEXT);
   const q3_selected = selectedOptions.includes(Q3_TEXT);
@@ -345,7 +331,7 @@ const processO3Data = (o3Data) => {
   const dmSynonyms = /diabetes|dm|high\sblood\ssugar|sugar/i;
   if (dmSynonyms.test(originalOtherConditions)) updatedFlags.hasDiabetes = true;
 
-  // 3️⃣ Return properly mapped object (using NULL for unchecked fields to avoid "false" string issues)
+  // 2️⃣ MAPPING: If selected, set text. If NOT selected, set NULL.
   const mappedO3Data = {
     q1: q1_selected ? Q1_TEXT : null,
     q2: q2_selected ? Q2_TEXT : null,
@@ -353,14 +339,13 @@ const processO3Data = (o3Data) => {
     q4: q4_selected ? Q4_TEXT : null,
     q5: q5_selected ? Q5_TEXT : null,
     q6: q6_selected ? Q6_TEXT : null,
-    selectedOptions: selectedOptions, // Save the corrected array back to DB
+    selectedOptions: selectedOptions, 
     other_conditions: originalOtherConditions,
     ...updatedFlags,
   };
 
   return { o3Data: mappedO3Data, o3Score };
 };
-
 // ... rest of the file ...
 
 const processO4Data = (o4Data) => {
@@ -632,22 +617,37 @@ if (!existingDoc?.onboardedAt) {
     // --- 2️⃣ FETCH EXISTING DATA ---
     const existingData = existingDoc ? existingDoc.toObject() : {};
 
-    // --- 3️⃣ SMART MERGE FOR O3 DATA (PERSISTENCE FIX) ---
-    const existingO3 = existingData.o3Data || {};
-    const incomingO3 = payload.o3Data || {};
-    const mergedO3 = { ...existingO3 };
+    
+  // --- 3️⃣ SMART MERGE FOR O3 DATA (THE ZOMBIE DATA FIX) ---
+    const existingO3 = existingData.o3Data || {};
+    const incomingO3 = payload.o3Data || {};
+    
+    // Start with existing data...
+    const mergedO3 = { ...existingO3 };
 
-    ["q1", "q2", "q3", "q4", "q5", "q6", "other_conditions", "hasHypertension", "hasDiabetes"].forEach(
-      (field) => {
-        if (incomingO3[field] !== undefined && incomingO3[field] !== null) {
-          mergedO3[field] = incomingO3[field];
-        }
-      }
-    );
+    // 🔥 THE FIX: If the payload contains a "selectedOptions" array (even empty),
+    // it becomes the single source of truth. We MUST wipe the old specific fields.
+    if (Array.isArray(incomingO3.selectedOptions)) {
+      mergedO3.selectedOptions = incomingO3.selectedOptions;
+      
+      // Wipe the old specific flags so they don't resurrect (Zombie Data)
+      mergedO3.q1 = null; 
+      mergedO3.q2 = null; 
+      mergedO3.q3 = null; 
+      mergedO3.q4 = null; 
+      mergedO3.q5 = null; 
+      mergedO3.q6 = null;
+      mergedO3.hasHypertension = false; // Reset flags
+      mergedO3.hasDiabetes = false;     // Reset flags
+    }
 
-    if (Array.isArray(incomingO3.selectedOptions)) {
-      mergedO3.selectedOptions = incomingO3.selectedOptions;
-    }
+    // Now, apply other incoming fields (like "other_conditions")
+    // We treat undefined as "do not update", but null/false as "clear"
+    ["other_conditions"].forEach((field) => {
+        if (incomingO3[field] !== undefined) {
+          mergedO3[field] = incomingO3[field];
+        }
+    });
 
     // --- 4️⃣ BUILD MERGED DATA SAFELY ---
     const mergedData = {
