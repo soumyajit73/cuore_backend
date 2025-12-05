@@ -748,6 +748,13 @@ exports.getHomeScreenData = async (req, res) => {
             monthsToGo: clampedMonths
         };
 
+          if (timelineData.dailySchedule && Array.isArray(timelineData.dailySchedule)) {
+            timelineData.dailySchedule = timelineData.dailySchedule.map(card => ({
+                ...card,
+                notified: card.alarm_notified === true
+            }));
+        }
+
         // ⭐ Build response
         const payload = {
             user: {
@@ -888,17 +895,24 @@ const getTimelineData = async (userId, dateString) => {
       if (!parsedTime.isValid()) return null;
 
       return {
-        time: parsedTime,
-        icon: card.type === "USER_MEDICATION" ? "💊" : "🔔",
-        title: card.title,
-        description: card.description || null,
-        completed: !!card.isCompleted,
-        reminder: true,
-        editable: true,
-        type: card.type,
-        id: card._id.toString(),
-        sourceId: card.sourceId?.toString(),
-      };
+    time: parsedTime,
+    icon: card.type === "USER_MEDICATION" ? "💊" : "🔔",
+    title: card.title,
+    description: card.description || null,
+    completed: !!card.isCompleted,
+    reminder: true,
+    editable: true,
+    type: card.type,
+    id: card._id.toString(),
+    sourceId: card.sourceId?.toString(),
+
+    // ⭐ NEW FIELDS
+    notified: card.alarm_notified === true,
+    alarm_notified: card.alarm_notified || false,
+    alarm_notified_time: card.alarm_notified_time || null,
+    alarm_notified_at: card.alarm_notified_at || null,
+};
+
     })
     .filter(Boolean);
 
@@ -936,17 +950,24 @@ const getTimelineData = async (userId, dateString) => {
       else if (titleLower.includes("snack")) icon = "🥛";
       else if (titleLower.includes("sleep")) icon = "🛌";
 
-      return {
-        time: parsedTime,
-        icon,
-        title: card.title,
-        description: card.description || null,
-        completed: !!card.isCompleted,
-        reminder: true,
-        editable: titleLower.includes("wake"), // only Wake Up editable
-        type: card.type,
-        id: card._id.toString(),
-      };
+     return {
+    time: parsedTime,
+    icon,
+    title: card.title,
+    description: card.description || null,
+    completed: !!card.isCompleted,
+    reminder: true,
+    editable: titleLower.includes("wake"),
+    type: card.type,
+    id: card._id.toString(),
+
+    // ⭐ NEW FIELDS
+    notified: card.alarm_notified === true,
+    alarm_notified: card.alarm_notified || false,
+    alarm_notified_time: card.alarm_notified_time || null,
+    alarm_notified_at: card.alarm_notified_at || null,
+};
+
     })
     .filter(Boolean);
 
