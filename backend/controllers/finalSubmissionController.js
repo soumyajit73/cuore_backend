@@ -122,78 +122,46 @@ exports.submitFinalOnboarding = async (req, res) => {
 
 exports.getOnboardingData = async (req, res) => {
     try {
-        const userId = req.user && req.user.userId;
+        const userId = req.user?.userId;
         if (!userId) {
             return res.status(401).json({
                 status: "error",
-                message: "User ID not found in request"
+                message: "User ID missing"
             });
         }
 
         const onboardingData = await model.getOnboardingDataByUserId(userId);
-
         if (!onboardingData) {
             return res.status(404).json({
                 status: "error",
-                message: "No onboarding data found for this user"
+                message: "No onboarding data found"
             });
         }
 
-        // ---------- Normalize o3Data for frontend ----------
         const rawO3 = onboardingData.o3Data || {};
 
-        // Build selectedOptions array:
-        // Prefer an existing selectedOptions array (older shape).
-        // Otherwise reconstruct from q1..q6 (newer shape) if they are strings.
-        let selectedOptions = Array.isArray(rawO3.selectedOptions) ? rawO3.selectedOptions.slice() : [];
-
-        if (selectedOptions.length === 0) {
-            ['q1','q2','q3','q4','q5','q6'].forEach(k => {
-                const v = rawO3[k];
-                if (typeof v === 'string' && v.trim().length > 0) {
-                    selectedOptions.push(v);
-                }
-            });
-        }
-
-        // Ensure other_conditions exists as a string
-        const other_conditions = typeof rawO3.other_conditions === 'string' ? rawO3.other_conditions : '';
-
-        // Determine boolean flags (prefer stored booleans, otherwise infer)
-        const inferFromText = text => {
-            if (!text || typeof text !== 'string') return false;
-            return /diabetes|dm|high blood sugar|sugar/i.test(text) ||
-                   /hypertension|htn|high blood pressure|bp/i.test(text);
-        };
-
-        const hasHypertension = (typeof rawO3.hasHypertension === 'boolean')
-            ? rawO3.hasHypertension
-            : (selectedOptions.some(s => /hypertension|htn|high blood pressure|bp/i.test(s)) || /hypertension|htn|high blood pressure|bp/i.test(other_conditions));
-
-        const hasDiabetes = (typeof rawO3.hasDiabetes === 'boolean')
-            ? rawO3.hasDiabetes
-            : (selectedOptions.some(s => /diabetes|dm|high blood sugar|sugar/i.test(s)) || /diabetes|dm|high blood sugar|sugar/i.test(other_conditions));
-
-        // Build explicit q1..q6 fields - if missing, return false to indicate "not selected"
-        const normalizedQ = {};
-        ['q1','q2','q3','q4','q5','q6'].forEach(k => {
-            const v = rawO3[k];
-            // If it's a non-empty string, return it; if it's explicitly false keep false; otherwise false
-            normalizedQ[k] = (typeof v === 'string' && v.trim().length > 0) ? v : false;
-        });
-
+        // ⭐ VERY IMPORTANT: Use EXACT saved values from DB
         const normalizedO3 = {
-            ...normalizedQ,
-            other_conditions,
-            hasHypertension,
-            hasDiabetes,
-            selectedOptions
+            q1: rawO3.q1 ?? false,
+            q2: rawO3.q2 ?? false,
+            q3: rawO3.q3 ?? false,
+            q4: rawO3.q4 ?? false,
+            q5: rawO3.q5 ?? false,
+            q6: rawO3.q6 ?? false,
+
+            selectedOptions: Array.isArray(rawO3.selectedOptions)
+                ? rawO3.selectedOptions
+                : [],
+
+            other_conditions: rawO3.other_conditions || "",
+
+            hasHypertension: !!rawO3.hasHypertension,
+            hasDiabetes: !!rawO3.hasDiabetes
         };
 
-        // ---------- Build response ----------
-        const responseBody = {
+        return res.status(200).json({
             status: "success",
-            message: "Onboarding data retrieved successfully",
+            message: "Onboarding data retrieved",
             data: {
                 o2Data: onboardingData.o2Data || {},
                 o3Data: normalizedO3,
@@ -202,16 +170,13 @@ exports.getOnboardingData = async (req, res) => {
                 o6Data: onboardingData.o6Data || {},
                 o7Data: onboardingData.o7Data || {}
             }
-        };
-
-        return res.status(200).json(responseBody);
+        });
 
     } catch (error) {
-        console.error('Error in getOnboardingData:', error);
+        console.error("Error in getOnboardingData:", error);
         return res.status(500).json({
             status: "error",
-            message: "Error fetching onboarding data",
-            error: error.message
+            message: "Internal server error"
         });
     }
 };
