@@ -287,21 +287,37 @@ const validateAndCalculateScores = (data) => {
   };
 };
 
+// ... existing imports and code ...
+
 const processO3Data = (o3Data) => {
-  // Define the question strings to avoid repetition
-  const Q1_TEXT =
-    "One of my parents was diagnosed with diabetes before the age of 60";
+  // Define the question strings
+  const Q1_TEXT = "One of my parents was diagnosed with diabetes before the age of 60";
   const Q2_TEXT = "One of my parents had a heart attack before the age of 60";
   const Q3_TEXT = "I have Hypertension (High blood pressure)";
   const Q4_TEXT = "I have Diabetes (High blood sugar)";
-  const Q5_TEXT =
-    "I feel short of breath or experience chest discomfort even during mild activity or at rest";
-  const Q6_TEXT =
-    "I've noticed an increase in hunger, thirst, or the need to urinate frequently";
+  const Q5_TEXT = "I feel short of breath or experience chest discomfort even during mild activity or at rest";
+  const Q6_TEXT = "I've noticed an increase in hunger, thirst, or the need to urinate frequently";
 
-  const selectedOptions = o3Data.selectedOptions || [];
+  // 1️⃣ SAFETY SYNC: Re-hydrate selectedOptions from q-fields if they exist
+  // This prevents data loss if selectedOptions is empty but q3="Hypertension" exists in the merge.
+  let selectedOptions = Array.isArray(o3Data.selectedOptions) 
+    ? [...o3Data.selectedOptions] 
+    : [];
 
-  // Use boolean flags for score calculation and hasHypertension/hasDiabetes flags
+  const Q_MAP = {
+      q1: Q1_TEXT, q2: Q2_TEXT, q3: Q3_TEXT, q4: Q4_TEXT, q5: Q5_TEXT, q6: Q6_TEXT
+  };
+
+  // Check each Q field. If it has a "truthy" string value (and not "false"), ensure it's in the list.
+  Object.entries(Q_MAP).forEach(([key, text]) => {
+      const val = o3Data[key];
+      // Check if value exists, is not boolean false, is not string "false", and not already in list
+      if (val && val !== false && val !== "false" && !selectedOptions.includes(text)) {
+           selectedOptions.push(text);
+      }
+  });
+
+  // 2️⃣ Proceed with calculation using the robust selectedOptions array
   const q1_selected = selectedOptions.includes(Q1_TEXT);
   const q2_selected = selectedOptions.includes(Q2_TEXT);
   const q3_selected = selectedOptions.includes(Q3_TEXT);
@@ -309,7 +325,6 @@ const processO3Data = (o3Data) => {
   const q5_selected = selectedOptions.includes(Q5_TEXT);
   const q6_selected = selectedOptions.includes(Q6_TEXT);
 
-  // The score calculation remains the same, as the boolean flags work perfectly
   const o3Score =
     (q1_selected ? 2 : 0) +
     (q2_selected ? 2 : 0) +
@@ -324,14 +339,13 @@ const processO3Data = (o3Data) => {
     hasDiabetes: q4_selected,
   };
 
-  // This logic also remains unchanged
   const htnSynonyms = /hypertension|htn|high\sblood\spressure|bp/i;
   if (htnSynonyms.test(originalOtherConditions))
     updatedFlags.hasHypertension = true;
   const dmSynonyms = /diabetes|dm|high\sblood\ssugar|sugar/i;
   if (dmSynonyms.test(originalOtherConditions)) updatedFlags.hasDiabetes = true;
 
-  // **NEW**: Create the final object with the full string for selected options, or `false` if not selected.
+  // 3️⃣ Return properly mapped object (using NULL for unchecked fields to avoid "false" string issues)
   const mappedO3Data = {
     q1: q1_selected ? Q1_TEXT : null,
     q2: q2_selected ? Q2_TEXT : null,
@@ -339,13 +353,15 @@ const processO3Data = (o3Data) => {
     q4: q4_selected ? Q4_TEXT : null,
     q5: q5_selected ? Q5_TEXT : null,
     q6: q6_selected ? Q6_TEXT : null,
+    selectedOptions: selectedOptions, // Save the corrected array back to DB
     other_conditions: originalOtherConditions,
-    selectedOptions: selectedOptions, // Ensure selectedOptions is preserved
     ...updatedFlags,
   };
 
   return { o3Data: mappedO3Data, o3Score };
 };
+
+// ... rest of the file ...
 
 const processO4Data = (o4Data) => {
   const { smoking, alcohol } = o4Data;
