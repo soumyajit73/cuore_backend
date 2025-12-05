@@ -755,17 +755,27 @@ if (!existingDoc?.onboardedAt) {
     };
 
     // --- 7️⃣ BUILD FINAL DATA TO SAVE ---
-    const finalDataToSave = {
-      userId,
-      onboardingVersion: "7",
-      o2Data: o2Metrics.o2Data,
-      derivedMetrics: o2Metrics.derivedMetrics,
-      o3Data: o3Metrics.o3Data,
-      o4Data: o4Metrics.o4Data,
-      o5Data: o5Metrics.o5Data,
-      o6Data: o6Metrics.o6Data,
-      timestamp: new Date(),
-    };
+   // ⭐ ALWAYS PRESERVE EXACT USER O3 SELECTIONS — DO NOT REWRITE THEM
+const finalDataToSave = {
+  userId,
+  onboardingVersion: "7",
+
+  o2Data: o2Metrics.o2Data,
+  derivedMetrics: o2Metrics.derivedMetrics,
+
+  // 🔥 FIX: Use mergedO3 (exact user selections)
+  o3Data: mergedO3,
+
+  // store only the score from O3 processor
+  o3Score: o3Metrics.o3Score,
+
+  o4Data: o4Metrics.o4Data,
+  o5Data: o5Metrics.o5Data,
+  o6Data: o6Metrics.o6Data,
+
+  timestamp: new Date(),
+};
+
 
     const { manual_fields } = processedO7Data;
     finalDataToSave.o7Data = {};

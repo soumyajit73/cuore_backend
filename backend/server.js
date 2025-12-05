@@ -59,6 +59,8 @@ mongoose.connection.once('open', async () => {
 app.get("/", (req, res) => {
     res.send("Cuore Backend API is running");
 });
+// share routes
+app.use('/api/v1/share', require('./routes/shareRoutes.js'));
 
 // Authentication
 app.use('/api/v1/auth', authRoutes);
