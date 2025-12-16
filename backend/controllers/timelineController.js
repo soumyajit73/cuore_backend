@@ -678,6 +678,9 @@ if (bsWorst === "orange") {
     });
   }
 
+  
+  
+
   // ---------------------------------------------------------------------
   // 🔟 Consultation reminder based on Cuore Score <55%
   // ---------------------------------------------------------------------
@@ -700,6 +703,56 @@ if (bsWorst === "orange") {
       });
     }
   }
+  
+  // ---------------------------------------------------------------------
+// 🔟 Exercise Timing Alert (Fitness within 60 mins after meal)
+// ---------------------------------------------------------------------
+
+const todayStr = dayjs().tz(TZ).format("YYYY-MM-DD");
+const timeline = await getTimelineData(userId, todayStr);
+
+let fitnessMins = null;
+const mealMins = [];
+
+// Convert "h:mm A" → minutes
+const toMinutes = (t) => {
+  const d = dayjs(t, "h:mm A");
+  return d.hour() * 60 + d.minute();
+};
+
+for (const card of timeline.dailySchedule) {
+  const title = card.title.toLowerCase();
+  const mins = toMinutes(card.time);
+
+  if (title.includes("fitness")) {
+    fitnessMins = mins;
+  }
+
+  if (
+    title.includes("breakfast") ||
+    title.includes("lunch") ||
+    title.includes("dinner")
+  ) {
+    mealMins.push(mins);
+  }
+}
+
+// Check rule
+if (fitnessMins != null && mealMins.length) {
+  for (const m of mealMins) {
+    const diff = fitnessMins - m;
+    if (diff > 0 && diff <= 60) {
+      alerts.push({
+        type: "yellow",
+        text: "Avoid exercising within 60 minutes of eating.",
+        action: "Avoid"
+      });
+      break;
+    }
+  }
+}
+
+  
 
   // ---------------------------------------------------------------------
   // FINAL: SORT & DEDUPE
