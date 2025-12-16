@@ -43,5 +43,8 @@ router.put("/:userId/complete/:reminderId", protect, timelineController.complete
 // Mark alarm as notified (bell icon pressed)
 router.put('/:userId/notified/:reminderId', protect, timelineController.markAlarmNotified);
 
+router.put('/:userId/off/:reminderId', protect, timelineController.markAlarmOff);
+
+
 // router.post('/:userId/clear-checkin', protect, timelineController.clearDoctorCheckin);
 module.exports = router;

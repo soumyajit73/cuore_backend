@@ -1872,6 +1872,46 @@ return res.status(200).json({
   }
 };
 
+exports.markAlarmOff = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { reminderId } = req.params;
+
+    if (!reminderId) {
+      return res.status(400).json({ error: "Missing reminderId in URL." });
+    }
+
+    // 🔕 Turn alarm OFF (simple reset)
+    const card = await TimelineCard.findOneAndUpdate(
+      { _id: reminderId, userId },
+      {
+        $set: {
+          alarm_notified: false,
+          alarm_notified_at: null,
+          alarm_notified_time: null
+        }
+      },
+      { new: true }
+    );
+
+    if (!card) {
+      return res.status(404).json({ error: "Card not found or not accessible." });
+    }
+
+    return res.status(200).json({
+      status: "success",
+      message: "Alarm turned off.",
+      card
+    });
+
+  } catch (err) {
+    console.error("Error turning alarm off:", err);
+    return res.status(500).json({
+      error: "Internal server error while turning alarm off."
+    });
+  }
+};
+
 
 
 
