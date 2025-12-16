@@ -1878,104 +1878,77 @@ exports.completeCard = async (req, res) => {
 exports.markAlarmNotified = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { reminderId } = req.params;   // <-- now consistent
+    const { reminderId } = req.params;
     const { time } = req.body;
 
     if (!reminderId) {
       return res.status(400).json({ error: "Missing reminderId in URL." });
     }
 
-    // 🔹 Convert "7:45 AM" → Date
-    let alarmNotifiedAt = new Date();
+    // 1️⃣ Fetch existing card first
+    const existingCard = await TimelineCard.findOne({ _id: reminderId, userId });
 
-    if (time && typeof time === "string") {
-      const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-      const combined = `${today} ${time}`;
-      const parsed = new Date(combined);
-
-      if (!isNaN(parsed.getTime())) {
-        alarmNotifiedAt = parsed;
-      }
-    }
-
-    // 1️⃣ Update the timeline card (reminderId actually refers to a card)
-    const card = await TimelineCard.findOneAndUpdate(
-      { _id: reminderId, userId },  // <-- FIXED
-      {
-        $set: {
-          alarm_notified: true,
-          alarm_notified_at: alarmNotifiedAt,
-          alarm_notified_time: time || null
-        }
-      },
-      { new: true }
-    );
-
-    if (!card) {
+    if (!existingCard) {
       return res.status(404).json({ error: "Card not found or not accessible." });
     }
 
-    // 2️⃣ Return full updated timeline
-    const allCards = await TimelineCard.find({ userId })
-      .sort({ date: -1 })
-      .lean();
-return res.status(200).json({
-  status: "success",
-  message: "Alarm marked as notified.",
-  card
-});
+    // --------------------------------------------------
+    // 🔁 TOGGLE LOGIC
+    // --------------------------------------------------
 
+    let update = {};
 
-  } catch (err) {
-    console.error("Error marking alarm notified:", err);
-    return res.status(500).json({
-      error: "Internal server error while marking alarm notified."
-    });
-  }
-};
+    // CASE A: Alarm already ON → TURN IT OFF
+    if (existingCard.alarm_notified === true) {
+      update = {
+        alarm_notified: false,
+        alarm_notified_at: null,
+        alarm_notified_time: null
+      };
+    }
+    // CASE B: Alarm OFF → TURN IT ON
+    else {
+      let alarmNotifiedAt = new Date();
 
-exports.markAlarmOff = async (req, res) => {
-  try {
-    const userId = req.user.userId;
-    const { reminderId } = req.params;
+      if (time && typeof time === "string") {
+        const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+        const combined = `${today} ${time}`;
+        const parsed = new Date(combined);
 
-    if (!reminderId) {
-      return res.status(400).json({ error: "Missing reminderId in URL." });
+        if (!isNaN(parsed.getTime())) {
+          alarmNotifiedAt = parsed;
+        }
+      }
+
+      update = {
+        alarm_notified: true,
+        alarm_notified_at: alarmNotifiedAt,
+        alarm_notified_time: time || null
+      };
     }
 
-    // 🔕 Turn alarm OFF (simple reset)
+    // 2️⃣ Apply update
     const card = await TimelineCard.findOneAndUpdate(
       { _id: reminderId, userId },
-      {
-        $set: {
-          alarm_notified: false,
-          alarm_notified_at: null,
-          alarm_notified_time: null
-        }
-      },
+      { $set: update },
       { new: true }
     );
-
-    if (!card) {
-      return res.status(404).json({ error: "Card not found or not accessible." });
-    }
 
     return res.status(200).json({
       status: "success",
-      message: "Alarm turned off.",
+      message: card.alarm_notified
+        ? "Alarm turned ON."
+        : "Alarm turned OFF.",
       card
     });
 
   } catch (err) {
-    console.error("Error turning alarm off:", err);
+    console.error("Error toggling alarm:", err);
     return res.status(500).json({
-      error: "Internal server error while turning alarm off."
+      error: "Internal server error while toggling alarm."
     });
   }
 };
-
-
-
 
 
 
