@@ -75,6 +75,18 @@ exports.getCuoreHealthData = async (req, res) => {
     const o7Data = onboardingDoc.o7Data || {};
     const metrics = model.calculateAllMetrics(onboardingDoc);
 
+    // --------------------
+// HsCRP display normalization (DISPLAY ONLY)
+// --------------------
+let hsCrpValue = o7Data.HsCRP ?? null;
+let hsCrpUnit = "mg/L";
+
+if (hsCrpValue != null && hsCrpValue >= 1) {
+  hsCrpValue = Number((hsCrpValue / 10).toFixed(2));
+  hsCrpUnit = "mg/dL";
+}
+
+
     // --- HELPERS ---
     const getStatus = (val, type, o3Data = {}) => {
       if (val == null || val === "") return "unknown";
@@ -184,9 +196,11 @@ if (o7Data.bp_upper && o7Data.bp_lower) {
         status: getStatus(tgHdlValue, "tg_hdl"),
       },
       HsCRP: {
-        value: o7Data.HsCRP || null,
-        status: getStatus(o7Data.HsCRP, "hscrp"),
-      },
+  value: hsCrpValue,
+  unit: hsCrpUnit,
+  status: getStatus(o7Data.HsCRP, "hscrp"), // ⚠️ raw value for logic
+},
+
       lifestyleScore: {
         value: metrics.lifestyle?.score || null,
         status: metrics.lifestyle?.status || "unknown",

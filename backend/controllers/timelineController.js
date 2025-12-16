@@ -282,8 +282,17 @@ function getColorStatus(value, greenThreshold, yellowThreshold, redThreshold) {
 
 const calculateHealthMetrics = (onboardingDoc) => {
     const { o2Data, o7Data, derivedMetrics, scores } = onboardingDoc;
+    let hsCrpValue = o7Data.HsCRP;
+    let hsCrpUnit = "mg/L"; // default
+    
+    if (hsCrpValue != null && hsCrpValue >= 1) {
+      hsCrpValue = Number((hsCrpValue / 10).toFixed(2));
+      hsCrpUnit = "mg/dL";
+    }
     const { age, gender, height_cm, weight_kg, waist_cm } = o2Data;
     const { bmi, wthr } = derivedMetrics;
+    // --- HsCRP normalization (unit correction) ---
+
 
     // --- Cuore Score ---
     const health_score = scores.cuoreScore;
@@ -655,7 +664,7 @@ if (bsWorst === "orange") {
   // 7️⃣ HsCRP
   // ---------------------------------------------------------------------
   const hs = n(o7Data.HsCRP);
-  if (hs != null && hs > 3) {
+  if (hs != null && hs > 0.3) {
     alerts.push({
       type: "orange",
       text: "Consult your doctor for high HsCRP.",
@@ -1991,6 +2000,15 @@ exports.getCuoreScoreDetails = async (req, res) => {
         : {};
 
     const o7 = onboardingDoc.o7Data || {};
+    // ✅ DEFINE HERE (MANDATORY)
+let hsCrpValue = o7.HsCRP ?? null;
+let hsCrpUnit = "mg/L";
+
+if (hsCrpValue != null && hsCrpValue >= 1) {
+  hsCrpValue = Number((hsCrpValue / 10).toFixed(2));
+  hsCrpUnit = "mg/dL";
+}
+
      const o3 = onboardingDoc.o3Data || {};
 
     // ------------------------------
@@ -2220,10 +2238,12 @@ if (o7.bp_upper != null && o7.bp_lower != null) {
               : {}
           ),
 
-          HsCRP: {
-            value: o7.HsCRP || null,
-            status: getStatus(o7.HsCRP, "hscrp"),
-          },
+         HsCRP: {
+  value: hsCrpValue,
+  unit: hsCrpUnit,
+  status: getStatus(o7.HsCRP, "hscrp"), // ⚠️ raw value for logic
+},
+
 
           body_fat: {
             value: body_fat,
