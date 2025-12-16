@@ -993,7 +993,6 @@ exports.getHomeScreenData = async (req, res) => {
 const getTimelineData = async (userId, dateString) => {
   let localDay = dayjs.tz(dateString, TZ);
   if (!localDay.isValid()) {
-    console.warn(`Invalid dateString in getTimelineData: "${dateString}". Falling back to today.`);
     localDay = dayjs().tz(TZ);
   }
   localDay = localDay.startOf("day");
@@ -1001,202 +1000,160 @@ const getTimelineData = async (userId, dateString) => {
   const utcStart = localDay.utc().toDate();
   const utcEnd = localDay.endOf("day").utc().toDate();
 
-  // --- Fetch latest onboarding data ---
+  // --------------------------------------------------
+  // Fetch onboarding
+  // --------------------------------------------------
   const onboarding = await Onboarding.findOne({ userId })
-    .select("o4Data.smoking o5Data.preferred_ex_time o6Data.wake_time streakCount lastStreakDate")
+    .select("streakCount lastStreakDate")
     .lean();
 
-  if (!onboarding) return { dailySchedule: [], missed: 0, alerts: [], streak: 0 };
-
-  // --- Ensure system cards exist for the day (only if missing) ---
-  const systemCardsExist = await TimelineCard.exists({
-    userId,
-    type: "SYSTEM",
-    scheduleDate: { $gte: utcStart, $lte: utcEnd },
-  });
-
-  if (!systemCardsExist) {
-    // If helper ensureSystemCardsExist inserts cards, use that; otherwise resync from wake time
-    // prefer ensureSystemCardsExist to create missing cards
-    if (typeof ensureSystemCardsExist === "function") {
-      await ensureSystemCardsExist(userId, onboarding, localDay);
-    } else {
-      const currentWakeTime = convertTo24Hour(onboarding?.o6Data?.wake_time) || "07:00";
-      await updateSystemCardsAfterWakeChange(userId, currentWakeTime, localDay);
-    }
-  } else {
-    // If cards exist, still make sure their times respect the user's current wake/exercise preference:
-    const currentWakeTime = convertTo24Hour(onboarding?.o6Data?.wake_time) || "07:00";
-    // updateSystemCardsAfterWakeChange will update scheduledTime in DB to match current wake if needed
-    if (typeof updateSystemCardsAfterWakeChange === "function") {
-      await updateSystemCardsAfterWakeChange(userId, currentWakeTime, localDay);
-    }
+  if (!onboarding) {
+    return { dailySchedule: [], missed: 0, alerts: [], streak: 0 };
   }
 
-  // ✅ Extract latest exercise time (user-customized) (24h)
-  const preferredExTime =
-    onboarding?.o5Data?.preferred_ex_time &&
-    convertTo24Hour(onboarding.o5Data.preferred_ex_time);
-
-  // --- STREAK LOGIC ---
-  const today = dayjs().startOf("day");
-  const lastStreakDate = onboarding.lastStreakDate
-    ? dayjs(onboarding.lastStreakDate).startOf("day")
-    : null;
-  let streakCount = onboarding.streakCount || 0;
-
-  if (!lastStreakDate) streakCount = 1;
-  else if (today.diff(lastStreakDate, "day") === 1) streakCount += 1;
-  else if (today.diff(lastStreakDate, "day") > 1) streakCount = 1;
-
-  if (!lastStreakDate || today.isAfter(lastStreakDate)) {
-    await Onboarding.updateOne({ userId }, { streakCount, lastStreakDate: new Date() });
-  }
-
-  // --- Fetch all cards (SYSTEM + USER) from DB for that date ---
+  // --------------------------------------------------
+  // Fetch ALL cards for the day
+  // --------------------------------------------------
   const rawCards = await TimelineCard.find({
     userId,
     scheduleDate: { $gte: utcStart, $lte: utcEnd },
   }).lean();
 
-  // --- USER CARDS ---
+  // --------------------------------------------------
+  // 1️⃣ DEDUPE SYSTEM CARDS (BY systemKey/Title) - Enhanced Logic
+  // --------------------------------------------------
+const systemMap = new Map();
+
+  for (const card of rawCards.filter(c => c.type === "SYSTEM")) {
+    // Force the unique key to be the sanitized title, as systemKey is inconsistent in DB.
+    const key = card.title?.trim().toLowerCase();
+
+    if (key) {
+      const existing = systemMap.get(key);
+      
+      // Keep the card that is the 'latest write wins' based on the implicit 'updatedAt' field.
+      // This ensures we return the most recently updated version of the duplicated card.
+      if (!existing || (card.updatedAt > existing.updatedAt)) {
+        systemMap.set(key, card);
+      }
+    }
+  }
+
+  const dedupedSystemCards = Array.from(systemMap.values());
+
+  // --------------------------------------------------
+  // 2️⃣ USER CARDS (NO CHANGE)
+  // --------------------------------------------------
   const userCards = rawCards
-    .filter((card) => card.type !== "SYSTEM")
-    .map((card) => {
-      const scheduled = convertTo24Hour(card.scheduledTime || card.time || "00:00");
-      const parsedTime = dayjs.tz(
+    .filter(card => card.type !== "SYSTEM")
+    .map(card => {
+      const scheduled = convertTo24Hour(card.scheduledTime || "00:00");
+      const time = dayjs.tz(
         `${localDay.format("YYYY-MM-DD")} ${scheduled}`,
         "YYYY-MM-DD HH:mm",
         TZ
       );
-      if (!parsedTime.isValid()) return null;
+
+      if (!time.isValid()) return null;
 
       return {
-    time: parsedTime,
-    icon: card.type === "USER_MEDICATION" ? "💊" : "🔔",
-    title: card.title,
-    description: card.description || null,
-    completed: !!card.isCompleted,
-    reminder: true,
-    editable: true,
-    type: card.type,
-    id: card._id.toString(),
-    sourceId: card.sourceId?.toString(),
-
-    // ⭐ NEW FIELDS
-    notified: card.alarm_notified === true,
-    alarm_notified: card.alarm_notified || false,
-    alarm_notified_time: card.alarm_notified_time || null,
-    alarm_notified_at: card.alarm_notified_at || null,
-};
-
+        time,
+        icon: card.type === "USER_MEDICATION" ? "💊" : "🔔",
+        title: card.title,
+        description: card.description || null,
+        completed: !!card.isCompleted,
+        reminder: true,
+        editable: true,
+        type: card.type,
+        id: card._id.toString(),
+        notified: card.alarm_notified === true,
+        alarm_notified: card.alarm_notified || false,
+        alarm_notified_time: card.alarm_notified_time || null,
+        alarm_notified_at: card.alarm_notified_at || null,
+      };
     })
     .filter(Boolean);
 
-  // --- SYSTEM CARDS (from DB) ---
-  const systemCardsFromDb = rawCards
-    .filter((card) => card.type === "SYSTEM")
-    .map((card) => {
-      // Use DB scheduledTime but allow fitness override with user's preferred time
-      let scheduledTime = convertTo24Hour(card.scheduledTime || "07:00");
-      if (card.title && card.title.toLowerCase().includes("fitness") && preferredExTime) {
-        scheduledTime = preferredExTime;
-      }
-
-      const parsedTime = dayjs.tz(
-        `${localDay.format("YYYY-MM-DD")} ${scheduledTime}`,
+  // --------------------------------------------------
+  // 3️⃣ SYSTEM CARDS → UI FORMAT (DB TIME ONLY) - FIX APPLIED HERE
+  // --------------------------------------------------
+  const systemCards = dedupedSystemCards
+    .map(card => {
+      const scheduled = convertTo24Hour(card.scheduledTime || "00:00");
+      const time = dayjs.tz(
+        `${localDay.format("YYYY-MM-DD")} ${scheduled}`,
         "YYYY-MM-DD HH:mm",
         TZ
       );
-      if (!parsedTime.isValid()) return null;
 
-      const titleLower = (card.title || "").toLowerCase();
+      if (!time.isValid()) return null;
+
+      const t = (card.title || "").toLowerCase();
       let icon = "🔔";
-      if (titleLower.includes("wake")) icon = "🌞";
-      else if (titleLower.includes("tobacco") || titleLower.includes("health win")) icon = "🚭";
-      else if (titleLower.includes("calorie") || titleLower.includes("ignite")) icon = "🔥";
-      else if (titleLower.includes("fitness")) icon = "🏃";
-      else if (titleLower.includes("breakfast")) icon = "🍳";
-      else if (titleLower.includes("boost") || titleLower.includes("mid-morning")) icon = "🥤";
-      else if (titleLower.includes("hydration")) icon = "💧";
-      else if (titleLower.includes("lunch")) icon = "🍽️";
-      else if (titleLower.includes("nap") || titleLower.includes("rest")) icon = "😴";
-      else if (titleLower.includes("refresh") || titleLower.includes("refuel")) icon = "🥗";
-      else if (titleLower.includes("dinner")) icon = "🌙";
-      else if (titleLower.includes("walk")) icon = "🚶";
-      else if (titleLower.includes("snack")) icon = "🥛";
-      else if (titleLower.includes("sleep")) icon = "🛌";
+      if (t.includes("wake")) icon = "🌞";
+      else if (t.includes("tobacco") || t.includes("health win")) icon = "🚭";
+      else if (t.includes("calorie")) icon = "🔥";
+      else if (t.includes("fitness")) icon = "🏃";
+      else if (t.includes("breakfast")) icon = "🍳";
+      else if (t.includes("boost")) icon = "🥤";
+      else if (t.includes("lunch")) icon = "🍽️";
+      else if (t.includes("nap")) icon = "😴";
+      else if (t.includes("refresh")) icon = "🥗";
+      else if (t.includes("dinner")) icon = "🌙";
+      else if (t.includes("walk")) icon = "🚶";
+      else if (t.includes("snack")) icon = "🥛";
+      else if (t.includes("sleep")) icon = "🛌";
 
-     return {
-    time: parsedTime,
-    icon,
-    title: card.title,
-    description: card.description || null,
-    completed: !!card.isCompleted,
-    reminder: true,
-    editable: titleLower.includes("wake"),
-    type: card.type,
-    id: card._id.toString(),
-
-    // ⭐ NEW FIELDS
-    notified: card.alarm_notified === true,
-    alarm_notified: card.alarm_notified || false,
-    alarm_notified_time: card.alarm_notified_time || null,
-    alarm_notified_at: card.alarm_notified_at || null,
-};
-
+      return {
+        time,
+        icon,
+        title: card.title,
+        description: card.description || null,
+        completed: !!card.isCompleted,
+        reminder: true,
+        editable: t.includes("wake"),
+        type: card.type,
+        id: card._id.toString(),
+        notified: card.alarm_notified === true,
+        alarm_notified: card.alarm_notified || false,
+        alarm_notified_time: card.alarm_notified_time || null,
+        alarm_notified_at: card.alarm_notified_at || null,
+        systemKey: card.systemKey || null, // <-- ADDED FOR ROBUSTNESS
+      };
     })
     .filter(Boolean);
 
-  // ------------------------------------------------------------------
-  // ⭐ FIX: Subjective Day Sort (Wake Up first, Late Night last)
-  // ------------------------------------------------------------------
-  
-  // 1. Get Wake Time in minutes
-  const wakeStr = convertTo24Hour(onboarding?.o6Data?.wake_time) || "07:00";
-  const [wH, wM] = wakeStr.split(':').map(Number);
-  const wakeMins = wH * 60 + wM;
-
-  // 2. Sort Logic
-  const allCards = [...systemCardsFromDb, ...userCards]
+  // --------------------------------------------------
+  // 4️⃣ FINAL SORT — PURE CLOCK ORDER
+  // --------------------------------------------------
+  const allCards = [...systemCards, ...userCards]
     .sort((a, b) => {
-        const getScore = (c) => {
-            const h = c.time.hour();
-            const m = c.time.minute();
-            let val = h * 60 + m;
-            // If time is earlier than wake time (e.g. 2:00 AM vs 7:00 AM wake),
-            // treat it as belonging to the "end" of the day (+24h)
-            if (val < wakeMins) val += 1440; 
-            return val;
-        };
-        return getScore(a) - getScore(b);
+      const aMin = a.time.hour() * 60 + a.time.minute();
+      const bMin = b.time.hour() * 60 + b.time.minute();
+      return aMin - bMin;
     })
-    .map((card) => ({
+    .map(card => ({
       ...card,
-      time: dayjs(card.time).tz(TZ).format("h:mm A"),
+      time: card.time.format("h:mm A"),
     }));
 
-  // --- Missed tasks (Updated Logic to handle wrap-around times) ---
-  const missedTasks = allCards.filter((task) => {
-      if (task.completed) return false;
-
-      // Re-parse the time string "h:mm A" relative to the queried day
-      let t = dayjs.tz(`${localDay.format("YYYY-MM-DD")} ${task.time}`, "YYYY-MM-DD h:mm A", TZ);
-      
-      // Check if this task is physically in the early morning of the next day
-      const h = t.hour();
-      const m = t.minute();
-      const mins = h * 60 + m;
-      
-      if (mins < wakeMins) {
-          // It's a "next day" task (e.g. Sleep at 2 AM), so shift date to tomorrow for comparison
-          t = t.add(1, 'day');
-      }
-
-      return t.isBefore(dayjs().tz(TZ));
+  // --------------------------------------------------
+  // 5️⃣ MISSED TASKS (SIMPLE & SAFE)
+  // --------------------------------------------------
+  const now = dayjs().tz(TZ);
+  const missedTasks = allCards.filter(card => {
+    if (card.completed) return false;
+    const t = dayjs.tz(
+      `${localDay.format("YYYY-MM-DD")} ${card.time}`,
+      "YYYY-MM-DD h:mm A",
+      TZ
+    );
+    return t.isBefore(now);
   }).length;
 
-  // --- Alerts ---
+  // --------------------------------------------------
+  // 6️⃣ ALERTS
+  // --------------------------------------------------
   const alerts = [];
   if (missedTasks > 0) {
     alerts.push({
@@ -1206,17 +1163,15 @@ const getTimelineData = async (userId, dateString) => {
     });
   }
 
-  // ✅ Return Final
   return {
     dailySchedule: allCards,
     missed: missedTasks,
     totalTasks: allCards.length,
     missedDisplay: `${missedTasks}/${allCards.length}`,
     alerts,
-    streak: streakCount,
+    streak: onboarding.streakCount || 1,
   };
 };
-
 
 
 
