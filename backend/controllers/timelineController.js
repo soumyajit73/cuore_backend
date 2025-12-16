@@ -565,13 +565,17 @@ const bsA = n(o7Data.bs_am);
 console.log("[DBG] o3Data.q4:", o3Data.q4, "o3Data.hasDiabetes:", o3Data.hasDiabetes);
 console.log("[DBG] parsed bsF:", bsF, "bsA:", bsA);
 
-const answeredQ4 = isAnswered(o3Data.q4);
+// Diabetes decision
 const hasDiabetes = o3Data.hasDiabetes === true;
-const noDiabetes = answeredQ4 && o3Data.hasDiabetes === false;
+// IMPORTANT: NO + UNANSWERED are treated the SAME
+const noDiabetes = !hasDiabetes;
 
 let bsWorst = null;
 
 if (hasDiabetes) {
+  // -------------------------
+  // RULE 6: HAS DIABETES
+  // -------------------------
   const bsFStatus = (() => {
     if (bsF == null) return null;
     if (bsF > 240 || bsF < 100) return "orange";
@@ -587,20 +591,31 @@ if (hasDiabetes) {
   })();
 
   bsWorst = worst(bsFStatus, bsAStatus);
-  console.log("[DBG] hasDiabetes path -> bsFStatus:", bsFStatus, "bsAStatus:", bsAStatus, "bsWorst:", bsWorst);
-} else if (noDiabetes) {
-  // Only one rule applies for explicit NO
+  console.log(
+    "[DBG] hasDiabetes path -> bsFStatus:",
+    bsFStatus,
+    "bsAStatus:",
+    bsAStatus,
+    "bsWorst:",
+    bsWorst
+  );
+
+} else {
+  // -------------------------
+  // RULE 7: NO OR UNANSWERED
+  // -------------------------
   if ((bsF != null && bsF > 120) || (bsA != null && bsA > 160)) {
     bsWorst = "orange";
   } else {
     bsWorst = null;
   }
-  console.log("[DBG] noDiabetes path -> bsWorst:", bsWorst);
-} else {
-  bsWorst = null; // unanswered -> no alert
-  console.log("[DBG] Q4 unanswered -> no sugar alert");
+
+  console.log("[DBG] noDiabetes (NO + UNANSWERED) path -> bsWorst:", bsWorst);
 }
 
+// -------------------------
+// PUSH ALERT
+// -------------------------
 if (bsWorst === "orange") {
   alerts.push({
     type: "orange",
@@ -614,6 +629,7 @@ if (bsWorst === "orange") {
     action: "Monitor",
   });
 }
+
 
   // ---------------------------------------------------------------------
   // 6️⃣ O2 Saturation
