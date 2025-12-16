@@ -1004,42 +1004,65 @@ const getTimelineData = async (userId, dateString) => {
   // Fetch onboarding
   // --------------------------------------------------
   const onboarding = await Onboarding.findOne({ userId })
-    .select("streakCount lastStreakDate")
+    .select("o4Data.smoking o5Data.preferred_ex_time o6Data.wake_time streakCount lastStreakDate")
     .lean();
 
   if (!onboarding) {
     return { dailySchedule: [], missed: 0, alerts: [], streak: 0 };
   }
 
+  await ensureSystemCardsExist(userId, onboarding, localDay);
   // --------------------------------------------------
   // Fetch ALL cards for the day
   // --------------------------------------------------
   const rawCards = await TimelineCard.find({
-    userId,
-    scheduleDate: { $gte: utcStart, $lte: utcEnd },
-  }).lean();
+  userId,
+  scheduleDate: localDay.toDate()
+})
+.select("scheduledTime title description type systemKey updatedAt isCompleted alarm_notified alarm_notified_time alarm_notified_at")
+.lean();
+
 
   // --------------------------------------------------
   // 1️⃣ DEDUPE SYSTEM CARDS (BY systemKey/Title) - Enhanced Logic
   // --------------------------------------------------
+// --------------------------------------------------
+// 1️⃣ DEDUPE SYSTEM CARDS (FINAL & SAFE)
+// --------------------------------------------------
 const systemMap = new Map();
 
-  for (const card of rawCards.filter(c => c.type === "SYSTEM")) {
-    // Force the unique key to be the sanitized title, as systemKey is inconsistent in DB.
-    const key = card.title?.trim().toLowerCase();
+const systemCardsRaw = rawCards.filter(c => c.type === "SYSTEM");
 
-    if (key) {
-      const existing = systemMap.get(key);
-      
-      // Keep the card that is the 'latest write wins' based on the implicit 'updatedAt' field.
-      // This ensures we return the most recently updated version of the duplicated card.
-      if (!existing || (card.updatedAt > existing.updatedAt)) {
+for (const card of systemCardsRaw) {
+  const key = card.title?.trim().toLowerCase();
+  if (!key) continue;
+
+  // Special handling for FITNESS
+  if (key.includes("fitness")) {
+    const existing = systemMap.get(key);
+
+    if (!existing) {
+      systemMap.set(key, card);
+    } else {
+      // pick the one with later scheduledTime
+      const a = convertTo24Hour(existing.scheduledTime || "00:00");
+      const b = convertTo24Hour(card.scheduledTime || "00:00");
+
+      if (b > a) {
         systemMap.set(key, card);
       }
     }
+    continue;
   }
 
-  const dedupedSystemCards = Array.from(systemMap.values());
+  // Normal cards → first one wins
+  if (!systemMap.has(key)) {
+    systemMap.set(key, card);
+  }
+}
+
+const dedupedSystemCards = Array.from(systemMap.values());
+
 
   // --------------------------------------------------
   // 2️⃣ USER CARDS (NO CHANGE)
@@ -1527,7 +1550,7 @@ exports.updateEntry = async (req, res) => {
         );
 
         // ✅ Step 3: Shift all system cards according to new wake-up time
-        await updateSystemCardsAfterWakeChange(userId, newTime, localDay);
+        await updateSystemCardsAfterWakeChange(userId, newTime, localDay, updatedOnboarding);
         
         // 🕒 Ensure DB writes are complete before fetching timeline
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -1634,7 +1657,10 @@ exports.updateEntry = async (req, res) => {
 
 // ✅ Do NOT re-import dayjs here; it's already imported above
 
-async function updateSystemCardsAfterWakeChange(userId, newWakeTime, localDay) {
+async function updateSystemCardsAfterWakeChange(userId, newWakeTime, localDay, onboarding) {
+  // The Fitness card is intentionally NOT shifted by this function, regardless of preferred_ex_time setting.
+  // Other cards (e.g., Breakfast, Lunch) WILL shift based on the new wake-up time.
+  
   const wakeUpAnchor = dayjs.tz(
     `${localDay.format("YYYY-MM-DD")} ${newWakeTime}`,
     "YYYY-MM-DD HH:mm",
@@ -1644,7 +1670,7 @@ async function updateSystemCardsAfterWakeChange(userId, newWakeTime, localDay) {
   const systemCardOffsets = [
     { key: /tobacco|health win/i, offset: 10 },
     { key: /calorie ignite/i, offset: 15 },
-    { key: /fitness/i, offset: 30 },
+    // 🛑 REMOVED: { key: /fitness/i, offset: 30 } - Fitness is now a fixed card that doesn't shift
     { key: /breakfast/i, offset: 105 },
     { key: /mid-morning|boost/i, offset: 255 },
     { key: /hydration.*3-4/i, offset: 375 },
@@ -1658,8 +1684,7 @@ async function updateSystemCardsAfterWakeChange(userId, newWakeTime, localDay) {
     { key: /sleep/i, offset: 960 },
   ];
 
-  // --- FIX ---
-  // Define the date range for the query
+  // --- Define the date range for the query (Keep existing fix)
   const utcStart = localDay.startOf("day").utc().toDate();
   const utcEnd = localDay.endOf("day").utc().toDate();
   // --- END FIX ---
@@ -1670,19 +1695,34 @@ async function updateSystemCardsAfterWakeChange(userId, newWakeTime, localDay) {
       .tz(TZ)
       .format("HH:mm");
 
-    // --- FIX ---
-    // Add the scheduleDate filter to the query
-    // Use updateMany in case cards for the day were somehow duplicated
-    await TimelineCard.updateMany(
-      {
-        userId,
-        type: "SYSTEM",
-        title: entry.key,
-        scheduleDate: { $gte: utcStart, $lte: utcEnd } // Ensures we only update today's cards
-      },
-      { $set: { scheduledTime: newTime } }
-    );
-    // --- END FIX ---
+    // We no longer need the 'title: {$not: /fitness/i}' check here 
+    // because fitness is not in the systemCardOffsets array.
+
+    
+ // 🔒 FINAL FIX: Force Fitness time from preferred_ex_time (DB is source of truth)
+// if (onboarding?.o5Data?.preferred_ex_time) {
+//   const exTime24 = convertTo24Hour(onboarding.o5Data.preferred_ex_time);
+
+//   await TimelineCard.findOneAndUpdate(
+//     {
+//       userId,
+//       systemKey: "SYSTEM_FITNESS",
+//       scheduleDate: localDay.toDate()
+//     },
+//     {
+//       $set: {
+//         title: "Fitness",
+//         type: "SYSTEM",
+//         scheduledTime: exTime24,
+//         scheduleDate: localDay.toDate()
+//       }
+//     },
+//     { upsert: true }
+//   );
+// }
+
+
+
   }
   
   console.log("📅 Shifted cards:");
@@ -1693,7 +1733,6 @@ async function updateSystemCardsAfterWakeChange(userId, newWakeTime, localDay) {
 
   console.log(`✅ SYSTEM cards shifted according to new wake-up time: ${newWakeTime}`);
 }
-
 
 
 

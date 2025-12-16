@@ -188,6 +188,15 @@ async function ensureSystemCardsExist(userId, onboarding, localDay) {
     // --------------------------------------------------
     // 6️⃣ UPSERT SYSTEM CARDS
     // --------------------------------------------------
+
+    // 🔥 HARD RESET system cards for the day (authoritative rebuild)
+await TimelineCard.deleteMany({
+  userId,
+  type: "SYSTEM",
+  scheduleDate
+});
+
+
     for (const card of systemCards) {
     await TimelineCard.updateOne(
   { userId, scheduleDate, systemKey: card.key },
