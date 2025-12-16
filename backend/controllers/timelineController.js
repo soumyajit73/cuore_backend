@@ -328,12 +328,36 @@ const calculateHealthMetrics = (onboardingDoc) => {
     const lifestyleStatus = lifestyleScore > 70 ? 'green' : lifestyleScore >= 55 ? 'orange' : 'red';
 
     // --- Vitals ---
-    const bpUpperStatus = o7Data.bp_upper < 100 ? 'orange' : o7Data.bp_upper <= 130 ? 'green' : o7Data.bp_upper <= 145 ? 'orange' : 'red';
-    const bpLowerStatus = o7Data.bp_lower < 64 ? 'orange' : o7Data.bp_lower <= 82 ? 'green' : o7Data.bp_lower <= 95 ? 'orange' : 'red';
+   const bpUpperStatus =
+  o7Data.bp_upper < 100 || o7Data.bp_upper > 145
+    ? "red"
+    : o7Data.bp_upper >= 116 && o7Data.bp_upper <= 126
+    ? "green"
+    : "orange";
+
+const bpLowerStatus =
+  o7Data.bp_lower < 68 || o7Data.bp_lower > 95
+    ? "red"
+    : o7Data.bp_lower >= 76 && o7Data.bp_lower <= 82
+    ? "green"
+    : "orange";
+
     const bsFastingTarget = scores.o3Data?.hasDiabetes ? '<100' : '<100';
     const bsFastingStatus = scores.o3Data?.hasDiabetes ? (o7Data.bs_f < 100 ? 'red' : o7Data.bs_f <= 139 ? 'green' : o7Data.bs_f <= 170 ? 'orange' : 'red') : (o7Data.bs_f < 100 ? 'green' : o7Data.bs_f <= 125 ? 'orange' : 'red');
     const bsAfterMealTarget = scores.o3Data?.hasDiabetes ? '<160' : '<140';
-    const bsAfterMealStatus = scores.o3Data?.hasDiabetes ? (o7Data.bs_am < 130 ? 'red' : o7Data.bs_am <= 169 ? 'green' : o7Data.bs_am <= 220 ? 'orange' : 'red') : (o7Data.bs_am < 140 ? 'green' : o7Data.bs_am <= 200 ? 'orange' : 'red');
+    const bsAfterMealStatus = scores.o3Data?.hasDiabetes
+  ? (
+      o7Data.bs_am < 130 ? 'red' :
+      o7Data.bs_am <= 180 ? 'green' :
+      o7Data.bs_am <= 220 ? 'orange' :
+      'red'
+    )
+  : (
+      o7Data.bs_am < 140 ? 'green' :
+      o7Data.bs_am <= 200 ? 'orange' :
+      'red'
+    );
+
     const trigHDLRatioStatus = o7Data.trig_hdl_ratio < 2.8 ? 'green' : o7Data.trig_hdl_ratio <= 4.0 ? 'orange' : 'red';
     const targetBodyFat = gender === 'male' ? 23 : 30;
     const bodyFat = gender === 'male' ? (1.2 * bmi) + (0.23 * age) - 16.2 : (1.2 * bmi) + (0.23 * age) - 5.4;
@@ -1886,9 +1910,11 @@ const getStatus = (val, type, o3Data = {}) => {
           }
 
         case "bs_pp":
+          case "bs_am":
+    case "after_meal":
           if (o3Data.hasDiabetes) {
             if (num < 130 || num > 220) return "red";
-            if (num >= 170 && num <= 220) return "orange";
+            if (num >= 180 && num <= 220) return "orange";
             return "green";
           } else {
             if (num < 140) return "green";
@@ -1903,12 +1929,12 @@ const getStatus = (val, type, o3Data = {}) => {
 
         case "tg_hdl":
           if (num < 2.8) return "green";
-          if (num <= 4.0) return "orange";
+          if (num <= 3.9) return "orange";
           return "red";
 
         case "hscrp":
-          if (num < 0.1) return "green";
-          else if(num >=0.1 && num <=0.29) return "orange";
+          if (num <= 1.0) return "green";
+          else if(num >=1.1 && num <=2.9) return "orange";
           return "red";
 
         default:
@@ -1920,8 +1946,8 @@ const getStatus = (val, type, o3Data = {}) => {
       if (val == null || val === "") return "unknown";
       const num = parseFloat(val);
 
-      if (num >= 64 && num <= 82) return "green";
-      if (num < 64 || (num >= 82 && num <= 95)) return "orange";
+      if (num >= 66 && num <= 92) return "green";
+      if ((num >= 61 && num <= 65) || (num >= 93 && num <= 109)) return "orange";
       return "red";
     };
 
@@ -1929,31 +1955,43 @@ const getStatus = (val, type, o3Data = {}) => {
     // ⭐ BP Combined Logic
     // ------------------------------
 
-    let bpString = null;
-    let bpStatus = "unknown";
+   let bpString = null;
+let bpStatus = "unknown";
 
-    if (o7.bp_upper && o7.bp_lower) {
-      const sys = parseFloat(o7.bp_upper);
-      const dia = parseFloat(o7.bp_lower);
+if (o7.bp_upper != null && o7.bp_lower != null) {
+  const sys = parseFloat(o7.bp_upper);
+  const dia = parseFloat(o7.bp_lower);
 
-      bpString = `${sys}/${dia}`;
+  bpString = `${sys}/${dia}`;
 
-      const sysStatus =
-        sys < 100 ? "orange" :
-        sys <= 130 ? "green" :
-        sys <= 145 ? "orange" :
-        "red";
+  // --------------------
+  // SYSTOLIC (UPPER)
+  // --------------------
+  let sysStatus;
+  if (sys < 100 || sys > 145) sysStatus = "red";
+  else if (sys >= 116 && sys <= 126) sysStatus = "green";
+  else sysStatus = "orange"; // 100–115 OR 127–145
 
-      const diaStatus =
-        dia < 64 ? "orange" :
-        dia <= 82 ? "green" :
-        dia <= 95 ? "orange" :
-        "red";
+  // --------------------
+  // DIASTOLIC (LOWER)
+  // --------------------
+  let diaStatus;
+  if (dia < 68 || dia > 95) diaStatus = "red";
+  else if (dia >= 76 && dia <= 82) diaStatus = "green";
+  else diaStatus = "orange"; // 68–75 OR 83–95
 
-      if (sysStatus === "red" || diaStatus === "red") bpStatus = "red";
-      else if (sysStatus === "orange" || diaStatus === "orange") bpStatus = "orange";
-      else bpStatus = "green";
-    }
+  // --------------------
+  // FINAL BP STATUS (Worst-case rule)
+  // --------------------
+  if (sysStatus === "red" || diaStatus === "red") {
+    bpStatus = "red";
+  } else if (sysStatus === "orange" || diaStatus === "orange") {
+    bpStatus = "orange";
+  } else {
+    bpStatus = "green";
+  }
+}
+
 
     // ⭐ FIX: ADD MISSING TG/HDL VARIABLES
     const tg_hdl_ratio = metrics?.trigHDLRatio?.current ?? null;
@@ -2044,10 +2082,11 @@ const getStatus = (val, type, o3Data = {}) => {
 },
 
             after_meal: {
-              value: bs_am,
-              target: 140,
-              status: bs_am == null ? "unknown" : bs_am <= 140 ? "green" : "red",
-            },
+  value: bs_am,
+  target: o3.hasDiabetes ? 160 : 140,
+  status: getStatus(bs_am, "bs_am", o3),
+},
+
             A1C: {
               value: A1C,
               target: 5.6,

@@ -88,18 +88,18 @@ exports.getCuoreHealthData = async (req, res) => {
 
         case "tg_hdl":
           if (num < 2.8) return "green";
-          if (num <= 4.0) return "orange";
+          if (num <= 3.9) return "orange";
           return "red";
 
          case "hscrp":
-          if (num < 0.1) return "green";
-          else if(num >=0.1 && num <=0.29) return "orange";
+          if (num <= 1.0) return "green";
+          else if(num >=1.1 && num <=2.9) return "orange";
           return "red";
 
         case "bs_pp":
           if (o3Data.hasDiabetes) {
             if (num < 130 || num > 220) return "red";
-            if (num >= 170 && num <= 220) return "orange";
+            if (num >= 180 && num <= 220) return "orange";
             return "green";
           } else {
             if (num < 140) return "green";
@@ -112,52 +112,51 @@ exports.getCuoreHealthData = async (req, res) => {
       }
     };
 
-    const getHrStatus = (val) => {
+     const getHrStatus = (val) => {
       if (val == null || val === "") return "unknown";
       const num = parseFloat(val);
 
-      if (num >= 64 && num <= 82) return "green";
-      if (num < 64 || (num >= 82 && num <= 95)) return "orange";
+      if (num >= 66 && num <= 92) return "green";
+      if ((num >= 61 && num <= 65) || (num >= 93 && num <= 109)) return "orange";
       return "red";
     };
 
     // -----------------------
     // ⭐ BP LOGIC (FIXED)
     // -----------------------
-    let bpString = null;
-    let bpStatus = "unknown";
+let bpString = null;
+let bpStatus = "unknown";
 
-    if (o7Data.bp_upper && o7Data.bp_lower) {
-      const sys = parseFloat(o7Data.bp_upper);
-      const dia = parseFloat(o7Data.bp_lower);
+if (o7Data.bp_upper && o7Data.bp_lower) {
+  const sys = parseFloat(o7Data.bp_upper);
+  const dia = parseFloat(o7Data.bp_lower);
 
-      if (!isNaN(sys) && !isNaN(dia)) {
-        bpString = `${sys}/${dia}`;
+  if (!isNaN(sys) && !isNaN(dia)) {
+    bpString = `${sys}/${dia}`;
 
-        const sysStatus =
-          sys < 100
-            ? "orange"
-            : sys <= 130
-            ? "green"
-            : sys <= 145
-            ? "orange"
-            : "red";
+    // BP Upper (Systolic)
+    const sysStatus =
+      sys < 100 || sys > 145
+        ? "red"
+        : sys >= 116 && sys <= 126
+        ? "green"
+        : "orange"; // 100–115 OR 127–145
 
-        const diaStatus =
-          dia < 64
-            ? "orange"
-            : dia <= 82
-            ? "green"
-            : dia <= 95
-            ? "orange"
-            : "red";
+    // BP Lower (Diastolic)
+    const diaStatus =
+      dia < 68 || dia > 95
+        ? "red"
+        : dia >= 76 && dia <= 82
+        ? "green"
+        : "orange"; // 68–75 OR 83–95
 
-        if (sysStatus === "red" || diaStatus === "red") bpStatus = "red";
-        else if (sysStatus === "orange" || diaStatus === "orange")
-          bpStatus = "orange";
-        else bpStatus = "green";
-      }
-    }
+    if (sysStatus === "red" || diaStatus === "red") bpStatus = "red";
+    else if (sysStatus === "orange" || diaStatus === "orange")
+      bpStatus = "orange";
+    else bpStatus = "green";
+  }
+}
+
 
     // --- TG/HDL ---
     const tgHdlValue = metrics.trigHDLRatio?.current;
