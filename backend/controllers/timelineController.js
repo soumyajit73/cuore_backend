@@ -655,7 +655,7 @@ if (bsWorst === "orange") {
   // 7️⃣ HsCRP
   // ---------------------------------------------------------------------
   const hs = n(o7Data.HsCRP);
-  if (hs != null && hs > 0.3) {
+  if (hs != null && hs > 3) {
     alerts.push({
       type: "orange",
       text: "Consult your doctor for high HsCRP.",
