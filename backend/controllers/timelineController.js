@@ -1542,6 +1542,9 @@ exports.updateEntry = async (req, res) => {
           { upsert: false }
         );
 
+        const updatedOnboarding = await Onboarding.findOne({ userId }).lean();
+
+
         // ✅ Step 2: Update the wake-up card itself
         const updatedSystemCard = await TimelineCard.findOneAndUpdate(
           { _id: docId, userId },
