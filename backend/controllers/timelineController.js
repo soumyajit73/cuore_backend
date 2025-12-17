@@ -899,6 +899,28 @@ exports.getHomeScreenData = async (req, res) => {
             Onboarding.findOne({ userId }).lean()
         ]);
 
+        const today = dayjs().tz(TZ).startOf("day");
+
+let streakCount = onboarding?.streakCount || 0;
+const lastStreakDate = onboarding?.lastStreakDate
+  ? dayjs(onboarding.lastStreakDate).tz(TZ).startOf("day")
+  : null;
+
+// If user is visiting on a NEW day
+if (!lastStreakDate || today.isAfter(lastStreakDate)) {
+  streakCount += 1;
+
+  await Onboarding.updateOne(
+    { userId },
+    {
+      $set: {
+        streakCount,
+        lastStreakDate: today.toDate()
+      }
+    }
+  );
+}
+
         if (!userData) {
             return res.status(404).json({ message: "User data not found." });
         }
@@ -1149,16 +1171,29 @@ const dedupedSystemCards = Array.from(systemMap.values());
   // --------------------------------------------------
   // 4️⃣ FINAL SORT — PURE CLOCK ORDER
   // --------------------------------------------------
-  const allCards = [...systemCards, ...userCards]
-    .sort((a, b) => {
-      const aMin = a.time.hour() * 60 + a.time.minute();
-      const bMin = b.time.hour() * 60 + b.time.minute();
-      return aMin - bMin;
-    })
-    .map(card => ({
-      ...card,
-      time: card.time.format("h:mm A"),
-    }));
+ // --------------------------------------------------
+// 4️⃣ FINAL SORT — WAKE FIRST, SLEEP LAST, OTHERS BY TIME
+// --------------------------------------------------
+const allCards = [...systemCards, ...userCards]
+  .sort((a, b) => {
+    // 1️⃣ Wake Up ALWAYS first
+    if (a.systemKey === "SYSTEM_WAKEUP") return -1;
+    if (b.systemKey === "SYSTEM_WAKEUP") return 1;
+
+    // 2️⃣ Sleep ALWAYS last
+    if (a.systemKey === "SYSTEM_SLEEP") return 1;
+    if (b.systemKey === "SYSTEM_SLEEP") return -1;
+
+    // 3️⃣ Everything else sorted by actual time
+    const aMin = a.time.hour() * 60 + a.time.minute();
+    const bMin = b.time.hour() * 60 + b.time.minute();
+    return aMin - bMin;
+  })
+  .map(card => ({
+    ...card,
+    time: card.time.format("h:mm A"),
+  }));
+
 
   // --------------------------------------------------
   // 5️⃣ MISSED TASKS (SIMPLE & SAFE)
@@ -1192,7 +1227,7 @@ const dedupedSystemCards = Array.from(systemMap.values());
     totalTasks: allCards.length,
     missedDisplay: `${missedTasks}/${allCards.length}`,
     alerts,
-    streak: onboarding.streakCount || 1,
+    streak: onboarding.streakCount,
   };
 };
 
