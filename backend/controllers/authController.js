@@ -264,8 +264,9 @@ exports.requestOtp = async (req, res) => {
   }
 
   try {
-    const caregiverPatient = await User.findOne({ caregiver_mobile: phone }).lean();
-    const existingUser = caregiverPatient ? null : await User.findOne({ phone }).lean();
+  const caregiverPatient = await User.findOne({ caregiver_mobile: phone }).lean();
+const existingUser = await User.findOne({ phone }).lean();
+
 
     if (!existingUser && !caregiverPatient) {
       return res.status(404).json({
@@ -276,19 +277,20 @@ exports.requestOtp = async (req, res) => {
       });
     }
 
-    if (role === "caregiver" && !caregiverPatient) {
-      return res.status(403).json({
-        error: "WRONG_ROLE",
-        message: "This number is not registered as caregiver."
-      });
-    }
+if (role === "caregiver" && !caregiverPatient) {
+  return res.status(403).json({
+    error: "WRONG_ROLE",
+    message: "This number is not registered as caregiver."
+  });
+}
 
-    if (role === "user" && caregiverPatient) {
-      return res.status(403).json({
-        error: "WRONG_ROLE",
-        message: "This number is registered as caregiver. Please login as caregiver."
-      });
-    }
+if (role === "user" && !existingUser) {
+  return res.status(403).json({
+    error: "WRONG_ROLE",
+    message: "This number is not registered as user."
+  });
+}
+
 
     const otp = generateSimpleOtp();
     const otpHash = hashOtp(otp);
@@ -308,9 +310,11 @@ exports.requestOtp = async (req, res) => {
       lastRequestedAt: new Date(),
 
       // ⭐ THE FIX: restore loginContext
-      loginContext: caregiverPatient
-        ? { type: "caregiver", userId: caregiverPatient._id }
-        : { type: "user", userId: existingUser._id }
+      loginContext:
+  role === "caregiver"
+    ? { type: "caregiver", userId: caregiverPatient._id }
+    : { type: "user", userId: existingUser._id }
+
     });
 
     console.log(`[AUTH] Test OTP for ${phone}: ${otp}`);
