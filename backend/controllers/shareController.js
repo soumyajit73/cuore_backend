@@ -1,4 +1,4 @@
-const puppeteer = require("puppeteer");
+const puppeteer = require("puppeteer-core");
 
 const {
   getCuoreHealthInternal
@@ -313,9 +313,16 @@ exports.shareReport = async (req, res) => {
 
     // ---- HTML → PDF ----
     const browser = await puppeteer.launch({
-      headless: "new",
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
+  headless: true,
+  executablePath: process.env.CHROME_PATH || "/usr/bin/google-chrome",
+  args: [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu"
+  ],
+});
+
 
     const pageObj = await browser.newPage();
     await pageObj.setContent(html, { waitUntil: "networkidle0" });
