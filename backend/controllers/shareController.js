@@ -1,3 +1,6 @@
+
+const { executablePath } = require("puppeteer");
+
 const puppeteer = require("puppeteer");
 
 
@@ -317,7 +320,8 @@ exports.shareReport = async (req, res) => {
 const isProduction = process.env.NODE_ENV === "production";
 
 const browser = await puppeteer.launch({
-  headless: true,
+  headless: "new", // Use "new" for better compatibility in recent versions
+  executablePath: isProduction ? executablePath() : undefined, 
   args: [
     "--no-sandbox",
     "--disable-setuid-sandbox",
