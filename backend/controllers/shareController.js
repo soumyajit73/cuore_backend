@@ -319,11 +319,16 @@ exports.shareReport = async (req, res) => {
     // ---- HTML → PDF ----
 const isProduction = process.env.NODE_ENV === "production";
 
+// Replace your existing launch config with this:
 const browser = await puppeteer.launch({
-  headless: "new", // Use "new" for better compatibility in recent versions
-  executablePath: isProduction ? executablePath() : undefined, 
+  headless: "new",
+  // Try to use the environment variable if you set one, 
+  // otherwise fallback to the automatic helper
+  executablePath: isProduction 
+    ? (process.env.CHROME_PATH || executablePath()) 
+    : undefined,
   args: [
-    "--no-sandbox",
+    "--no-sandbox", 
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
     "--disable-gpu"
