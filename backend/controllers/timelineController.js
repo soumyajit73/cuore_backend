@@ -2277,3 +2277,30 @@ responseBody.current_date = formattedDate;
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
+// 🔹 INTERNAL FUNCTION FOR SHARE (SAFE WRAPPER)
+async function getCuoreScoreDetailsInternal(userId) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const fakeReq = {
+        user: { userId },
+        params: { userId },
+      };
+
+      const fakeRes = {
+        status: function () {
+          return this;
+        },
+        json: function (payload) {
+          resolve(payload);
+        },
+      };
+
+      await exports.getCuoreScoreDetails(fakeReq, fakeRes);
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+exports.getCuoreScoreDetailsInternal = getCuoreScoreDetailsInternal;

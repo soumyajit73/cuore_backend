@@ -222,6 +222,35 @@ if (o7Data.bp_upper && o7Data.bp_lower) {
     return res.status(500).json({ error: "Internal server error." });
   }
 };
+// 🔹 INTERNAL FUNCTION FOR SHARE (SAFE WRAPPER)
+async function getCuoreHealthInternal(userId) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const fakeReq = {
+        user: { userId },
+      };
+
+      const fakeRes = {
+        status: function () {
+          return this;
+        },
+        json: function (payload) {
+          // existing API wraps data inside { status, data }
+          if (payload?.data) {
+            resolve(payload.data);
+          } else {
+            resolve(payload);
+          }
+        },
+      };
+
+      await exports.getCuoreHealthData(fakeReq, fakeRes);
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 
 // Update last consulted date
 exports.updateLastConsultedDate = async (req, res) => {
@@ -262,3 +291,5 @@ exports.updateLastConsultedDate = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
+exports.getCuoreHealthInternal = getCuoreHealthInternal;

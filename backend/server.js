@@ -19,6 +19,8 @@ const predictRoutes = require('./routes/predictRoutes');
 const cuoreHealthRoutes=require('./routes/cuoreHealthRoutes.js');
 const doctorAuthRoutes=require('./routes/web/doctorAuthRoutes.js');
 const doctorDashboardRoutes = require('./routes/web/doctorDashboardRoutes.js');
+const shareRoutes = require("./routes/shareRoutes");
+
 
 // --- NEW/UPDATED IMPORTS ---
 const nourishmentRoutes = require('./routes/nourishmentRoutes'); 
@@ -60,7 +62,7 @@ app.get("/", (req, res) => {
     res.send("Cuore Backend API is running");
 });
 // share routes
-// app.use('/api/v1/share', require('./routes/shareRoutes.js'));
+app.use('/api/v1/share', require('./routes/shareRoutes.js'));
 
 // Authentication
 app.use('/api/v1/auth', authRoutes);
