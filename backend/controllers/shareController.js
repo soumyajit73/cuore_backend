@@ -1,9 +1,5 @@
-
-const { executablePath } = require("puppeteer");
-
 const puppeteer = require("puppeteer");
-
-
+const { executablePath } = require("puppeteer");
 
 const {
   getCuoreHealthInternal
@@ -43,9 +39,7 @@ function generateCuoreHealthHTML(data) {
     </style>
   </head>
   <body>
-
     <h1>Cuore Health Report</h1>
-
     <h2>Profile</h2>
     <div class="card">
       <p><b>Name:</b> ${p.name}</p>
@@ -57,7 +51,6 @@ function generateCuoreHealthHTML(data) {
           ? new Date(p.lastConsulted).toDateString()
           : "—"
       }</p>
-
       <p><b>Medications:</b></p>
       <ul>
         ${(p.medications && p.medications.length)
@@ -66,56 +59,25 @@ function generateCuoreHealthHTML(data) {
         }
       </ul>
     </div>
-
     <h2>Health Observations</h2>
     <div class="card">
       <ul>
-        <li>
-          Heart Rate: ${h.heartRate.value}
-          <span class="muted">(${h.heartRate.status})</span>
-        </li>
-
-        <li>
-          Blood Pressure: ${h.bloodPressure.value}
-          <span class="muted">(${h.bloodPressure.status})</span>
-        </li>
-
-        <li>
-          Blood Sugar (PP): ${h.bloodSugarPP.value}
-          <span class="muted">(${h.bloodSugarPP.status})</span>
-        </li>
-
-        <li>
-          HbA1c: ${h.HbA1c.value}
-          <span class="muted">(${h.HbA1c.status})</span>
-        </li>
-
-        <li>
-          TG / HDL Ratio: ${h.TG_HDL_Ratio.value}
-          <span class="muted">(${h.TG_HDL_Ratio.status})</span>
-        </li>
-
-        <li>
-          HsCRP: ${h.HsCRP.value} ${h.HsCRP.unit}
-          <span class="muted">(${h.HsCRP.status})</span>
-        </li>
-
-        <li>
-          Lifestyle Score: ${h.lifestyleScore.value}
-          <span class="muted">(${h.lifestyleScore.status})</span>
-        </li>
+        <li>Heart Rate: ${h.heartRate.value} <span class="muted">(${h.heartRate.status})</span></li>
+        <li>Blood Pressure: ${h.bloodPressure.value} <span class="muted">(${h.bloodPressure.status})</span></li>
+        <li>Blood Sugar (PP): ${h.bloodSugarPP.value} <span class="muted">(${h.bloodSugarPP.status})</span></li>
+        <li>HbA1c: ${h.HbA1c.value} <span class="muted">(${h.HbA1c.status})</span></li>
+        <li>TG / HDL Ratio: ${h.TG_HDL_Ratio.value} <span class="muted">(${h.TG_HDL_Ratio.status})</span></li>
+        <li>HsCRP: ${h.HsCRP.value} ${h.HsCRP.unit} <span class="muted">(${h.HsCRP.status})</span></li>
+        <li>Lifestyle Score: ${h.lifestyleScore.value} <span class="muted">(${h.lifestyleScore.status})</span></li>
       </ul>
     </div>
-
   </body>
   </html>
   `;
 }
 
-
 function generateCuoreScoreHTML(data) {
   const m = data.health_metrics;
-
   return `
   <!DOCTYPE html>
   <html>
@@ -126,173 +88,42 @@ function generateCuoreScoreHTML(data) {
       body { font-family: Arial, sans-serif; padding: 20px; }
       h1 { color: #0f172a; }
       h2 { margin-top: 24px; }
-      h3 { margin-top: 16px; }
-      .card {
-        border: 1px solid #ddd;
-        padding: 14px;
-        border-radius: 8px;
-        margin-bottom: 16px;
-      }
+      .card { border: 1px solid #ddd; padding: 14px; border-radius: 8px; margin-bottom: 16px; }
       ul { padding-left: 18px; }
       li { margin-bottom: 6px; }
       .muted { color: #666; font-size: 13px; }
     </style>
   </head>
   <body>
-
     <h1>Cuore Score Report</h1>
     <p><b>Date:</b> ${data.current_date}</p>
-
-    <!-- OVERALL SCORE -->
     <div class="card">
       <p><b>Health Score:</b> ${m.health_score}</p>
-      <p>
-        <b>Estimated Time to Target:</b>
-        ${m.estimated_time_to_target.value}
-        ${m.estimated_time_to_target.unit}
-      </p>
+      <p><b>Estimated Time to Target:</b> ${m.estimated_time_to_target.value} ${m.estimated_time_to_target.unit}</p>
     </div>
-
-    <!-- BODY METRICS -->
     <h2>Body Metrics</h2>
     <div class="card">
       <ul>
-        <li>
-          Metabolic Age:
-          ${m.metabolic_age.value} ${m.metabolic_age.unit}
-          <span class="muted">(Gap: ${m.metabolic_age.gap} years)</span>
-        </li>
-
-        <li>
-          Weight:
-          ${m.weight.current}${m.weight.unit}
-          →
-          Target: ${m.weight.target}${m.weight.unit}
-          <span class="muted">(${m.weight.status})</span>
-        </li>
-
-        <li>
-          BMI:
-          ${m.bmi.value}
-          →
-          Target: ${m.bmi.target}
-          <span class="muted">(${m.bmi.status})</span>
-        </li>
-
-        <li>
-          Body Fat:
-          ${m.vitals.body_fat.value}${m.vitals.body_fat.unit}
-          →
-          Target: ${m.vitals.body_fat.target}${m.vitals.body_fat.unit}
-          <span class="muted">(${m.vitals.body_fat.status})</span>
-        </li>
+        <li>Metabolic Age: ${m.metabolic_age.value} ${m.metabolic_age.unit} <span class="muted">(Gap: ${m.metabolic_age.gap} years)</span></li>
+        <li>Weight: ${m.weight.current}${m.weight.unit} → Target: ${m.weight.target}${m.weight.unit}</li>
       </ul>
     </div>
-
-    <!-- LIFESTYLE -->
-    <h2>Lifestyle</h2>
-    <div class="card">
-      <ul>
-        <li>
-          Lifestyle Score:
-          ${m.lifestyle_score.value}${m.lifestyle_score.unit}
-          →
-          Target: ${m.lifestyle_score.target}${m.lifestyle_score.unit}
-          <span class="muted">(${m.lifestyle_score.status})</span>
-        </li>
-
-        <li>
-          Recommended Calories:
-          ${m.recommended.calories.value} ${m.recommended.calories.unit}
-        </li>
-
-        <li>
-          Recommended Exercise:
-          ${m.recommended.exercise.value} ${m.recommended.exercise.unit}
-        </li>
-      </ul>
-    </div>
-
-    <!-- VITALS -->
-    <h2>Vitals</h2>
-    <div class="card">
-      <ul>
-        <li>
-          Heart Rate:
-          ${m.vitals.heartRate.value}
-          <span class="muted">(${m.vitals.heartRate.status})</span>
-        </li>
-
-        <li>
-          Blood Pressure:
-          ${m.vitals.blood_pressure.current}
-          →
-          Target: ${m.vitals.blood_pressure.target}
-          <span class="muted">
-            (Upper: ${m.vitals.blood_pressure.status.upper},
-             Lower: ${m.vitals.blood_pressure.status.lower})
-          </span>
-        </li>
-
-        <li>
-          Blood Sugar (Fasting):
-          ${m.vitals.blood_sugar.fasting.value}
-          →
-          Target: ${m.vitals.blood_sugar.fasting.target}
-          <span class="muted">(${m.vitals.blood_sugar.fasting.status})</span>
-        </li>
-
-        <li>
-          Blood Sugar (After Meal):
-          ${m.vitals.blood_sugar.after_meal.value}
-          →
-          Target: ${m.vitals.blood_sugar.after_meal.target}
-          <span class="muted">(${m.vitals.blood_sugar.after_meal.status})</span>
-        </li>
-
-        <li>
-          HbA1c:
-          ${m.vitals.blood_sugar.A1C.value}
-          →
-          Target: ${m.vitals.blood_sugar.A1C.target}
-          <span class="muted">(${m.vitals.blood_sugar.A1C.status})</span>
-        </li>
-
-        <li>
-          TG / HDL Ratio:
-          ${m.vitals.cholesterol.tg_hdl_ratio.value}
-          →
-          Target: ${m.vitals.cholesterol.tg_hdl_ratio.target}
-          <span class="muted">(${m.vitals.cholesterol.tg_hdl_ratio.status})</span>
-        </li>
-
-        <li>
-          HsCRP:
-          ${m.vitals.HsCRP.value} ${m.vitals.HsCRP.unit}
-          <span class="muted">(${m.vitals.HsCRP.status})</span>
-        </li>
-      </ul>
-    </div>
-
-    <!-- MAIN FOCUS -->
     <h2>Main Focus Areas</h2>
     <div class="card">
       <ul>
         ${m.main_focus.map(focus => `<li>${focus}</li>`).join("")}
       </ul>
     </div>
-
   </body>
   </html>
   `;
 }
 
-
 // -------------------------
 // SHARE REPORT API
 // -------------------------
-
 exports.shareReport = async (req, res) => {
+  let browser;
   try {
     const userId = req.user.userId;
     const { page } = req.body;
@@ -317,30 +148,19 @@ exports.shareReport = async (req, res) => {
     }
 
     // ---- HTML → PDF ----
-const isProduction = process.env.NODE_ENV === "production";
+    const isProduction = process.env.NODE_ENV === "production";
 
-// Replace your existing launch config with this:
-const browser = await puppeteer.launch({
-  headless: "new",
-  // Try to use the environment variable if you set one, 
-  // otherwise fallback to the automatic helper
-  executablePath: isProduction 
-    ? (process.env.CHROME_PATH || executablePath()) 
-    : undefined,
-  args: [
-    "--no-sandbox", 
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-gpu"
-  ],
-});
-
-
-console.log("Using CHROME_PATH:", process.env.CHROME_PATH);
-
-
-
-
+    browser = await puppeteer.launch({
+      headless: "new",
+      // executablePath() finds the binary in PUPPETEER_CACHE_DIR automatically
+      executablePath: isProduction ? executablePath() : undefined,
+      args: [
+        "--no-sandbox", 
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu"
+      ],
+    });
 
     const pageObj = await browser.newPage();
     await pageObj.setContent(html, { waitUntil: "networkidle0" });
@@ -349,8 +169,6 @@ console.log("Using CHROME_PATH:", process.env.CHROME_PATH);
       format: "A4",
       printBackground: true,
     });
-
-    await browser.close();
 
     // ---- Send PDF ----
     res.set({
@@ -364,5 +182,7 @@ console.log("Using CHROME_PATH:", process.env.CHROME_PATH);
   } catch (err) {
     console.error("Error in shareReport:", err);
     return res.status(500).json({ error: "Failed to generate PDF" });
+  } finally {
+    if (browser) await browser.close();
   }
 };
