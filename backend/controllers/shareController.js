@@ -1,5 +1,4 @@
-const puppeteer = require("puppeteer");
-// const { executablePath } = require("puppeteer");
+const { chromium } = require("playwright-chromium");
 
 const {
   getCuoreHealthInternal
@@ -40,6 +39,7 @@ function generateCuoreHealthHTML(data) {
   </head>
   <body>
     <h1>Cuore Health Report</h1>
+
     <h2>Profile</h2>
     <div class="card">
       <p><b>Name:</b> ${p.name}</p>
@@ -47,18 +47,19 @@ function generateCuoreHealthHTML(data) {
       <p><b>Smoker:</b> ${p.smoker}</p>
       <p><b>Past History:</b> ${p.pastHO || "—"}</p>
       <p><b>Last Consulted:</b> ${
-        p.lastConsulted
-          ? new Date(p.lastConsulted).toDateString()
-          : "—"
+        p.lastConsulted ? new Date(p.lastConsulted).toDateString() : "—"
       }</p>
+
       <p><b>Medications:</b></p>
       <ul>
-        ${(p.medications && p.medications.length)
-          ? p.medications.map(m => `<li>${m}</li>`).join("")
-          : "<li>—</li>"
+        ${
+          p.medications && p.medications.length
+            ? p.medications.map(m => `<li>${m}</li>`).join("")
+            : "<li>—</li>"
         }
       </ul>
     </div>
+
     <h2>Health Observations</h2>
     <div class="card">
       <ul>
@@ -78,6 +79,7 @@ function generateCuoreHealthHTML(data) {
 
 function generateCuoreScoreHTML(data) {
   const m = data.health_metrics;
+
   return `
   <!DOCTYPE html>
   <html>
@@ -88,7 +90,12 @@ function generateCuoreScoreHTML(data) {
       body { font-family: Arial, sans-serif; padding: 20px; }
       h1 { color: #0f172a; }
       h2 { margin-top: 24px; }
-      .card { border: 1px solid #ddd; padding: 14px; border-radius: 8px; margin-bottom: 16px; }
+      .card {
+        border: 1px solid #ddd;
+        padding: 14px;
+        border-radius: 8px;
+        margin-bottom: 16px;
+      }
       ul { padding-left: 18px; }
       li { margin-bottom: 6px; }
       .muted { color: #666; font-size: 13px; }
@@ -96,18 +103,28 @@ function generateCuoreScoreHTML(data) {
   </head>
   <body>
     <h1>Cuore Score Report</h1>
+
     <p><b>Date:</b> ${data.current_date}</p>
+
     <div class="card">
       <p><b>Health Score:</b> ${m.health_score}</p>
       <p><b>Estimated Time to Target:</b> ${m.estimated_time_to_target.value} ${m.estimated_time_to_target.unit}</p>
     </div>
+
     <h2>Body Metrics</h2>
     <div class="card">
       <ul>
-        <li>Metabolic Age: ${m.metabolic_age.value} ${m.metabolic_age.unit} <span class="muted">(Gap: ${m.metabolic_age.gap} years)</span></li>
-        <li>Weight: ${m.weight.current}${m.weight.unit} → Target: ${m.weight.target}${m.weight.unit}</li>
+        <li>
+          Metabolic Age: ${m.metabolic_age.value} ${m.metabolic_age.unit}
+          <span class="muted">(Gap: ${m.metabolic_age.gap} years)</span>
+        </li>
+        <li>
+          Weight: ${m.weight.current}${m.weight.unit}
+          → Target: ${m.weight.target}${m.weight.unit}
+        </li>
       </ul>
     </div>
+
     <h2>Main Focus Areas</h2>
     <div class="card">
       <ul>
@@ -122,8 +139,10 @@ function generateCuoreScoreHTML(data) {
 // -------------------------
 // SHARE REPORT API
 // -------------------------
+
 exports.shareReport = async (req, res) => {
   let browser;
+
   try {
     const userId = req.user.userId;
     const { page } = req.body;
@@ -138,37 +157,30 @@ exports.shareReport = async (req, res) => {
     if (page === "CUORE_HEALTH") {
       data = await getCuoreHealthInternal(userId);
       html = generateCuoreHealthHTML(data);
-    } 
-    else if (page === "CUORE_SCORE") {
+    } else if (page === "CUORE_SCORE") {
       data = await getCuoreScoreDetailsInternal(userId);
       html = generateCuoreScoreHTML(data);
-    } 
-    else {
+    } else {
       return res.status(400).json({ error: "Invalid page type" });
     }
 
-    // ---- HTML → PDF ----
-    const isProduction = process.env.NODE_ENV === "production";
+    // ---- HTML → PDF (Playwright) ----
+    browser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
 
-browser = await puppeteer.launch({
-  headless: "new",
-  executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-  args: [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-gpu",
-  ],
-});
+    const context = await browser.newContext();
+    const pageObj = await context.newPage();
 
-
-    const pageObj = await browser.newPage();
-    await pageObj.setContent(html, { waitUntil: "networkidle0" });
+    await pageObj.setContent(html, { waitUntil: "networkidle" });
 
     const pdfBuffer = await pageObj.pdf({
       format: "A4",
       printBackground: true,
     });
+
+    await browser.close();
 
     // ---- Send PDF ----
     res.set({
@@ -181,8 +193,7 @@ browser = await puppeteer.launch({
 
   } catch (err) {
     console.error("Error in shareReport:", err);
-    return res.status(500).json({ error: "Failed to generate PDF" });
-  } finally {
     if (browser) await browser.close();
+    return res.status(500).json({ error: "Failed to generate PDF" });
   }
 };
