@@ -1,5 +1,5 @@
 const puppeteer = require("puppeteer");
-const { executablePath } = require("puppeteer");
+// const { executablePath } = require("puppeteer");
 
 const {
   getCuoreHealthInternal
@@ -150,17 +150,16 @@ exports.shareReport = async (req, res) => {
     // ---- HTML → PDF ----
     const isProduction = process.env.NODE_ENV === "production";
 
-    browser = await puppeteer.launch({
-      headless: "new",
-      // executablePath() finds the binary in PUPPETEER_CACHE_DIR automatically
-      executablePath: isProduction ? executablePath() : undefined,
-      args: [
-        "--no-sandbox", 
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu"
-      ],
-    });
+ browser = await puppeteer.launch({
+  headless: "new",
+  args: [
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+  ],
+});
+
 
     const pageObj = await browser.newPage();
     await pageObj.setContent(html, { waitUntil: "networkidle0" });
