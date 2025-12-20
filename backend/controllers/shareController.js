@@ -1,7 +1,5 @@
-const puppeteer =
-  process.env.NODE_ENV === "production"
-    ? require("puppeteer-core")
-    : require("puppeteer");
+const puppeteer = require("puppeteer");
+
 
 
 const {
@@ -320,7 +318,6 @@ const isProduction = process.env.NODE_ENV === "production";
 
 const browser = await puppeteer.launch({
   headless: true,
-  executablePath: process.env.CHROME_PATH,
   args: [
     "--no-sandbox",
     "--disable-setuid-sandbox",
@@ -328,6 +325,8 @@ const browser = await puppeteer.launch({
     "--disable-gpu"
   ],
 });
+
+
 console.log("Using CHROME_PATH:", process.env.CHROME_PATH);
 
 
