@@ -1,4 +1,8 @@
-const puppeteer = require("puppeteer-core");
+const puppeteer =
+  process.env.NODE_ENV === "production"
+    ? require("puppeteer-core")
+    : require("puppeteer");
+
 
 const {
   getCuoreHealthInternal
@@ -312,9 +316,13 @@ exports.shareReport = async (req, res) => {
     }
 
     // ---- HTML → PDF ----
-    const browser = await puppeteer.launch({
+const isProduction = process.env.NODE_ENV === "production";
+
+const browser = await puppeteer.launch({
   headless: true,
-  executablePath: process.env.CHROME_PATH || "/usr/bin/google-chrome",
+  executablePath: isProduction
+    ? process.env.CHROME_PATH || "/usr/bin/google-chrome"
+    : undefined, // puppeteer (not core) handles this
   args: [
     "--no-sandbox",
     "--disable-setuid-sandbox",
@@ -322,6 +330,8 @@ exports.shareReport = async (req, res) => {
     "--disable-gpu"
   ],
 });
+
+
 
 
     const pageObj = await browser.newPage();
