@@ -90,6 +90,7 @@ function generateCuoreScoreHTML(data) {
       body { font-family: Arial, sans-serif; padding: 20px; }
       h1 { color: #0f172a; }
       h2 { margin-top: 24px; }
+      h3 { margin-top: 16px; }
       .card {
         border: 1px solid #ddd;
         padding: 14px;
@@ -102,35 +103,149 @@ function generateCuoreScoreHTML(data) {
     </style>
   </head>
   <body>
-    <h1>Cuore Score Report</h1>
 
+    <h1>Cuore Score Report</h1>
     <p><b>Date:</b> ${data.current_date}</p>
 
+    <!-- OVERALL SCORE -->
     <div class="card">
       <p><b>Health Score:</b> ${m.health_score}</p>
-      <p><b>Estimated Time to Target:</b> ${m.estimated_time_to_target.value} ${m.estimated_time_to_target.unit}</p>
+      <p>
+        <b>Estimated Time to Target:</b>
+        ${m.estimated_time_to_target.value}
+        ${m.estimated_time_to_target.unit}
+      </p>
     </div>
 
+    <!-- BODY METRICS -->
     <h2>Body Metrics</h2>
     <div class="card">
       <ul>
         <li>
-          Metabolic Age: ${m.metabolic_age.value} ${m.metabolic_age.unit}
+          Metabolic Age:
+          ${m.metabolic_age.value} ${m.metabolic_age.unit}
           <span class="muted">(Gap: ${m.metabolic_age.gap} years)</span>
         </li>
+
         <li>
-          Weight: ${m.weight.current}${m.weight.unit}
-          → Target: ${m.weight.target}${m.weight.unit}
+          Weight:
+          ${m.weight.current}${m.weight.unit}
+          →
+          Target: ${m.weight.target}${m.weight.unit}
+          <span class="muted">(${m.weight.status})</span>
+        </li>
+
+        <li>
+          BMI:
+          ${m.bmi.value}
+          →
+          Target: ${m.bmi.target}
+          <span class="muted">(${m.bmi.status})</span>
+        </li>
+
+        <li>
+          Body Fat:
+          ${m.vitals.body_fat.value}${m.vitals.body_fat.unit}
+          →
+          Target: ${m.vitals.body_fat.target}${m.vitals.body_fat.unit}
+          <span class="muted">(${m.vitals.body_fat.status})</span>
         </li>
       </ul>
     </div>
 
+    <!-- LIFESTYLE -->
+    <h2>Lifestyle</h2>
+    <div class="card">
+      <ul>
+        <li>
+          Lifestyle Score:
+          ${m.lifestyle_score.value}${m.lifestyle_score.unit}
+          →
+          Target: ${m.lifestyle_score.target}${m.lifestyle_score.unit}
+          <span class="muted">(${m.lifestyle_score.status})</span>
+        </li>
+
+        <li>
+          Recommended Calories:
+          ${m.recommended.calories.value} ${m.recommended.calories.unit}
+        </li>
+
+        <li>
+          Recommended Exercise:
+          ${m.recommended.exercise.value} ${m.recommended.exercise.unit}
+        </li>
+      </ul>
+    </div>
+
+    <!-- VITALS -->
+    <h2>Vitals</h2>
+    <div class="card">
+      <ul>
+        <li>
+          Heart Rate:
+          ${m.vitals.heartRate.value}
+          <span class="muted">(${m.vitals.heartRate.status})</span>
+        </li>
+
+        <li>
+          Blood Pressure:
+          ${m.vitals.blood_pressure.current}
+          →
+          Target: ${m.vitals.blood_pressure.target}
+          <span class="muted">
+            (Upper: ${m.vitals.blood_pressure.status.upper},
+             Lower: ${m.vitals.blood_pressure.status.lower})
+          </span>
+        </li>
+
+        <li>
+          Blood Sugar (Fasting):
+          ${m.vitals.blood_sugar.fasting.value}
+          →
+          Target: ${m.vitals.blood_sugar.fasting.target}
+          <span class="muted">(${m.vitals.blood_sugar.fasting.status})</span>
+        </li>
+
+        <li>
+          Blood Sugar (After Meal):
+          ${m.vitals.blood_sugar.after_meal.value}
+          →
+          Target: ${m.vitals.blood_sugar.after_meal.target}
+          <span class="muted">(${m.vitals.blood_sugar.after_meal.status})</span>
+        </li>
+
+        <li>
+          HbA1c:
+          ${m.vitals.blood_sugar.A1C.value}
+          →
+          Target: ${m.vitals.blood_sugar.A1C.target}
+          <span class="muted">(${m.vitals.blood_sugar.A1C.status})</span>
+        </li>
+
+        <li>
+          TG / HDL Ratio:
+          ${m.vitals.cholesterol.tg_hdl_ratio.value}
+          →
+          Target: ${m.vitals.cholesterol.tg_hdl_ratio.target}
+          <span class="muted">(${m.vitals.cholesterol.tg_hdl_ratio.status})</span>
+        </li>
+
+        <li>
+          HsCRP:
+          ${m.vitals.HsCRP.value} ${m.vitals.HsCRP.unit}
+          <span class="muted">(${m.vitals.HsCRP.status})</span>
+        </li>
+      </ul>
+    </div>
+
+    <!-- MAIN FOCUS -->
     <h2>Main Focus Areas</h2>
     <div class="card">
       <ul>
         ${m.main_focus.map(focus => `<li>${focus}</li>`).join("")}
       </ul>
     </div>
+
   </body>
   </html>
   `;
