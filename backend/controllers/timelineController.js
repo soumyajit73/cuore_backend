@@ -843,26 +843,32 @@ const generateTimelineCardsForDay = async (userId, targetDate) => {
     });
 
     // 3. Upsert the cards
-    for (const card of newCards) {
-      await TimelineCard.findOneAndUpdate(
-        {
-          userId,
-          sourceId: card.sourceId,
-        },
-        {
-  $set: card,
-  $setOnInsert: {
-    alarm_notified: false,
-    alarm_notified_at: null,
-    alarm_notified_time: null,
-    isCompleted: false,
-    completionTime: null,
-  }
+  for (const card of newCards) {
+  delete card.alarm_notified;
+  delete card.alarm_notified_at;
+  delete card.alarm_notified_time;
+  delete card.isCompleted;
+  delete card.completionTime;
+
+  await TimelineCard.findOneAndUpdate(
+    {
+      userId,
+      sourceId: card.sourceId,
+    },
+    {
+      $set: card,
+      $setOnInsert: {
+        alarm_notified: false,
+        alarm_notified_at: null,
+        alarm_notified_time: null,
+        isCompleted: false,
+        completionTime: null,
+      },
+    },
+    { upsert: true, new: true }
+  );
 }
-,
-        { upsert: true, new: true }
-      );
-    }
+
 
     // 4. Clean up orphaned cards
     const validSourceIds = newCards.map((c) => c.sourceId.toString());
@@ -1928,7 +1934,14 @@ exports.markAlarmNotified = async (req, res) => {
     }
 
     // 1️⃣ Fetch existing card first
-    const existingCard = await TimelineCard.findOne({ _id: reminderId, userId });
+    TimelineCard.findOne({
+  userId,
+  $or: [
+    { _id: reminderId },
+    { sourceId: reminderId }
+  ]
+})
+
 
     if (!existingCard) {
       return res.status(404).json({ error: "Card not found or not accessible." });
