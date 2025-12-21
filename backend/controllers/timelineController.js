@@ -849,7 +849,17 @@ const generateTimelineCardsForDay = async (userId, targetDate) => {
           userId,
           sourceId: card.sourceId,
         },
-        { $set: card },
+        {
+  $set: card,
+  $setOnInsert: {
+    alarm_notified: false,
+    alarm_notified_at: null,
+    alarm_notified_time: null,
+    isCompleted: false,
+    completionTime: null,
+  }
+}
+,
         { upsert: true, new: true }
       );
     }
