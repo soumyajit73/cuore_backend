@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { chromium } = require("playwright-chromium");
 
 const {
@@ -333,13 +334,28 @@ exports.shareReport = async (req, res) => {
 
     await browser.close();
 
-    res.set({
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename=${page}.pdf`,
-      "Content-Length": pdfBuffer.length,
-    });
+  // ---- SAVE PDF TEMPORARILY ----
+const fileId = crypto.randomUUID();
+const fileName = `${page.toLowerCase()}-${fileId}.pdf`;
 
-    res.send(pdfBuffer);
+const reportsDir = path.join(__dirname, "../temp/reports");
+
+if (!fs.existsSync(reportsDir)) {
+  fs.mkdirSync(reportsDir, { recursive: true });
+}
+
+const filePath = path.join(reportsDir, fileName);
+fs.writeFileSync(filePath, pdfBuffer);
+
+// ---- CREATE PUBLIC LINK ----
+const fileUrl = `${req.protocol}://${req.get("host")}/public/reports/${fileName}`;
+
+// ---- SEND JSON RESPONSE ----
+return res.status(200).json({
+  success: true,
+  url: fileUrl
+});
+
 
   } catch (err) {
     console.error("Error in shareReport:", err);
