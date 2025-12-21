@@ -50,18 +50,18 @@ async function ensureSystemCardsExist(userId, onboarding, localDay) {
       TOBACCO: 10,
       CALORIE: 15,
       FITNESS_DEFAULT: 30,
-      BREAKFAST: 105,          // 1h 45m
-      MID_MORNING: 255,        // BF + 2h 30m
-      LUNCH: 390,              // 6h 30m
-      NAP: 450,                // Lunch + 1h
-      EVENING_SNACK: 570,      // Lunch + 3h
-      DINNER: 780,             // Lunch + 6h 30m
-      AFTER_DINNER_WALK: 810,  // Dinner + 30m
-      SLEEP: 960               // 16h
+      BREAKFAST: 105,
+      MID_MORNING: 255,
+      LUNCH: 390,
+      NAP: 450,
+      EVENING_SNACK: 570,
+      DINNER: 780,
+      AFTER_DINNER_WALK: 810,
+      SLEEP: 960
     };
 
     // --------------------------------------------------
-    // 3️⃣ FITNESS TIME (PREFERRED OR DEFAULT)
+    // 3️⃣ FITNESS TIME
     // --------------------------------------------------
     let fitnessTime;
     const preferredEx = onboarding?.o5Data?.preferred_ex_time;
@@ -88,12 +88,13 @@ async function ensureSystemCardsExist(userId, onboarding, localDay) {
       await TimelineCard.deleteMany({
         userId,
         type: "SYSTEM",
-        title: /tobacco|health win/i
+        systemKey: "SYSTEM_TOBACCO",
+        scheduleDate
       });
     }
 
     // --------------------------------------------------
-    // 5️⃣ SYSTEM CARDS (STRICT ORDER, WAKE-BASED)
+    // 5️⃣ SYSTEM CARD DEFINITIONS
     // --------------------------------------------------
     const systemCards = [
       {
@@ -186,42 +187,41 @@ async function ensureSystemCardsExist(userId, onboarding, localDay) {
     ];
 
     // --------------------------------------------------
-    // 6️⃣ UPSERT SYSTEM CARDS
+    // 6️⃣ SAFE UPSERT (NO STATE LOSS)
     // --------------------------------------------------
-
-    // 🔥 HARD RESET system cards for the day (authoritative rebuild)
-await TimelineCard.deleteMany({
-  userId,
-  type: "SYSTEM",
-  scheduleDate
-});
-
-
     for (const card of systemCards) {
-    await TimelineCard.updateOne(
-  { userId, scheduleDate, systemKey: card.key },
-  {
-    $set: {
-      scheduledTime: card.time.format("HH:mm"),
-      title: card.title,
-      description: card.desc,
-      type: "SYSTEM"
-    },
-    $setOnInsert: {
-      userId,
-      scheduleDate,
-      isCompleted: false,
-      isMissed: false,
-      systemKey: card.key
-    }
-  },
-  { upsert: true }
-);
-
+      await TimelineCard.findOneAndUpdate(
+        {
+          userId,
+          systemKey: card.key,
+          scheduleDate
+        },
+        {
+          // ✅ layout updates only
+          $set: {
+            title: card.title,
+            description: card.desc,
+            scheduledTime: card.time.format("HH:mm"),
+            type: "SYSTEM"
+          },
+          // ✅ created only once
+          $setOnInsert: {
+            userId,
+            systemKey: card.key,
+            scheduleDate,
+            isCompleted: false,
+            isMissed: false,
+            alarm_notified: false,
+            alarm_notified_at: null,
+            alarm_notified_time: null
+          }
+        },
+        { upsert: true }
+      );
     }
 
     console.log(
-      `✅ System cards ensured (wake-anchored) for ${userId} on ${localDay.format(
+      `✅ System cards ensured safely for ${userId} on ${localDay.format(
         "YYYY-MM-DD"
       )}`
     );

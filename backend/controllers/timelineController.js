@@ -842,32 +842,25 @@ const generateTimelineCardsForDay = async (userId, targetDate) => {
       }
     });
 
-    // 3. Upsert the cards
-  for (const card of newCards) {
-  delete card.alarm_notified;
-  delete card.alarm_notified_at;
-  delete card.alarm_notified_time;
-  delete card.isCompleted;
-  delete card.completionTime;
-
-  await TimelineCard.findOneAndUpdate(
-    {
-      userId,
+ await TimelineCard.findOneAndUpdate(
+  {
+    userId,
+    sourceId: card.sourceId,
+  },
+  {
+    $set: {
+      userId: card.userId,
       sourceId: card.sourceId,
-    },
-    {
-      $set: card,
-      $setOnInsert: {
-        alarm_notified: false,
-        alarm_notified_at: null,
-        alarm_notified_time: null,
-        isCompleted: false,
-        completionTime: null,
-      },
-    },
-    { upsert: true, new: true }
-  );
-}
+      title: card.title,
+      description: card.description,
+      scheduledTime: card.scheduledTime,
+      scheduleDate: card.scheduleDate,
+      type: card.type
+    }
+  },
+  { upsert: true, new: true }
+);
+
 
 
     // 4. Clean up orphaned cards
@@ -1927,81 +1920,50 @@ exports.markAlarmNotified = async (req, res) => {
   try {
     const userId = req.user.userId;
     const { reminderId } = req.params;
-    const { time } = req.body;
+    const { time, systemKey } = req.body;
 
-    if (!reminderId) {
-      return res.status(400).json({ error: "Missing reminderId in URL." });
+    const todayStart = dayjs().tz(TZ).startOf("day").toDate();
+    const todayEnd = dayjs().tz(TZ).endOf("day").toDate();
+
+    let card;
+
+    // ✅ SYSTEM CARD
+    if (systemKey) {
+      card = await TimelineCard.findOne({
+        userId,
+        systemKey,
+        scheduleDate: { $gte: todayStart, $lte: todayEnd }
+      });
     }
-
-    // 1️⃣ Fetch existing card first
-    TimelineCard.findOne({
-  userId,
-  $or: [
-    { _id: reminderId },
-    { sourceId: reminderId }
-  ]
-})
-
-
-    if (!existingCard) {
-      return res.status(404).json({ error: "Card not found or not accessible." });
-    }
-
-    // --------------------------------------------------
-    // 🔁 TOGGLE LOGIC
-    // --------------------------------------------------
-
-    let update = {};
-
-    // CASE A: Alarm already ON → TURN IT OFF
-    if (existingCard.alarm_notified === true) {
-      update = {
-        alarm_notified: false,
-        alarm_notified_at: null,
-        alarm_notified_time: null
-      };
-    }
-    // CASE B: Alarm OFF → TURN IT ON
+    // ✅ USER CARD
     else {
-      let alarmNotifiedAt = new Date();
-
-      if (time && typeof time === "string") {
-        const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-        const combined = `${today} ${time}`;
-        const parsed = new Date(combined);
-
-        if (!isNaN(parsed.getTime())) {
-          alarmNotifiedAt = parsed;
-        }
-      }
-
-      update = {
-        alarm_notified: true,
-        alarm_notified_at: alarmNotifiedAt,
-        alarm_notified_time: time || null
-      };
+      card = await TimelineCard.findOne({
+        userId,
+        $or: [{ _id: reminderId }, { sourceId: reminderId }],
+        scheduleDate: { $gte: todayStart, $lte: todayEnd }
+      });
     }
 
-    // 2️⃣ Apply update
-    const card = await TimelineCard.findOneAndUpdate(
-      { _id: reminderId, userId },
-      { $set: update },
-      { new: true }
-    );
+    if (!card) {
+      return res.status(404).json({ error: "Card not found for today" });
+    }
 
-    return res.status(200).json({
-      status: "success",
-      message: card.alarm_notified
-        ? "Alarm turned ON."
-        : "Alarm turned OFF.",
-      card
+    const newStatus = !card.alarm_notified;
+
+    card.alarm_notified = newStatus;
+    card.alarm_notified_at = newStatus ? new Date() : null;
+    card.alarm_notified_time = newStatus ? time : null;
+
+    await card.save();
+
+    return res.json({
+      success: true,
+      alarm_notified: newStatus
     });
 
   } catch (err) {
     console.error("Error toggling alarm:", err);
-    return res.status(500).json({
-      error: "Internal server error while toggling alarm."
-    });
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 
