@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getPatientList,addPatientLink,getPatientDetails,sendProfileEditOtp,updateDoctorProfile,getDoctorProfile,doctorRequestCheckin,clearDoctorCheckin } = require('../../controllers/web/doctorDashboardController');
+const { getPatientList,addPatientLink,getPatientDetails,sendProfileEditOtp,updateDoctorProfile,getDoctorProfile,doctorRequestCheckin,clearDoctorCheckin,getPatientVitalsHistory } = require('../../controllers/web/doctorDashboardController');
 const { protect } = require('../../middleware/authMiddleware'); // Your combined auth file
 
 // @route   GET /api/web/dashboard/patients
@@ -19,6 +19,8 @@ router.put('/profile/update', protect, updateDoctorProfile);
 router.get('/profile', protect, getDoctorProfile);
 
 router.post('/doctor/request-checkin', protect, doctorRequestCheckin);
+
+router.get('/patient/:patientId/vitals-history', protect, getPatientVitalsHistory);
 
 // router.post('/user/clear-checkin', protect, clearDoctorCheckin);
 

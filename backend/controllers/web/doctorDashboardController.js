@@ -5,6 +5,13 @@ const { Onboarding } = require('../../models/onboardingModel');
 const { calculateAllMetrics } = require('../../models/onboardingModel');
 const Reminder = require('../../models/Reminder');
 const bcrypt = require('bcryptjs');
+const dayjs = require("dayjs");
+const utc = require("dayjs/plugin/utc");
+const timezone = require("dayjs/plugin/timezone");
+
+dayjs.extend(utc);
+dayjs.extend(timezone);
+
 
 // --- HELPER: Generate Random Doctor Code ---
 function generateNewCode(name) {
@@ -886,5 +893,97 @@ exports.doctorRequestCheckin = async (req, res) => {
   } catch (err) {
     console.error("Error in doctorRequestCheckin:", err);
     res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.getPatientVitalsHistory = async (req, res) => {
+  try {
+    const { patientId } = req.params;
+
+    const onboarding = await Onboarding.findOne(
+      { userId: patientId },
+      { o7History: 1 }
+    ).lean();
+
+    if (!onboarding || !Array.isArray(onboarding.o7History)) {
+      return res.status(200).json({
+        monthly: { count: 0, data: [] },
+        biMonthly: { count: 0, data: [] },
+        quarterly: { count: 0, data: [] },
+        allHistory: { count: 0, data: [] }
+      });
+    }
+
+    const now = dayjs();
+    const history = onboarding.o7History;
+
+    // --- Helper: format single row ---
+    const formatRow = (entry) => {
+      const ts = entry.timestamp;
+
+      return {
+        date: new Date(ts).toLocaleDateString("en-GB", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric"
+        }),
+        time: new Date(ts).toLocaleTimeString("en-US", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: true
+        }),
+        sbp: entry.data?.bp_upper ?? null,
+        dbp: entry.data?.bp_lower ?? null,
+        bs_f: entry.data?.bs_f ?? null,
+        bs_pp: entry.data?.bs_am ?? null
+      };
+    };
+
+    // --- Buckets ---
+    const monthly = [];
+    const biMonthly = [];
+    const quarterly = [];
+    const allHistory = [];
+
+    history.forEach(entry => {
+      if (!entry.timestamp) return;
+
+      const entryDate = dayjs(entry.timestamp);
+      const daysDiff = now.diff(entryDate, "day");
+      const row = formatRow(entry);
+
+      allHistory.push(row);
+
+      if (daysDiff <= 30) {
+        monthly.push(row);
+      } else if (daysDiff <= 60) {
+        biMonthly.push(row);
+      } else if (daysDiff <= 90) {
+        quarterly.push(row);
+      }
+    });
+
+    return res.status(200).json({
+      monthly: {
+        count: monthly.length,
+        data: monthly
+      },
+      biMonthly: {
+        count: biMonthly.length,
+        data: biMonthly
+      },
+      quarterly: {
+        count: quarterly.length,
+        data: quarterly
+      },
+      allHistory: {
+        count: allHistory.length,
+        data: allHistory
+      }
+    });
+
+  } catch (err) {
+    console.error("Error fetching o7 vitals history:", err);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
