@@ -403,6 +403,7 @@ exports.verifyOtp = async (req, res) => {
 
         // ⭐ Always return correct caregiver role
         role: "caregiver",
+        // paymentStatus: user.paymentStatus || "none",
 
         access_token: accessToken,
         refresh_token: refreshToken,
@@ -448,7 +449,9 @@ exports.verifyOtp = async (req, res) => {
       onboardingStatus,
       caregiver_login: false,
 
-      role: storedRole,   // still "user"
+      role: storedRole, 
+      paymentStatus: user.paymentStatus || "none",
+      // still "user"
 
       access_token: accessToken,
       refresh_token: refreshToken,
