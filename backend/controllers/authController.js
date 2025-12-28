@@ -242,6 +242,7 @@ exports.verifyNewUserOtp = async (req, res) => {
             user_id: newUser._id,
             new_user: true,
             onboardingStatus: "incomplete",
+             paymentStatus: newUser.paymentStatus || "none",
             access_token: accessToken,
             refresh_token: refreshToken,
             expires_in: 18000
