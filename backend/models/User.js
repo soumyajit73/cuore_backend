@@ -35,6 +35,25 @@ const userSchema = new mongoose.Schema(
     doctor_phone: { type: String, default: "" },
     doctor_code: { type: String },
     corporate_code: { type: String },
+
+  paymentStatus: {
+  type: String,
+  enum: ["none", "pending", "completed", "failed"],
+  default: "none",
+},
+paymentMeta: {
+  orderId: String,
+  paymentId: String,
+  provider: { type: String, default: "razorpay" },
+},
+doctorId: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "Doctor",
+},
+email: String,
+city: String,
+state: String,
+
   },
   { timestamps: true }
 );

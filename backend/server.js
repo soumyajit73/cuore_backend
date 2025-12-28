@@ -21,6 +21,7 @@ const doctorAuthRoutes=require('./routes/web/doctorAuthRoutes.js');
 const doctorDashboardRoutes = require('./routes/web/doctorDashboardRoutes.js');
 const shareRoutes = require("./routes/shareRoutes");
 const path = require("path");
+const paymentRoutes = require("./routes/paymentRoutes");
 
 // --- NEW/UPDATED IMPORTS ---
 const nourishmentRoutes = require('./routes/nourishmentRoutes'); 
@@ -97,6 +98,8 @@ app.use(
   "/public/reports",
   express.static(path.join(__dirname, "temp/reports"))
 );
+
+app.use('/api/payment', paymentRoutes);
 
 
 // --- Start Server ---
