@@ -114,11 +114,10 @@ exports.getProfile = async (req, res) => {
     // ----------------------------------------
     let doctorDetails = null;
 
-    if (user.doctor_code) {
-      doctorDetails = await Doctor.findOne({
-        doctorCode: user.doctor_code
-      }).lean();
-    }
+   if (user.doctorId) {
+  doctorDetails = await Doctor.findById(user.doctorId).lean();
+}
+
 
     return res.status(200).json({
       status: "success",
