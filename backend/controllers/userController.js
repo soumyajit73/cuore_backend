@@ -114,9 +114,14 @@ exports.getProfile = async (req, res) => {
     // ----------------------------------------
     let doctorDetails = null;
 
-   if (user.doctorId) {
+ if (user.doctorId) {
   doctorDetails = await Doctor.findById(user.doctorId).lean();
+} else if (user.doctor_code) {
+  doctorDetails = await Doctor.findOne({
+    doctorCode: user.doctor_code
+  }).lean();
 }
+
 
 
     return res.status(200).json({
