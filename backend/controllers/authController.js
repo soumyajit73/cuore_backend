@@ -3,10 +3,11 @@ const mongoose = require('mongoose');
 const crypto = require("crypto");
 
 
+
 let nanoid;
 (async () => {
-    const module = await import('nanoid');
-    nanoid = module.nanoid;
+  const module = await import('nanoid');
+  nanoid = module.nanoid;
 })();
 
 const User = require('../models/User');
@@ -14,6 +15,7 @@ const OtpRequest = require('../models/otp');
 const { Onboarding } = require('../models/onboardingModel.js');
 const PatientLink = require('../models/PatientLink'); 
 const Doctor = require('../models/Doctor');
+const CorporateCode = require("../models/CorporateCode");
 
 // --- CONSTANTS ---
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'fallback-access-secret';
@@ -175,84 +177,139 @@ exports.createAccount = async (req, res) => {
 
 // 2. Verify OTP and Activate New User Account
 exports.verifyNewUserOtp = async (req, res) => {
-    const { request_id, otp_code } = req.body;
-    
-    if (!request_id || !otp_code) {
-        return res.status(400).json({ error: "Missing required fields." });
+  const { request_id, otp_code } = req.body;
+
+  if (!request_id || !otp_code) {
+    return res.status(400).json({ error: "Missing required fields." });
+  }
+
+  try {
+    // 1️⃣ Find OTP entry
+    const otpEntry = await OtpRequest.findOne({ request_id });
+    if (!otpEntry) {
+      return res.status(401).json({ error: "OTP_INVALID (Code not found or expired.)" });
     }
 
-    try {
-        // 1. Find OTP entry
-        const otpEntry = await OtpRequest.findOne({ request_id });
-        if (!otpEntry) {
-            return res.status(401).json({ error: "OTP_INVALID (Code not found or expired.)" });
-        }
-        
-        // 2. Expiry check
-        if (otpEntry.expiresAt < new Date()) {
-            await OtpRequest.deleteOne({ request_id });
-            return res.status(410).json({ error: "OTP_EXPIRED (This code has expired.)" });
-        }
+    // 2️⃣ Expiry check
+    if (otpEntry.expiresAt < new Date()) {
+      await OtpRequest.deleteOne({ request_id });
+      return res.status(410).json({ error: "OTP_EXPIRED (This code has expired.)" });
+    }
 
-        // 3. Verify OTP
-        const isOtpValid = compareOtp(otp_code, otpEntry.otpHash);
-        if (!isOtpValid) {
-            return res.status(401).json({ error: "OTP_INVALID (That code didn't match.)" });
-        }
+    // 3️⃣ Verify OTP
+    const isOtpValid = compareOtp(otp_code, otpEntry.otpHash);
+    if (!isOtpValid) {
+      return res.status(401).json({ error: "OTP_INVALID (That code didn't match.)" });
+    }
 
-        // 4. Avoid race condition
-        const existingUser = await User.findOne({ phone: otpEntry.phone });
-        if (existingUser) {
-            await OtpRequest.deleteOne({ request_id });
-            return res.status(409).json({ 
-                error: "USER_ALREADY_EXISTS",
-                message: "This mobile number is already registered."
-            });
-        }
+    // 4️⃣ Avoid race condition (user already exists)
+    const existingUser = await User.findOne({ phone: otpEntry.phone });
+    if (existingUser) {
+      await OtpRequest.deleteOne({ request_id });
+      return res.status(409).json({
+        error: "USER_ALREADY_EXISTS",
+        message: "This mobile number is already registered."
+      });
+    }
 
-        // 5. CREATE NEW USER
-        const newUser = await User.create({
-            ...otpEntry.userData,   // Includes doctor fields
-            isPhoneVerified: true
-        });
+    // ------------------------------------------------------------------
+    // ⭐ CORPORATE CODE VALIDATION
+    // ------------------------------------------------------------------
+    let corporateSignup = false;
+    let corporateCodeDoc = null;
 
-        // 6. LINK USER TO DOCTOR (if applicable)
-        if (newUser.doctor_code) {
-            const linkedDoctor = await Doctor.findOne({ doctorCode: newUser.doctor_code });
+    if (otpEntry.userData.corporate_code) {
+      const code = otpEntry.userData.corporate_code.toUpperCase();
 
-            if (linkedDoctor) {
-                // Add this user ID to the doctor's patient list
-                await Doctor.updateOne(
-                    { _id: linkedDoctor._id },
-                    { $addToSet: { patients: newUser._id } }
-                );
-                console.log(`[LINK] User ${newUser._id} linked to Doctor ${linkedDoctor._id}`);
-            } else {
-                console.warn(`[LINK] No matching doctor found for code ${newUser.doctor_code}`);
-            }
-        }
+      corporateCodeDoc = await CorporateCode.findOne({
+        code,
+        is_active: true
+      });
 
-        // 7. Delete OTP entry
+      if (!corporateCodeDoc) {
         await OtpRequest.deleteOne({ request_id });
-
-        // 8. Issue tokens
-        const { accessToken, refreshToken } = generateTokens(newUser._id);
-
-        return res.status(200).json({
-            user_id: newUser._id,
-            new_user: true,
-            onboardingStatus: "incomplete",
-             paymentStatus: newUser.paymentStatus || "none",
-            access_token: accessToken,
-            refresh_token: refreshToken,
-            expires_in: 18000
+        return res.status(400).json({
+          error: "INVALID_CORPORATE_CODE",
+          message: "The corporate code you entered is invalid or inactive."
         });
+      }
 
-    } catch (error) {
-        console.error("Error verifying new user OTP:", error);
-        return res.status(500).json({ error: "SERVER_ERROR" });
+      if (
+        corporateCodeDoc.max_uses !== -1 &&
+        corporateCodeDoc.used_count >= corporateCodeDoc.max_uses
+      ) {
+        await OtpRequest.deleteOne({ request_id });
+        return res.status(403).json({
+          error: "CORPORATE_LIMIT_REACHED",
+          message: "Corporate code usage limit reached."
+        });
+      }
+
+      corporateSignup = true;
     }
+
+    // ------------------------------------------------------------------
+    // 5️⃣ CREATE NEW USER
+    // ------------------------------------------------------------------
+    const newUser = await User.create({
+      ...otpEntry.userData,
+      isPhoneVerified: true,
+      paymentStatus: corporateSignup ? "waived" : "pending"
+    });
+
+    // ------------------------------------------------------------------
+    // 6️⃣ LINK USER TO DOCTOR (if applicable)
+    // ------------------------------------------------------------------
+    if (newUser.doctor_code) {
+      const linkedDoctor = await Doctor.findOne({ doctorCode: newUser.doctor_code });
+
+      if (linkedDoctor) {
+        await Doctor.updateOne(
+          { _id: linkedDoctor._id },
+          { $addToSet: { patients: newUser._id } }
+        );
+        console.log(`[LINK] User ${newUser._id} linked to Doctor ${linkedDoctor._id}`);
+      } else {
+        console.warn(`[LINK] No matching doctor found for code ${newUser.doctor_code}`);
+      }
+    }
+
+    // ------------------------------------------------------------------
+    // 7️⃣ INCREMENT CORPORATE CODE USAGE (ATOMIC)
+    // ------------------------------------------------------------------
+    if (corporateSignup && corporateCodeDoc) {
+      await CorporateCode.updateOne(
+        { _id: corporateCodeDoc._id },
+        { $inc: { used_count: 1 } }
+      );
+    }
+
+    // 8️⃣ Delete OTP entry
+    await OtpRequest.deleteOne({ request_id });
+
+    // 9️⃣ Issue tokens
+    const { accessToken, refreshToken } = generateTokens(newUser._id);
+
+    return res.status(200).json({
+      user_id: newUser._id,
+      new_user: true,
+      onboardingStatus: "incomplete",
+
+      corporate_signup: corporateSignup,
+      payment_required: !corporateSignup,
+
+      paymentStatus: newUser.paymentStatus,
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      expires_in: 18000
+    });
+
+  } catch (error) {
+    console.error("Error verifying new user OTP:", error);
+    return res.status(500).json({ error: "SERVER_ERROR" });
+  }
 };
+
 
 // Existing User Login Flow Endpoints (Modified)
 exports.requestOtp = async (req, res) => {

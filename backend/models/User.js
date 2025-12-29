@@ -38,7 +38,7 @@ const userSchema = new mongoose.Schema(
 
   paymentStatus: {
   type: String,
-  enum: ["none", "pending", "completed", "failed"],
+  enum: ["none", "pending", "completed", "failed","waived"],
   default: "none",
 },
 paymentMeta: {
