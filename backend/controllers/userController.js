@@ -1,6 +1,17 @@
 const User = require('../models/User'); 
 const mongoose = require('mongoose');
-const Doctor = require("../models/Doctor");  // <-- MUST BE ADDED
+const Doctor = require("../models/Doctor");
+const OtpRequest = require("../models/otp");
+const PatientLink = require("../models/PatientLink");
+const { Onboarding } = require("../models/onboardingModel");
+const TimelineCard = require("../models/TimelineCard");
+const Medication = require("../models/Medication");
+const Reminder = require("../models/Reminder");
+const NudgeHistory = require("../models/NudgeHistory");
+const NutritionPlanItem = require("../models/nutritionPlanItemModel");
+const {TobaccoProfile} = require("../models/TobaccoProfile");
+  // <-- MUST BE ADDED
+  
 
 exports.updateProfile = async (req, res) => {
   const userIdFromToken = req.user.userId;
@@ -243,5 +254,68 @@ exports.searchDoctors = async (req, res) => {
   } catch (error) {
     console.error("Error searching doctors:", error);
     res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+exports.deleteAccount = async (req, res) => {
+  const userId = req.user.userId;
+
+  try {
+    // 1️⃣ Fetch user (for phone reference)
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        status: "error",
+        message: "User not found"
+      });
+    }
+
+    const userPhone = user.phone;
+
+    // ------------------------------------------------------------------
+    // 2️⃣ REMOVE USER FROM DOCTOR DASHBOARD
+    // ------------------------------------------------------------------
+    await Doctor.updateMany(
+      { patients: userId },
+      { $pull: { patients: userId } }
+    );
+
+    // ------------------------------------------------------------------
+    // 3️⃣ DELETE EVERYTHING RELATED TO USER
+    // ------------------------------------------------------------------
+    await Promise.all([
+      // Core user
+      User.deleteOne({ _id: userId }),
+
+      // Auth / links
+      OtpRequest.deleteMany({ phone: userPhone }),
+      PatientLink.deleteMany({ patientMobile: userPhone }),
+
+      // User-specific data
+      Onboarding.deleteMany({ userId }),
+      TimelineCard.deleteMany({ userId }),
+      Medication.deleteMany({ userId }),
+      Reminder.deleteMany({ userId }),
+      NudgeHistory.deleteMany({ userId }),
+      NutritionPlanItem.deleteMany({ userId }),
+      TobaccoProfile.deleteMany({ userId })
+
+      // 👉 Add any other userId-based collections here
+    ]);
+
+    // ------------------------------------------------------------------
+    // 4️⃣ DONE
+    // ------------------------------------------------------------------
+    return res.status(200).json({
+      status: "success",
+      message: "User account and all related data have been permanently deleted."
+    });
+
+  } catch (error) {
+    console.error("DELETE ACCOUNT ERROR:", error);
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to delete account"
+    });
   }
 };
