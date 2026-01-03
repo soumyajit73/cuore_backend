@@ -1048,7 +1048,10 @@ const getTimelineData = async (userId, dateString) => {
   // --------------------------------------------------
   const rawCards = await TimelineCard.find({
   userId,
-  scheduleDate: localDay.toDate()
+  scheduleDate: {
+  $gte: localDay.startOf("day").toDate(),
+  $lte: localDay.endOf("day").toDate()
+}
 })
 .select("scheduledTime title description type systemKey updatedAt isCompleted alarm_notified alarm_notified_time alarm_notified_at")
 .lean();
@@ -1459,51 +1462,64 @@ exports.updateWakeUpTime = async (req, res) => {
 // -----------------------------------------------------
 exports.deleteReminder = async (req, res) => {
   const userId = req.user?.userId;
-  const { reminderId } = req.params;
+  const { reminderId } = req.params; // this is actually TimelineCard._id
 
   if (!userId) {
-    return res.status(401).json({ error: "Unauthorized. User ID not found." });
+    return res.status(401).json({ error: "Unauthorized." });
   }
 
   if (!reminderId) {
-    return res.status(400).json({ error: "Reminder ID is required in the URL." });
+    return res.status(400).json({ error: "ID is required in URL." });
   }
 
   try {
-    // 1️⃣ Delete from Reminder collection
-    const deletedReminder = await Reminder.findOneAndDelete({
+    // 🔹 STEP 1: Find TimelineCard first
+    const card = await TimelineCard.findOne({
       _id: reminderId,
-      userId: userId,
+      userId,
+      type: "USER_REMINDER"
+    });
+
+    if (!card) {
+      return res.status(404).json({ error: "Timeline card not found." });
+    }
+
+    // 🔹 STEP 2: Get real Reminder ID
+    const actualReminderId = card.sourceId;
+
+    // 🔹 STEP 3: Delete Reminder
+    const deletedReminder = await Reminder.findOneAndDelete({
+      _id: actualReminderId,
+      userId
     });
 
     if (!deletedReminder) {
-      return res.status(404).json({ error: "Reminder not found or access denied." });
+      return res.status(404).json({ error: "Reminder not found." });
     }
 
-    // 2️⃣ Delete linked timeline card(s)
+    // 🔹 STEP 4: Delete TimelineCard(s)
     await TimelineCard.deleteMany({
-      userId: userId,
-      sourceId: reminderId,
-      type: "USER_REMINDER",
+      userId,
+      sourceId: actualReminderId,
+      type: "USER_REMINDER"
     });
-
-    console.log(`✅ Deleted reminder ${reminderId} and its linked timeline cards.`);
-
-    // ✅ 3️⃣ Regenerate timeline — but SAFELY (idempotent)
-    await generateTimelineCardsForDay(userId, dayjs().tz(TZ).toDate());
 
     return res.status(200).json({
-      message: "Reminder deleted successfully and timeline refreshed safely.",
-      data: { id: reminderId },
+      message: "Reminder deleted successfully.",
+      data: { id: actualReminderId }
     });
+
   } catch (error) {
-    console.error(`❌ Error deleting reminder ${reminderId}:`, error);
+    console.error("❌ Delete error:", error);
+
     if (error.name === "CastError") {
-      return res.status(400).json({ error: "Invalid Reminder ID format." });
+      return res.status(400).json({ error: "Invalid ID format." });
     }
-    return res.status(500).json({ error: "Internal server error during deletion." });
+
+    return res.status(500).json({ error: "Internal server error." });
   }
 };
+
 
 
 
@@ -1553,75 +1569,39 @@ exports.getEntries = async (req, res) => {
 // 🔹 Main update function
 exports.updateEntry = async (req, res) => {
   const userId = req.user.userId;
-  const { model, docId } = getModelAndId(req);
-  const { title, startDate, endDate, time, repeatFrequency, name, dosage } = req.body;
+  const { reminderId:docId } = req.params; // TimelineCard ID
+  const { title, startDate, endDate, time, repeatFrequency } = req.body;
+
+  if (!docId) {
+    return res.status(400).json({ error: "ID is required in URL." });
+  }
 
   try {
-    // 1️⃣ Try fetching entry from Reminder/Medication
-    let existingEntry = await model.findOne({ _id: docId, userId }).lean();
+    // 🔹 STEP 1: Find TimelineCard
+    const card = await TimelineCard.findOne({
+      _id: docId,
+      userId,
+      type: "USER_REMINDER"
+    });
 
-    // ✅ If not found, check if it's a "Wake Up" system card
-    if (!existingEntry && model.modelName === "Reminder") {
-      const systemCard = await TimelineCard.findOne({
-        _id: docId,
-        userId,
-        type: "SYSTEM",
-        title: /wake up/i,
-      });
-
-      if (systemCard) {
-        if (!time) {
-          return res.status(400).json({
-            error: "Only time updates are allowed for Wake Up system cards.",
-          });
-        }
-
-        const newTime = convertTo24Hour(time);
-        const localDay = dayjs().tz(TZ).startOf("day");
-
-        // ✅ Step 1: Update wake time in onboarding
-        await Onboarding.updateOne(
-          { userId },
-          { "o6Data.wake_time": newTime },
-          { upsert: false }
-        );
-
-        const updatedOnboarding = await Onboarding.findOne({ userId }).lean();
-
-
-        // ✅ Step 2: Update the wake-up card itself
-        const updatedSystemCard = await TimelineCard.findOneAndUpdate(
-          { _id: docId, userId },
-          { $set: { scheduledTime: newTime } },
-          { new: true }
-        );
-
-        // ✅ Step 3: Shift all system cards according to new wake-up time
-        await updateSystemCardsAfterWakeChange(userId, newTime, localDay, updatedOnboarding);
-        
-        // 🕒 Ensure DB writes are complete before fetching timeline
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // ✅ Step 4: Fetch the latest timeline (without regenerating)
-        const updatedTimeline = await getTimelineData(userId, dayjs().format("YYYY-MM-DD"));
-
-        return res.status(200).json({
-          message: "Wake Up time updated — all system cards shifted correctly.",
-          previousData: systemCard,
-          updatedData: updatedSystemCard,
-          updatedTimeline,
-        });
-      }
+    if (!card) {
+      return res.status(404).json({ error: "Timeline card not found." });
     }
 
-    // ❌ Not found at all
+    // 🔹 STEP 2: Extract real Reminder ID
+    const reminderId = card.sourceId;
+
+    // 🔹 STEP 3: Fetch Reminder
+    const existingEntry = await Reminder.findOne({
+      _id: reminderId,
+      userId
+    }).lean();
+
     if (!existingEntry) {
-      return res
-        .status(404)
-        .json({ error: `${model.modelName} not found or access denied.` });
+      return res.status(404).json({ error: "Reminder not found." });
     }
 
-    // 2️⃣ Prepare update object dynamically
+    // 🔹 STEP 4: Build update object
     const updateData = {};
     if (title !== undefined) updateData.title = title;
     if (startDate !== undefined) updateData.startDate = parseDate(startDate);
@@ -1629,75 +1609,64 @@ exports.updateEntry = async (req, res) => {
     if (time !== undefined) updateData.time = convertTo24Hour(time);
     if (repeatFrequency !== undefined) updateData.repeatFrequency = repeatFrequency;
 
-    if (model.modelName === "Medication") {
-      if (name !== undefined) updateData.name = name;
-      if (dosage !== undefined) updateData.dosage = dosage;
-    }
-
-    // 3️⃣ Update Reminder/Medication entry
-    const updatedEntry = await model.findOneAndUpdate(
-      { _id: docId, userId },
+    // 🔹 STEP 5: Update Reminder
+    const updatedEntry = await Reminder.findOneAndUpdate(
+      { _id: reminderId, userId },
       { $set: updateData },
       { new: true, runValidators: true }
     );
 
-    // ---------------------------------------------------------
-    // ✅ FIX START: Sync changes to TimelineCard collection
-    // ---------------------------------------------------------
-    if (updatedEntry) {
-      const cardUpdates = {};
-      
-      // Update title if changed
-      if (updatedEntry.title) cardUpdates.title = updatedEntry.title;
+    // 🔹 STEP 6: Sync TimelineCard
+    const cardUpdates = {};
 
-      // If time or date changed, we must recalculate the specific scheduleDate
-      // so the timeline sorts it correctly.
-      const finalTime = updatedEntry.time; // 24h format e.g. "14:00"
-      const finalDate = updatedEntry.startDate; // Date object
-
-      if (finalTime && finalDate) {
-        const [hh, mm] = finalTime.split(':');
-        
-        // Reconstruct the exact date+time for the card
-        const newScheduleDate = dayjs(finalDate)
-            .tz(TZ)
-            .hour(Number(hh))
-            .minute(Number(mm))
-            .second(0)
-            .toDate();
-
-        cardUpdates.scheduledTime = finalTime;
-        cardUpdates.scheduleDate = newScheduleDate;
-      }
-
-      // Perform the update on the TimelineCard
-      await TimelineCard.updateMany(
-        { userId, sourceId: docId }, // Find cards linked to this reminder ID
-        { $set: cardUpdates }
-      );
+    if (updatedEntry.title) {
+      cardUpdates.title = updatedEntry.title;
     }
-    // ---------------------------------------------------------
-    // ✅ FIX END
-    // ---------------------------------------------------------
 
-    // ✅ 4️⃣ Fetch updated timeline
-    // We pass the date of the updated entry to ensure we are looking at the right day
-    const targetDateStr = dayjs(updatedEntry.startDate).tz(TZ).format("YYYY-MM-DD");
+    if (updatedEntry.time && updatedEntry.startDate) {
+      const [hh, mm] = updatedEntry.time.split(":");
+
+      const newScheduleDate = dayjs(updatedEntry.startDate)
+        .tz(TZ)
+        .hour(Number(hh))
+        .minute(Number(mm))
+        .second(0)
+        .toDate();
+
+      cardUpdates.scheduledTime = updatedEntry.time;
+      cardUpdates.scheduleDate = newScheduleDate;
+    }
+
+    await TimelineCard.updateMany(
+      { userId, sourceId: reminderId },
+      { $set: cardUpdates }
+    );
+
+    // 🔹 STEP 7: Return updated timeline
+    const targetDateStr = dayjs(updatedEntry.startDate)
+      .tz(TZ)
+      .format("YYYY-MM-DD");
+
     const updatedTimeline = await getTimelineData(userId, targetDateStr);
 
     return res.status(200).json({
-      message: `${model.modelName} updated successfully.`,
+      message: "Reminder updated successfully.",
       previousData: existingEntry,
       updatedData: updatedEntry,
-      updatedTimeline,
+      updatedTimeline
     });
+
   } catch (error) {
-    console.error(`❌ Error updating ${model.modelName}:`, error);
-    return res
-      .status(500)
-      .json({ error: "Internal server error during update." });
+    console.error("❌ Error updating reminder:", error);
+
+    if (error.name === "CastError") {
+      return res.status(400).json({ error: "Invalid ID format." });
+    }
+
+    return res.status(500).json({ error: "Internal server error." });
   }
 };
+
 
 
 
