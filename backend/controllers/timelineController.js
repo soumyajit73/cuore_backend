@@ -1568,6 +1568,8 @@ exports.getEntries = async (req, res) => {
 
 // 🔹 Main update function
 exports.updateEntry = async (req, res) => {
+  console.log("UPDATE req.params =>", req.params);
+
   const userId = req.user.userId;
   const { reminderId:docId } = req.params; // TimelineCard ID
   const { title, startDate, endDate, time, repeatFrequency } = req.body;
